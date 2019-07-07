@@ -111,3 +111,4 @@ type t = {
 let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 
+let empty = { listeners = IS.empty ; connections = CM.empty }

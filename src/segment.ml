@@ -117,7 +117,7 @@ let pp ppf t =
     Flags.pp t.flags t.window Fmt.(list ~sep:(unit "; ") pp_option) t.options
     (Cstruct.len t.payload)
 
-let checksum src dst buf =
+let checksum ~src ~dst buf =
   let plen = Cstruct.len buf in
   (* potentially pad *)
   let pad = plen mod 2 in
@@ -155,9 +155,9 @@ let encode t =
   Cstruct.BE.set_uint16 hdr 14 t.window;
   Cstruct.concat [ hdr ; options ; t.payload ]
 
-let encode_and_checksum src dst t =
+let encode_and_checksum ~src ~dst t =
   let data = encode t in
-  let checksum = checksum src dst data in
+  let checksum = checksum ~src ~dst data in
   Cstruct.BE.set_uint16 data 16 checksum;
   data
 
@@ -180,9 +180,9 @@ let decode data =
   { source_port ; destination_port ; seq ; ack ; flags ; window ; options ; payload },
   checksum
 
-let decode_and_validate src dst data =
+let decode_and_validate ~src ~dst data =
   let open Rresult.R.Infix in
   decode data >>= fun (t, pkt_csum) ->
-  let computed = checksum src dst data in
+  let computed = checksum ~src ~dst data in
   guard (computed = pkt_csum) (`Msg "invalid checksum") >>| fun () ->
   t

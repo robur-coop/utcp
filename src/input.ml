@@ -1,6 +1,11 @@
 (* (c) 2017 Hannes Mehnert, all rights reserved *)
 
+let src = Logs.Src.create "tcp.input" ~doc:"TCP input"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 open State
+
+open Rresult.R.Infix
 (* in general, some flag combinations are always bad:
     only one of syn, fin, rst can ever be reasonably set.
  *)
@@ -41,8 +46,12 @@ deliver_in_8 - recv SYN in yy - handle_conn state conn
 deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - handle_conn state conn
 *)
 
-let handle_input _t _src _dst _data =
-  assert false
+let handle t ~src ~dst data =
+  Segment.decode_and_validate ~src ~dst data >>= fun seg ->
+  Log.app (fun m -> m "%a -> %a valid TCP %a"
+              Ipaddr.V4.pp src Ipaddr.V4.pp dst
+              Segment.pp seg) ;
+  Ok (t, [])
 (*  let id = Connection.of_segment src dst segment in
   (* deliver_in_4: validate checksum (and non-martian) *)
   match CM.find_opt id t.connections with

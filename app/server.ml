@@ -4,11 +4,13 @@ module Ethernet = Ethernet.Make(Netif)
 module ARP = Arp.Make(Ethernet)(OS.Time)
 module IPv4 = Static_ipv4.Make(Mirage_random_test)(Mclock)(Ethernet)(ARP)
 
+let tcp_state = ref Tcp.State.empty
+
 let tcp ~src ~dst payload =
   Logs.app (fun m -> m "received TCP frame %a -> %a (%d bytes)"
                Ipaddr.V4.pp src Ipaddr.V4.pp dst (Cstruct.len payload));
-  (match Tcp.Segment.decode_and_validate src dst payload with
-   | Ok t -> Logs.app (fun m -> m "received %a" Tcp.Segment.pp t)
+  (match Tcp.Input.handle !tcp_state ~src ~dst payload with
+   | Ok (tcp_state', _) -> tcp_state := tcp_state'
    | Error (`Msg msg) -> Logs.err (fun m -> m "invalid frame %s" msg));
   Lwt.return_unit
 
