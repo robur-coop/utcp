@@ -1,0 +1,7 @@
+(executable
+  (name server)
+  (public_name server)
+  (modules server)
+  (libraries tcp mirage-net-unix cstruct lwt logs ethernet arp-mirage tcpip.ipv4
+             mirage-random-test mirage-unix mirage-clock-unix
+             lwt.unix cmdliner logs.fmt fmt.cli logs.cli fmt.tty))
