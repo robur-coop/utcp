@@ -8,6 +8,8 @@ type t = int32
 let add = Int32.add
 let incr a = add a 1l
 
+let zero = 0l
+
 let addi a i = add a (Int32.of_int i)
 
 let of_int32 a = a

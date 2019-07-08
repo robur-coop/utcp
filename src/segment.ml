@@ -98,11 +98,16 @@ module Flags = struct
     empty all
 
   let encode flags = fold (fun f acc -> acc + number f) flags 0
+
+  let has ?(no = empty) ?(yes = empty) t =
+    subset yes t && is_empty (inter no t)
+
+  let only f t = singleton f = t
 end
 
 type t = {
-  source_port : int ;
-  destination_port : int ;
+  src_port : int ;
+  dst_port : int ;
   seq : Sequence.t ;
   ack : Sequence.t ;
   flags : Flags.t ;
@@ -111,11 +116,42 @@ type t = {
   payload : Cstruct.t ;
 }
 
+(* we always take our IP as source, thus of_segment -- to be used for a
+   received segment -- needs to swap *)
+let to_id ~src ~dst t = (dst, t.dst_port, src, t.src_port)
+
 let pp ppf t =
   Fmt.pf ppf "%d -> %d@ seq %a@ ack %a@ flags %a window %d@ %a@ payload size: %d"
-    t.source_port t.destination_port Sequence.pp t.seq Sequence.pp t.ack
+    t.src_port t.dst_port Sequence.pp t.seq Sequence.pp t.ack
     Flags.pp t.flags t.window Fmt.(list ~sep:(unit "; ") pp_option) t.options
     (Cstruct.len t.payload)
+
+let count_flags flags =
+  (if Flags.mem `FIN flags then 1 else 0) + (if Flags.mem `SYN flags then 1 else 0)
+
+let dropwithreset seg =
+  if Flags.mem `RST seg.flags then
+    None
+  else
+    let flags =
+      if Flags.mem `ACK seg.flags then Flags.empty else Flags.singleton `ACK
+    in
+    let ack =
+      let ack = Sequence.addi seg.seq (Cstruct.len seg.payload) in
+      Sequence.addi ack (count_flags seg.flags)
+    and seq =
+      if Flags.mem `ACK seg.flags then seg.ack else Sequence.zero
+    in
+    Some { src_port = seg.dst_port ;
+           dst_port = seg.src_port ;
+           seq ; ack ;
+           flags = Flags.add `RST flags ;
+           window = 0 ; options = [] ; payload = Cstruct.empty }
+
+let make_syn_ack ?(options = []) cb ~src_port ~dst_port =
+  { src_port ; dst_port ; seq = cb.State.iss ; ack = cb.rcv_nxt ;
+    flags = Flags.(add `SYN (singleton `ACK)) ;
+    window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
 
 let checksum ~src ~dst buf =
   let plen = Cstruct.len buf in
@@ -146,11 +182,11 @@ let checksum ~src ~dst buf =
 let encode t =
   let hdr = Cstruct.create header_size in
   let options = encode_options t.options in
-  Cstruct.BE.set_uint16 hdr 0 t.source_port;
-  Cstruct.BE.set_uint16 hdr 2 t.destination_port;
+  Cstruct.BE.set_uint16 hdr 0 t.src_port;
+  Cstruct.BE.set_uint16 hdr 2 t.dst_port;
   Cstruct.BE.set_uint32 hdr 4 (Sequence.to_int32 t.seq);
   Cstruct.BE.set_uint32 hdr 8 (Sequence.to_int32 t.ack);
-  Cstruct.set_uint8 hdr 12 (Cstruct.len options lsl 2); (* upper 4 bit, lower 4 reserved *)
+  Cstruct.set_uint8 hdr 12 ((header_size + Cstruct.len options) lsl 2); (* upper 4 bit, lower 4 reserved *)
   Cstruct.set_uint8 hdr 13 (Flags.encode t.flags);
   Cstruct.BE.set_uint16 hdr 14 t.window;
   Cstruct.concat [ hdr ; options ; t.payload ]
@@ -164,8 +200,8 @@ let encode_and_checksum ~src ~dst t =
 let decode data =
   let open Rresult.R.Infix in
   guard (Cstruct.len data >= header_size) (`Msg "too small") >>= fun () ->
-  let source_port = Cstruct.BE.get_uint16 data 0
-  and destination_port = Cstruct.BE.get_uint16 data 2
+  let src_port = Cstruct.BE.get_uint16 data 0
+  and dst_port = Cstruct.BE.get_uint16 data 2
   and seq = Sequence.of_int32 (Cstruct.BE.get_uint32 data 4)
   and ack = Sequence.of_int32 (Cstruct.BE.get_uint32 data 8)
   and data_off = (Cstruct.get_uint8 data 12 lsr 4) * 4 (* lower 4 are reserved [can't assume they're 0] *)
@@ -174,15 +210,22 @@ let decode data =
   and checksum = Cstruct.BE.get_uint16 data 16
   and _up = Cstruct.BE.get_uint16 data 18
   in
+  guard (Cstruct.len data >= data_off) (`Msg "data_offset too big") >>= fun () ->
   let options_buf = Cstruct.sub data header_size (data_off - header_size) in
   decode_options options_buf >>| fun options ->
   let payload = Cstruct.shift data data_off in
-  { source_port ; destination_port ; seq ; ack ; flags ; window ; options ; payload },
+  { src_port ; dst_port ; seq ; ack ; flags ; window ; options ; payload },
   checksum
 
 let decode_and_validate ~src ~dst data =
   let open Rresult.R.Infix in
   decode data >>= fun (t, pkt_csum) ->
   let computed = checksum ~src ~dst data in
-  guard (computed = pkt_csum) (`Msg "invalid checksum") >>| fun () ->
-  t
+  guard (computed = pkt_csum) (`Msg "invalid checksum") >>= fun () ->
+  guard Ipaddr.V4.(compare src broadcast <> 0) (`Msg "segment from broadcast") >>= fun () ->
+  guard Ipaddr.V4.(compare dst broadcast <> 0) (`Msg "segment to broadcast") >>= fun () ->
+  guard (not (Ipaddr.V4.is_multicast src)) (`Msg "segment from multicast address") >>= fun () ->
+  guard (not (Ipaddr.V4.is_multicast dst)) (`Msg "segment to multicast address") >>= fun () ->
+  guard (not ((Ipaddr.V4.compare src dst = 0 && t.src_port = t.dst_port)))
+    (`Msg "segment source and destination ip and port are equal") >>| fun () ->
+  t, to_id ~src ~dst t

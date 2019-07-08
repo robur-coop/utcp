@@ -4,15 +4,24 @@ module Ethernet = Ethernet.Make(Netif)
 module ARP = Arp.Make(Ethernet)(OS.Time)
 module IPv4 = Static_ipv4.Make(Mirage_random_test)(Mclock)(Ethernet)(ARP)
 
-let tcp_state = ref Tcp.State.empty
+let tcp_state = ref Tcp.State.(start_listen empty 23)
 
-let tcp ~src ~dst payload =
+let log_err ~pp_error = function
+  | Ok a -> ()
+  | Error e -> Logs.err (fun m -> m "error %a" pp_error e)
+
+let handle_events ip =
+  Lwt_list.iter_s (function
+      | `Data (dst, out) ->
+        IPv4.write ip dst `TCP (fun _ -> 0) [ out ] >|=
+        log_err ~pp_error:IPv4.pp_error)
+
+let tcp ip ~src ~dst payload =
   Logs.app (fun m -> m "received TCP frame %a -> %a (%d bytes)"
                Ipaddr.V4.pp src Ipaddr.V4.pp dst (Cstruct.len payload));
-  (match Tcp.Input.handle !tcp_state ~src ~dst payload with
-   | Ok (tcp_state', _) -> tcp_state := tcp_state'
-   | Error (`Msg msg) -> Logs.err (fun m -> m "invalid frame %s" msg));
-  Lwt.return_unit
+  let tcp_state', events = Tcp.Input.handle !tcp_state ~src ~dst payload in
+  tcp_state := tcp_state' ;
+  handle_events ip events
 
 let cb ~proto ~src ~dst payload =
   Logs.app (fun m -> m "received proto %X frame %a -> %a (%d bytes)" proto
@@ -31,7 +40,7 @@ let jump () =
     let eth_input =
       Ethernet.input eth
         ~arpv4:(ARP.input arp)
-        ~ipv4:(IPv4.input ip ~tcp ~udp:(cb ~proto:17) ~default:cb)
+        ~ipv4:(IPv4.input ip ~tcp:(tcp ip) ~udp:(cb ~proto:17) ~default:cb)
         ~ipv6:(fun _ -> Lwt.return_unit)
     in
     Netif.listen tap ~header_size:14 eth_input >|=

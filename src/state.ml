@@ -44,20 +44,6 @@ type control_block = {
   irs : Sequence.t (* inital receive sequence number *)
 }
 
-let empty_control =
-  let zero = Sequence.of_int32 0l in
-  {
-    snd_una = zero ;
-    snd_nxt = zero ;
-    snd_wnd = 0 ;
-    snd_wl1 = zero ;
-    snd_wl2 = zero ;
-    iss = zero ;
-    rcv_wnd = 0 ;
-    rcv_nxt = zero ;
-    irs = zero ;
-  }
-
 let pp_control ppf c =
   Fmt.pf ppf "send unacknowledget %a send next %a send window %d \
               last window update sequence %a last window update ack %a \
@@ -80,10 +66,6 @@ module Connection = struct
       (andThen (compare_int dstp dstp')
          (andThen (Ipaddr.V4.compare src src')
             (Ipaddr.V4.compare dst dst')))
-
-  (* we always take our IP as source, thus of_segment -- to be used for a
-     received segment -- needs to swap *)
-  let of_segment src dst t = (dst, t.Segment.destination_port, src, t.source_port)
 end
 
 (* in this we store Connection.t -> state *)

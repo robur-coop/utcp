@@ -5,6 +5,8 @@ type t
 val of_int32 : int32 -> t
 val to_int32 : t -> int32
 
+val zero : t
+
 val add : t -> t -> t
 val incr : t -> t
 
