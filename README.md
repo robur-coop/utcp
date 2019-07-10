@@ -72,3 +72,7 @@ rather private).
 - More restrictive with flag combinations (uhm, likely... but then, half-closed connection are fun, maybe FIN+SYN is a valid combination ;)
 - CLOSED state can't be observed
 - going from TIME_WAIT anywhere (i.e. when someone connects with a socket, and instead close on EOF does another connect - this may actually happen; if you're talking to this library, your second connect will fail.... hope you handle the case properly) - deliver_in_9 will never happen for us
+
+## Questions
+
+Is a reset ever retransmitted? no!

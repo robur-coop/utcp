@@ -7,7 +7,7 @@ module IPv4 = Static_ipv4.Make(Mirage_random_test)(Mclock)(Ethernet)(ARP)
 let tcp_state = ref Tcp.State.(start_listen empty 23)
 
 let log_err ~pp_error = function
-  | Ok a -> ()
+  | Ok _ -> ()
   | Error e -> Logs.err (fun m -> m "error %a" pp_error e)
 
 let handle_events ip =

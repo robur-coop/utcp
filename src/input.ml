@@ -77,18 +77,47 @@ let handle_noconn t id seg =
     (* deliver_in_5 / deliver_in_6 *)
     t, Segment.dropwithreset seg
 
+(* we likely need both escape hatches: drop segment and drop connection and (maybe) send reset *)
 let handle_conn t id conn seg =
+  Log.debug (fun m -> m "handle_conn %a" pp_conn_state conn);
+  let add conn' = { t with connections = CM.add id conn' t.connections }
+  and _drop () = { t with connections = CM.remove id t.connections }
+  in
+  let cb = conn.control_block in
   match conn.tcp_state with
-  | Syn_sent -> assert false
+  | Syn_sent ->
     (* deliver_in_2 / deliver_in_2a / deliver_in_2b *)
-  | Syn_received -> assert false
+    assert false
+  | Syn_received ->
     (* deliver_in_3c and syn_received parts of deliver_in_3 *)
+    begin match
+        (* some errors should lead to reset+drop (those who have the sequence and ack right), others to silent drop... *)
+        (* TODO hostLTS:15801: [[SYN]] flag set may be set in the final segment of a simultaneous open :*)
+        guard (Segment.Flags.only `ACK seg.Segment.flags) "only ACK flag" >>= fun () ->
+        (* hostLTS:15828 :*)
+        guard (Sequence.greater seg.Segment.ack cb.snd_una) "ack > snd_una" >>= fun () ->
+        (* not (ack <= tcp_sock.cb.snd_una \/ ack > tcp_sock.cb.snd_max) *)
+        guard (Sequence.greater_equal seg.Segment.seq cb.irs) "seq >= irs" >>= fun () ->
+        (* we sent a fin (already) and our fin is acked stuff *)
+        (* rtt measurement likely *)
+        (* paws (di3_topstuff) *)
+        (* expect (assume for now): no data in that segment !? *)
+        guard (Sequence.greater_equal seg.Segment.ack cb.iss) "ack >= iss" >>| fun () ->
+        (* update cb as well, una and window.. *)
+        (* if not cantsendmore established else if ourfinisacked fin_wait2 else fin_wait_1 *)
+        add { conn with tcp_state = Established }, None
+      with
+      | Ok (t, a) -> (t, a)
+      | Error msg ->
+        Log.err (fun m -> m "error in syn_received failed condition %s" msg);
+        (t, None)
+    end
+  | _state -> (* always the same ;) *)
     (* window handling etc., we'll end up in established likely (unless fin has been sent or received) *)
     (* we diverge a bit from deliver_in_3 by first matching on state *)
     (* we should handle the flags fin and rst, syn explicitly, and validate sequence numbers! *)
     (* and need the cantrcvmore / cantsndmore flags *)
     (* and retransmission timers and queues *)
-  | x -> (* always the same ;) *)
     (t, None)
 
 (* as noted above, 3b is not relevant for us *)

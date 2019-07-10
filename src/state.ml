@@ -83,6 +83,9 @@ type conn_state = {
   write_queue : Cstruct.t list ;
 }
 
+let pp_conn_state ppf c =
+  Fmt.pf ppf "TCP %a cb %a" pp_fsm c.tcp_state pp_control c.control_block
+
 module IS = Set.Make(struct type t = int let compare = compare_int end)
 
 type t = {
