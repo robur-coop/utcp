@@ -6,6 +6,9 @@ module Log = (val Logs.src_log src : Logs.LOG)
 open State
 
 open Rresult.R.Infix
+
+let guard p e = if p then Ok () else Error e
+
 (* in general, some flag combinations are always bad:
     only one of syn, fin, rst can ever be reasonably set.
  *)
@@ -16,78 +19,68 @@ open Rresult.R.Infix
   sbsndptr, sbsndmbuf, .sb_state (used for CANTRCVMORE), sbappendstream_locked, sbspace
  *)
 
-(* TCP input handling (no ICMP errors atm) *)
-(* for any given incoming frame:
-    - compute the identifier (dest-ip dest-port src-ip src-port)
-    - lookup whether we've a connection state for it
-    - if not, handle unknown incoming fragment:
-      - maybe a SYN and some listener is interested (passive-open, inserting a new state into map)
-      - maybe RST out if nothing found (and not an incoming RST)
-    - if we've state, validate sequence numbers and possible move forward
-      - or error out (dropping bad frame (keep current state), rst to remote (bad input, new/no state), new state and potential output
-    - we also need a way to signal the caller to notify waiters (application data received, ..)
-*)
-
 (* from netsem:
-<<>> validate sequence number only needs to happen in synchronised states!
 deliver_in_1 - passive open - handle_unknown_fragment
 deliver_in_1b - drop bad for listening - handle_unknown_fragment
-deliver_in_2 - active open or simultaneous open - handle_conn state conn
+deliver_in_2 - active open - handle_conn state conn
 deliver_in_2a - bad or boring, RST or ignore - handle_conn state conn
+deliver_in_2b - simultaneous open - handle_conn state conn
 deliver_in_3 - data, fin, ack in established - handle_conn state conn
 deliver_in_3a - data with invalid checksum - handle_conn state conn --> validate_segment fails
-deliver_in_3b - data when process gone away - handle_conn state conn --> ??? fails (we can't really have this) [process gone away]
+deliver_in_3b - data when process gone away - not handled
 deliver_in_3c - stupid ack or land in SYN_RCVD - handle_conn state conn --> validate_segment fails
 deliver_in_4 - drop non-sane or martian segment - handle_input ? difference from 3a?
 deliver_in_5 - drop with RST sth not matching any socket - handle_unknown_fragment
 deliver_in_6 - drop sane segment in CLOSED - handle_unknown_fragment (we may need CLOSED state for this -- receive and drop (silently!) a sane segment that matches a CLOSED socket)
 deliver_in_7 - recv RST and zap - handle_con state conn (and maybe ignored (?LISTEN?. SYN_SENT, TIME_WAIT))
 deliver_in_8 - recv SYN in yy - handle_conn state conn
-deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - handle_conn state conn
+deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - not handled
 *)
 
 let handle_noconn t id seg =
-  (* TL;DR: if there's a listener, and it is a SYN, we do sth useful. otherwise RST *)
-  if IS.mem seg.Segment.dst_port t.listeners then
-    if Segment.Flags.only `SYN seg.Segment.flags then begin
-      (* deliver_in_1 - passive open *)
-      (* segment is acceptable -- checked above *)
-      (* broadcast/multicast already handled by decode_and_validate *)
-      (* best_match also done implicitly -- connection table already dealt with *)
-      (* there can't be anything in TIME_WAIT, otherwise we wouldn't end up here *)
-      (* TODO check RFC 1122 Section 4.2.2.13 whether this actually happens (socket reusage) *)
-      (* TODO resource management: limit number of outstanding connection attempts *)
-      let control_block =
-        let iss = (* random value *) Sequence.of_int32 7l
-        and ack = Sequence.incr seg.seq (* ACK the SYN *)
-        and snd_wnd = 0 and rcv_wnd = 65000
-        in
-        { snd_una = iss ; snd_nxt = Sequence.incr iss ; snd_wnd ;
-          snd_wl1 = Sequence.zero ; snd_wl2 = Sequence.zero ;
-          iss ; rcv_nxt = ack ; rcv_wnd ; irs = seg.seq }
+  match
+    (* TL;DR: if there's a listener, and it is a SYN, we do sth useful. otherwise RST *)
+    guard (IS.mem seg.Segment.dst_port t.listeners) () >>= fun () ->
+    guard (Segment.Flags.only `SYN seg.Segment.flags) () >>| fun () ->
+    (* deliver_in_1 - passive open *)
+    (* segment is acceptable -- checked above *)
+    (* broadcast/multicast already handled by decode_and_validate *)
+    (* best_match also done implicitly -- connection table already dealt with *)
+    (* there can't be anything in TIME_WAIT, otherwise we wouldn't end up here *)
+    (* TODO check RFC 1122 Section 4.2.2.13 whether this actually happens (socket reusage) *)
+    (* TODO resource management: limit number of outstanding connection attempts *)
+    let control_block =
+      let iss = (* random value *) Sequence.of_int32 7l
+      and ack = Sequence.incr seg.seq (* ACK the SYN *)
+      and snd_wnd = 0 and rcv_wnd = 65000
       in
-      let conn_state =
-        { tcp_state = Syn_received ; control_block ;
-          read_queue = [] ; write_queue = [] }
-      in
-      (* TODO options: mss, timestamp, window scaling *)
-      (* TODO compute buffer sizes: bandwidth-delay-product, rcvbufsize, sndbufsize, maxseg, snd_cwnd *)
-      let reply =
-        Segment.make_syn_ack control_block
-          ~src_port:seg.dst_port ~dst_port:seg.src_port
-      in
-      ({ t with connections = CM.add id conn_state t.connections }, Some reply)
-    end else
-      (* deliver_in_1b - we do less checks and potentially send more resets *)
-      (t, Segment.dropwithreset seg)
-  else
+      { snd_una = iss ; snd_nxt = Sequence.incr iss ; snd_wnd ;
+        snd_wl1 = Sequence.zero ; snd_wl2 = Sequence.zero ;
+        iss ; rcv_nxt = ack ; rcv_wnd ; irs = seg.seq }
+    in
+    let conn_state =
+      { tcp_state = Syn_received ; control_block ;
+        read_queue = [] ; write_queue = [] }
+    in
+    (* TODO options: mss, timestamp, window scaling *)
+    (* TODO compute buffer sizes: bandwidth-delay-product, rcvbufsize, sndbufsize, maxseg, snd_cwnd *)
+    (* TODO start retransmission timer *)
+    let reply =
+      Segment.make_syn_ack control_block
+        ~src_port:seg.dst_port ~dst_port:seg.src_port
+    in
+    ({ t with connections = CM.add id conn_state t.connections }, Some reply)
+  with
+  | Ok (t, reply) -> t, reply
+  | Error () ->
+    (* deliver_in_1b - we do less checks and potentially send more resets *)
     (* deliver_in_5 / deliver_in_6 *)
-    (t, Segment.dropwithreset seg)
+    t, Segment.dropwithreset seg
 
 let handle_conn t id conn seg =
   match conn.tcp_state with
   | Syn_sent -> assert false
-    (* deliver_in_2 / deliver_in_2a *)
+    (* deliver_in_2 / deliver_in_2a / deliver_in_2b *)
   | Syn_received -> assert false
     (* deliver_in_3c and syn_received parts of deliver_in_3 *)
     (* window handling etc., we'll end up in established likely (unless fin has been sent or received) *)
@@ -110,8 +103,8 @@ let handle t ~src ~dst data =
                 Ipaddr.V4.pp src Ipaddr.V4.pp dst
                 Segment.pp seg) ;
     let t', out = match CM.find_opt id t.connections with
-      | None -> handle_noconn t id seg (* 1 1b 5 6 *)
-      | Some conn -> handle_conn t id conn seg (* 2 2a 3 3c 7 8 9 *)
+      | None -> handle_noconn t id seg
+      | Some conn -> handle_conn t id conn seg
     in
     (t', match out with
       | None ->
@@ -121,17 +114,7 @@ let handle t ~src ~dst data =
         [ `Data (src, Segment.encode_and_checksum ~src:dst ~dst:src d) ])
 
 (*
-so, what's the protocol?
-- handle_input : t -> Cstruct.t ->
-t * Cstruct.t option * [ `Data of connection * Cstruct.t | `Connected of int * connection | `Error of connection ]
-
-~~> `Out of src * dst * Cstruct.t
-
 - timer : t -> t * Cstruct.t list * [ `Timeout of connection | `Error of connection ]
-
-operations for server sockets:
-- start_listen : t -> int -> t
-- stop_listen : t -> int -> t
 
 other operations:
 - create_connection : t -> ?src:int -> Ipaddr.t -> int -> t * connection * Cstruct.t
@@ -139,7 +122,6 @@ other operations:
 - write : t -> connection -> Cstruct.t -> t * Cstruct.t option [may also fail if connection bad or half-closed]
 
 on individual sockets:
-- close
 - shutdown_read
 - shutdown_write
 

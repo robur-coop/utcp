@@ -3,8 +3,8 @@ let header_size = 20
 
 let guard f e = if f then Ok () else Error e
 
+(* looks like a good use case for gmap ;) *)
 type option =
-  (* | Timestamp *)
   | MaximumSegmentSize of int
   (* | WindowScale *)
   | Unknown of int * Cstruct.t
@@ -221,11 +221,16 @@ let decode_and_validate ~src ~dst data =
   let open Rresult.R.Infix in
   decode data >>= fun (t, pkt_csum) ->
   let computed = checksum ~src ~dst data in
+  (* these are already checks done in deliver_in_4, etc. *)
   guard (computed = pkt_csum) (`Msg "invalid checksum") >>= fun () ->
-  guard Ipaddr.V4.(compare src broadcast <> 0) (`Msg "segment from broadcast") >>= fun () ->
-  guard Ipaddr.V4.(compare dst broadcast <> 0) (`Msg "segment to broadcast") >>= fun () ->
-  guard (not (Ipaddr.V4.is_multicast src)) (`Msg "segment from multicast address") >>= fun () ->
-  guard (not (Ipaddr.V4.is_multicast dst)) (`Msg "segment to multicast address") >>= fun () ->
+  guard Ipaddr.V4.(compare src broadcast <> 0)
+    (`Msg "segment from broadcast") >>= fun () ->
+  guard Ipaddr.V4.(compare dst broadcast <> 0)
+    (`Msg "segment to broadcast") >>= fun () ->
+  guard (not (Ipaddr.V4.is_multicast src))
+    (`Msg "segment from multicast address") >>= fun () ->
+  guard (not (Ipaddr.V4.is_multicast dst))
+    (`Msg "segment to multicast address") >>= fun () ->
   guard (not ((Ipaddr.V4.compare src dst = 0 && t.src_port = t.dst_port)))
     (`Msg "segment source and destination ip and port are equal") >>| fun () ->
   t, to_id ~src ~dst t
