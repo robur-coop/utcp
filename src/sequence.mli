@@ -16,6 +16,7 @@ val less : t -> t -> bool
 val less_equal : t -> t -> bool
 val greater : t -> t -> bool
 val greater_equal : t -> t -> bool
+val equal : t -> t -> bool
 
 val min : t -> t -> t
 val max : t -> t -> t

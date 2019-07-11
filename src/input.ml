@@ -78,13 +78,28 @@ let handle_noconn t id seg =
     (* deliver_in_5 / deliver_in_6 *)
     t, Segment.dropwithreset seg
 
+let in_window cb seg =
+  (* from table in 793bis13 3.3 *)
+  let seq = seg.Segment.seq
+  and max = Sequence.addi cb.rcv_nxt cb.rcv_wnd
+  in
+  match Cstruct.len seg.Segment.payload, cb.rcv_wnd with
+  | 0, 0 -> Sequence.equal seq cb.rcv_nxt
+  | 0, _ -> Sequence.less_equal cb.rcv_nxt seq && Sequence.less seq max
+  | _, 0 -> false
+  | dl, _ ->
+    (*assert dl > 0*)
+    let rseq = Sequence.addi seq (pred dl) in
+    (Sequence.less_equal cb.rcv_nxt seq && Sequence.less seq max) ||
+    (Sequence.less_equal cb.rcv_nxt rseq && Sequence.less rseq max)
+
 (* we likely need both escape hatches: drop segment and drop connection and (maybe) send reset *)
 let handle_conn t id conn seg =
   Log.debug (fun m -> m "handle_conn %a %a seg %a" Connection.pp id pp_conn_state conn Segment.pp seg);
   let add conn' =
     Log.debug (fun m -> m "%a now %a" Connection.pp id pp_conn_state conn');
     { t with connections = CM.add id conn' t.connections }
-  and _drop () =
+  and drop () =
     Log.debug (fun m -> m "%a dropped" Connection.pp id);
     { t with connections = CM.remove id t.connections }
   in
@@ -96,34 +111,60 @@ let handle_conn t id conn seg =
   | Syn_received ->
     (* deliver_in_3c and syn_received parts of deliver_in_3 *)
     begin match
-        (* some errors should lead to reset+drop (those who have the sequence and ack right), others to silent drop... *)
         (* TODO hostLTS:15801: [[SYN]] flag set may be set in the final segment of a simultaneous open :*)
-        guard (Segment.Flags.only `ACK seg.Segment.flags) "only ACK flag" >>= fun () ->
-        (* hostLTS:15828 :*)
-        guard (Sequence.greater seg.Segment.ack cb.snd_una) "ack > snd_una" >>= fun () ->
+        (* what is the current state? *)
+        (* - we acked the initial syn, their seq should be rcv_nxt (or?) *)
+        (* - furthermore, it should be >= irs -- that's redundant with above *)
+        (* if their seq is good (but their ack isn't or it is no ack), reset *)
+        guard (Sequence.equal seg.Segment.seq cb.rcv_nxt) (`Drop "seq = rcv_nxt") >>= fun () ->
+        (* - we sent our syn, so we expect an appropriate ack for the syn! *)
+        (* - we didn't send out more data, so that ack should be exact *)
+        (* if their seq is not good, drop packet *)
+        guard (Segment.Flags.only `ACK seg.Segment.flags) (`Reset "only ACK flag") >>= fun () ->
+        (* hostLTS:15828 - well, more or less ;) *)
+        guard (Sequence.equal seg.Segment.ack cb.snd_nxt) (`Reset "ack = snd_nxt") >>| fun () ->
         (* not (ack <= tcp_sock.cb.snd_una \/ ack > tcp_sock.cb.snd_max) *)
-        guard (Sequence.greater_equal seg.Segment.seq cb.irs) "seq >= irs" >>= fun () ->
-        (* we sent a fin (already) and our fin is acked stuff *)
-        (* rtt measurement likely *)
+        (* TODO we sent a fin (already) and our fin is acked stuff *)
+        (* TODO rtt measurement likely *)
         (* paws (di3_topstuff) *)
         (* expect (assume for now): no data in that segment !? *)
-        guard (Sequence.greater_equal seg.Segment.ack cb.iss) "ack >= iss" >>| fun () ->
-        (* update cb as well, una and window.. *)
+        (* guard (Sequence.greater_equal seg.Segment.ack cb.iss) "ack >= iss" >>| fun () -> *)
+        (* update other parts as well? wl1/wl2? *)
+        let control_block = { cb with snd_una = seg.Segment.ack ; snd_wnd = seg.Segment.window } in
         (* if not cantsendmore established else if ourfinisacked fin_wait2 else fin_wait_1 *)
-        add { conn with tcp_state = Established }, None
+        add { conn with tcp_state = Established ; control_block }, None
       with
-      | Ok (t, a) -> (t, a)
-      | Error msg ->
-        Log.err (fun m -> m "error in syn_received failed condition %s" msg);
-        (t, None)
+      | Ok (t, a) -> t, a
+      | Error (`Drop msg) ->
+        Log.err (fun m -> m "dropping segment in syn_received failed condition %s" msg);
+        t, None
+      | Error (`Reset msg) ->
+        Log.err (fun m -> m "reset in syn_received %s" msg);
+        drop (), Segment.dropwithreset seg
     end
-  | _state -> (* always the same ;) *)
+  | state -> (* always the same ;) *)
     (* window handling etc., we'll end up in established likely (unless fin has been sent or received) *)
     (* we diverge a bit from deliver_in_3 by first matching on state *)
     (* we should handle the flags fin and rst, syn explicitly, and validate sequence numbers! *)
     (* and need the cantrcvmore / cantsndmore flags *)
     (* and retransmission timers and queues *)
-    (t, None)
+    match
+      (* sequence number and ack processing (drop or rst): *)
+      guard (in_window cb seg) (`Drop "in_window") >>| fun () ->
+      (* flag evaluation: what should we do with this segment? *)
+      (* ACK processing *)
+      (* RST + SYN processing -> immediate ack or drop *)
+      (* FIN processing *)
+      (* data processing *)
+      t, None
+    with
+    | Ok (t, a) -> t, a
+    | Error (`Drop msg) ->
+      Log.err (fun m -> m "dropping segment in %a failed condition %s" pp_fsm state msg);
+      t, None
+    | Error (`Reset msg) ->
+      Log.err (fun m -> m "reset in %a %s" pp_fsm state msg);
+      drop (), Segment.dropwithreset seg
 
 (* as noted above, 3b is not relevant for us *)
 let handle t ~src ~dst data =

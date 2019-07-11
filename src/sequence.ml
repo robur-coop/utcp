@@ -19,6 +19,7 @@ let less a b = Int32.sub a b < 0l
 let less_equal a b = Int32.sub a b <= 0l
 let greater a b = Int32.sub a b > 0l
 let greater_equal a b = Int32.sub a b >= 0l
+let equal a b = Int32.compare a b = 0
 
 let min a b = if less a b then a else b
 let max a b = if greater a b then a else b

@@ -66,13 +66,13 @@ numbers are refering to git commit 2374ad26b2f4f32f62aaea62ac641c3a91b2efbc
 (mostly actually 409966517e3468bc677d58f46756957d4a1dddb0, because the other is
 rather private).
 
+We'll likely need to define a new ARCH for this implementation in the model and
+then hope it's good enough ;) (or only run tests which behave similat to
+FreeBSD).
+
 - Accurate Byte Counting (this is what i intend to implement)
 - Initial window size (that may already be in my FreeBSD12 changeset)
 - Incoming urgent flag (not handled in the implementation)
 - More restrictive with flag combinations (uhm, likely... but then, half-closed connection are fun, maybe FIN+SYN is a valid combination ;)
 - CLOSED state can't be observed
 - going from TIME_WAIT anywhere (i.e. when someone connects with a socket, and instead close on EOF does another connect - this may actually happen; if you're talking to this library, your second connect will fail.... hope you handle the case properly) - deliver_in_9 will never happen for us
-
-## Questions
-
-Is a reset ever retransmitted? no!
