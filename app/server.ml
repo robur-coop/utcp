@@ -17,8 +17,6 @@ let handle_events ip =
         log_err ~pp_error:IPv4.pp_error)
 
 let tcp ip ~src ~dst payload =
-  Logs.app (fun m -> m "received TCP frame %a -> %a (%d bytes)"
-               Ipaddr.V4.pp src Ipaddr.V4.pp dst (Cstruct.len payload));
   let tcp_state', events = Tcp.Input.handle !tcp_state ~src ~dst payload in
   tcp_state := tcp_state' ;
   handle_events ip events

@@ -45,11 +45,9 @@ type control_block = {
 }
 
 let pp_control ppf c =
-  Fmt.pf ppf "send unacknowledget %a send next %a send window %d \
-              last window update sequence %a last window update ack %a \
-              send initial sequence number %a \
-              receive window %d receive next %a \
-              receive initial sequence number %a"
+  Fmt.pf ppf "snd_una %a snd_nxt %a snd_wnd %d \
+              snd_wl1 %a snd_wl2 %a iss %a@. \
+              rcv_wnd %d rcv_nxt %a irs %a"
     Sequence.pp c.snd_una Sequence.pp c.snd_nxt c.snd_wnd
     Sequence.pp c.snd_wl1 Sequence.pp c.snd_wl2
     Sequence.pp c.iss
@@ -59,6 +57,9 @@ let compare_int (a : int) (b : int) = compare a b
 
 module Connection = struct
   type t = Ipaddr.V4.t * int * Ipaddr.V4.t * int
+
+  let pp ppf (src, srcp, dst, dstp) =
+    Fmt.pf ppf "%a:%d -> %a:%d" Ipaddr.V4.pp src srcp Ipaddr.V4.pp dst dstp
 
   let andThen a b = if a = 0 then b else a
   let compare ((src, srcp, dst, dstp) : t) ((src', srcp', dst', dstp') : t) =

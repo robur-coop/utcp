@@ -79,7 +79,7 @@ module Flags = struct
     | `PSH -> "P"
     | `ACK -> "A"
 
-  let pp ppf f = Fmt.(list string) ppf (List.map to_string (elements f))
+  let pp ppf f = Fmt.(list ~sep:nop string) ppf (List.map to_string (elements f))
 
   let bit = function
     | `FIN -> 8
@@ -121,9 +121,9 @@ type t = {
 let to_id ~src ~dst t = (dst, t.dst_port, src, t.src_port)
 
 let pp ppf t =
-  Fmt.pf ppf "%d -> %d@ seq %a@ ack %a@ flags %a window %d@ %a@ payload size: %d"
-    t.src_port t.dst_port Sequence.pp t.seq Sequence.pp t.ack
-    Flags.pp t.flags t.window Fmt.(list ~sep:(unit "; ") pp_option) t.options
+  Fmt.pf ppf "%a@ seq %a@ ack %a@ window %d@ opts %a%d bytes data"
+    Flags.pp t.flags Sequence.pp t.seq Sequence.pp t.ack
+    t.window Fmt.(list ~sep:(unit ";@ ") pp_option) t.options
     (Cstruct.len t.payload)
 
 let count_flags flags =
@@ -133,14 +133,17 @@ let dropwithreset seg =
   if Flags.mem `RST seg.flags then
     None
   else
-    let flags =
-      if Flags.mem `ACK seg.flags then Flags.empty else Flags.singleton `ACK
-    in
-    let ack =
-      let ack = Sequence.addi seg.seq (Cstruct.len seg.payload) in
-      Sequence.addi ack (count_flags seg.flags)
-    and seq =
-      if Flags.mem `ACK seg.flags then seg.ack else Sequence.zero
+    let flags, ack, seq =
+      if Flags.mem `ACK seg.flags then
+        Flags.empty, Sequence.zero, seg.ack
+      else
+        let ack =
+          let data_len = Cstruct.len seg.payload
+          and flag_len = count_flags seg.flags
+          in
+          Sequence.(addi (addi seg.seq data_len) flag_len)
+        in
+        Flags.singleton `ACK, ack, Sequence.zero
     in
     Some { src_port = seg.dst_port ;
            dst_port = seg.src_port ;

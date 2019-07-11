@@ -19,7 +19,7 @@ let guard p e = if p then Ok () else Error e
   sbsndptr, sbsndmbuf, .sb_state (used for CANTRCVMORE), sbappendstream_locked, sbspace
  *)
 
-(* from netsem:
+(* input rules from netsem
 deliver_in_1 - passive open - handle_unknown_fragment
 deliver_in_1b - drop bad for listening - handle_unknown_fragment
 deliver_in_2 - active open - handle_conn state conn
@@ -62,13 +62,14 @@ let handle_noconn t id seg =
       { tcp_state = Syn_received ; control_block ;
         read_queue = [] ; write_queue = [] }
     in
-    (* TODO options: mss, timestamp, window scaling *)
+    (* TODO options: mss, window scaling *)
     (* TODO compute buffer sizes: bandwidth-delay-product, rcvbufsize, sndbufsize, maxseg, snd_cwnd *)
     (* TODO start retransmission timer *)
     let reply =
       Segment.make_syn_ack control_block
         ~src_port:seg.dst_port ~dst_port:seg.src_port
     in
+    Log.debug (fun m -> m "%a passive open %a" Connection.pp id pp_conn_state conn_state);
     ({ t with connections = CM.add id conn_state t.connections }, Some reply)
   with
   | Ok (t, reply) -> t, reply
@@ -79,9 +80,13 @@ let handle_noconn t id seg =
 
 (* we likely need both escape hatches: drop segment and drop connection and (maybe) send reset *)
 let handle_conn t id conn seg =
-  Log.debug (fun m -> m "handle_conn %a" pp_conn_state conn);
-  let add conn' = { t with connections = CM.add id conn' t.connections }
-  and _drop () = { t with connections = CM.remove id t.connections }
+  Log.debug (fun m -> m "handle_conn %a %a seg %a" Connection.pp id pp_conn_state conn Segment.pp seg);
+  let add conn' =
+    Log.debug (fun m -> m "%a now %a" Connection.pp id pp_conn_state conn');
+    { t with connections = CM.add id conn' t.connections }
+  and _drop () =
+    Log.debug (fun m -> m "%a dropped" Connection.pp id);
+    { t with connections = CM.remove id t.connections }
   in
   let cb = conn.control_block in
   match conn.tcp_state with
@@ -128,18 +133,16 @@ let handle t ~src ~dst data =
     (t, [])
   | Ok (seg, id) ->
     (* deliver_in_3a deliver_in_4 are done now! *)
-    Log.app (fun m -> m "%a -> %a valid TCP %a"
-                Ipaddr.V4.pp src Ipaddr.V4.pp dst
-                Segment.pp seg) ;
+    Log.info (fun m -> m "%a TCP %a" Connection.pp id Segment.pp seg) ;
     let t', out = match CM.find_opt id t.connections with
       | None -> handle_noconn t id seg
       | Some conn -> handle_conn t id conn seg
     in
     (t', match out with
       | None ->
-        Log.app (fun m -> m "no answer"); []
+        Log.info (fun m -> m "no answer"); []
       | Some d ->
-        Log.app (fun m -> m "answering with %a" Segment.pp d);
+        Log.info (fun m -> m "answer %a" Segment.pp d);
         [ `Data (src, Segment.encode_and_checksum ~src:dst ~dst:src d) ])
 
 (*
