@@ -156,6 +156,11 @@ let dropwithreset seg =
            flags = Flags.add `RST flags ;
            window = 0 ; options = [] ; payload = Cstruct.empty }
 
+let make_reset ?(options = []) cb ~src_port ~dst_port =
+  { src_port ; dst_port ; seq = cb.State.snd_nxt (* or send_una + 1? *) ;
+    ack = cb.State.rcv_nxt ; flags = Flags.of_list [ `RST ; `ACK ] ;
+    window = cb.State.rcv_wnd ; options ; payload = Cstruct.empty }
+
 let make_syn_ack ?(options = []) cb ~src_port ~dst_port =
   { src_port ; dst_port ; seq = cb.State.iss ; ack = cb.rcv_nxt ;
     flags = Flags.of_list [ `SYN ; `ACK ] ;

@@ -43,7 +43,7 @@ let jump () =
          s := s' ;
          handle_events ip events),
       (fun () ->
-         match Tcp.User.close !s conn with
+         match Tcp.User.reset !s conn with
          | Error (`Msg msg) -> Logs.err (fun m -> m "close failed %s" msg) ; Lwt.return_unit
          | Ok (s', out) ->
            s := s' ;

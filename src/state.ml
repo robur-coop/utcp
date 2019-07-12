@@ -103,6 +103,9 @@ type t = {
   connections : conn_state CM.t
 }
 
+let quad t (a, ap, b, bp) =
+  if Ipaddr.V4.compare a t.ip = 0 then a, ap, b, bp else b, bp, a, ap
+
 let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 

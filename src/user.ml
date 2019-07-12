@@ -32,6 +32,12 @@ let connect t ?src_port dst dst_port =
   in
   { t with connections }, id, data
 
+(* it occurs that all these functions below are not well suited for sending out
+   segments, a tcp_output(_really) will for sure help *)
+
+(* or should only a timer be responsible for outputting data? sounds a bit weird *)
+
+(* in real, this is shutdown `write *)
 let close t id =
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
@@ -42,17 +48,25 @@ let close t id =
      | _ -> Error (`Msg "wrong state")) >>| fun tcp_state ->
     let conn' = { conn with tcp_state ; cantsndmore = true } in
     Log.debug (fun m -> m "%a close %a" Connection.pp id pp_conn_state conn');
-    let src_port, dst_port, dst =
-      let a, ap, b, bp = id in
-      if Ipaddr.V4.compare a t.ip = 0 then ap, bp, b else bp, ap, a
-    in
+    let _, src_port, dst, dst_port = quad t id in
     (* that's a bit ad-hoc since there may still be data in the outq *)
     let seg = Segment.make_fin_ack conn.control_block ~src_port ~dst_port in
     let data = Segment.encode_and_checksum ~src:t.ip ~dst seg in
     { t with connections = CM.add id conn' t.connections }, (dst, data)
 
-let write _t _con _buf =
+(* this is usually known as close / tcp_close *)
+let reset t id = match CM.find_opt id t.connections with
+  | None -> Error (`Msg "no connection")
+  | Some c ->
+    let _, src_port, dst, dst_port = quad t id in
+    let rst = Segment.make_reset c.control_block ~src_port ~dst_port in
+    let data = Segment.encode_and_checksum ~src:t.ip ~dst rst in
+    Log.debug (fun m -> m "%a drop %a reset %a"
+                  Connection.pp id pp_conn_state c Segment.pp rst);
+    Ok ({ t with connections = CM.remove id t.connections }, (dst, data))
+
+let send _t _id _buf =
   assert false
 
-let read _t _con =
+let recv _t _id =
   assert false

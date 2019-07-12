@@ -198,11 +198,10 @@ let deliver_in_3c_3d conn seg =
   (* if their seq is not good, drop packet *)
   guard (Segment.Flags.only `ACK seg.Segment.flags) (`Reset "only ACK flag") >>= fun () ->
   (* hostLTS:15828 - well, more or less ;) *)
+  (* auxFns:2252 ack < snd_una || snd_max < ack -> break LAND DoS, prevent ACK storm *)
   guard (Sequence.equal seg.Segment.ack cb.snd_nxt) (`Reset "ack = snd_nxt") >>| fun () ->
   (* not (ack <= tcp_sock.cb.snd_una \/ ack > tcp_sock.cb.snd_max) *)
-  (* TODO we sent a fin (already) and our fin is acked stuff *)
   (* TODO rtt measurement likely *)
-  (* paws (di3_topstuff) *)
   (* expect (assume for now): no data in that segment !? *)
   (* guard (Sequence.greater_equal seg.Segment.ack cb.iss) "ack >= iss" >>| fun () -> *)
   let control_block = {
