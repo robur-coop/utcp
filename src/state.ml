@@ -78,10 +78,16 @@ module CM = Map.Make(Connection)
    --> and they may change whenever an ACK is received *)
 type conn_state = {
   tcp_state : tcp_state ;
-  control_block : control_block ;
+  control_block : control_block ; (* i think control_block should go into state *)
+  cantrcvmore : bool ;
+  cantsndmore : bool ;
   (* reassembly : Cstruct.t list ; (* TODO nicer data structure! *) *)
   (* read_queue : Cstruct.t list ;
    * write_queue : Cstruct.t list ; *)
+}
+
+let conn_state tcp_state control_block = {
+  tcp_state ; control_block ; cantrcvmore = false ; cantsndmore = false
 }
 
 let pp_conn_state ppf c =

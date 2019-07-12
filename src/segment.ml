@@ -158,12 +158,17 @@ let dropwithreset seg =
 
 let make_syn_ack ?(options = []) cb ~src_port ~dst_port =
   { src_port ; dst_port ; seq = cb.State.iss ; ack = cb.rcv_nxt ;
-    flags = Flags.(add `SYN (singleton `ACK)) ;
+    flags = Flags.of_list [ `SYN ; `ACK ] ;
     window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
 
 let make_syn ?(options = []) cb ~src_port ~dst_port =
   { src_port ; dst_port ; seq = cb.State.iss ; ack = Sequence.zero ;
     flags = Flags.singleton`SYN ;
+    window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
+
+let make_fin_ack ?(options = []) cb ~src_port ~dst_port =
+  { src_port ; dst_port ; seq = cb.State.snd_nxt ; ack = cb.rcv_nxt ;
+    flags = Flags.of_list [ `FIN ; `ACK ] ;
     window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
 
 let make_ack ?(options = []) cb ~src_port ~dst_port =
