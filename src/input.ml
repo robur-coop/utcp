@@ -21,21 +21,23 @@ let guard p e = if p then Ok () else Error e
  *)
 
 (* input rules from netsem
-deliver_in_1 - passive open - handle_unknown_fragment
-deliver_in_1b - drop bad for listening - handle_unknown_fragment
-deliver_in_2 - active open - handle_conn state conn
-deliver_in_2a - bad or boring, RST or ignore - handle_conn state conn
-deliver_in_2b - simultaneous open - handle_conn state conn
-deliver_in_3 - data, fin, ack in established - handle_conn state conn
-deliver_in_3a - data with invalid checksum - handle_conn state conn --> validate_segment fails
+deliver_in_1 - passive open - handle_noconnn
+deliver_in_1b - drop bad for listening - handle_noconn
+deliver_in_2 - active open - handle_conn
+deliver_in_2a - bad or boring, RST or ignore - handle_conn
+deliver_in_2b - simultaneous open - handle_conn
+deliver_in_3 - data, fin, ack in established - handle_conn
+deliver_in_3a - data with invalid checksum - validate_segment fails
 deliver_in_3b - data when process gone away - not handled
-deliver_in_3c - stupid ack or land in SYN_RCVD - handle_conn state conn --> validate_segment fails
-deliver_in_4 - drop non-sane or martian segment - handle_input ? difference from 3a?
-deliver_in_5 - drop with RST sth not matching any socket - handle_unknown_fragment
-deliver_in_6 - drop sane segment in CLOSED - handle_unknown_fragment (we may need CLOSED state for this -- receive and drop (silently!) a sane segment that matches a CLOSED socket)
-deliver_in_7 - recv RST and zap - handle_con state conn (and maybe ignored (?LISTEN?. SYN_SENT, TIME_WAIT))
-deliver_in_8 - recv SYN in yy - handle_conn state conn
+deliver_in_3c - stupid ack or land in SYN_RCVD - handle_conn and validate_segment fails
+deliver_in_3d - valid ack in SYN_RCVD - handle_conn
+deliver_in_4 - drop non-sane or martian segment - validate_segment fails
+deliver_in_5 - drop with RST sth not matching any socket - handle_noconn
+deliver_in_6 - drop sane segment in CLOSED - not handled (no CLOSED, handle_noconn may reset)
+deliver_in_7 - recv RST and zap - handle_conn
+deliver_in_8 - recv SYN in yy - handle_conn
 deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - not handled
+??deliver_in_10 - stupid flag combinations are dropped (without reset)
 *)
 
 let handle_noconn t id seg =
@@ -161,14 +163,14 @@ let deliver_in_2 conn seg =
   Segment.make_ack control_block ~src_port:seg.Segment.dst_port ~dst_port:seg.Segment.src_port
 
 let deliver_in_2a conn seg =
-  (* well well, the remote could have leftover state and send us a ack+fin... but that's fine to drop (and unlikely to happen once we have random)
+  (* well well, the remote could have leftover state and send us a ack+fin... but that's fine to drop (and unlikely to happen now that we have random)
      server.exe: [DEBUG] 10.0.42.2:20 -> 10.0.42.1:1234 handle_conn TCP syn sent cb snd_una 0 snd_nxt 1 snd_wl1 0 snd_wl2 0 iss 0 rcv_wnd 65000 rcv_nxt 0 irs 0 seg AF seq 3062921918 ack 1 window 65535 opts 0 bytes data
      server.exe: [ERROR] dropping segment in syn sent failed condition RA *)
   guard (Segment.Flags.exact [ `ACK ; `RST ] seg.Segment.flags) (`Drop "RA") >>= fun () ->
   guard (Sequence.equal seg.Segment.ack conn.control_block.snd_nxt) (`Drop "ACK in-window")
 
 let deliver_in_3c_3d conn seg =
-  (* deliver_in_3c and syn_received parts of deliver_in_3 *)
+  (* deliver_in_3c and syn_received parts of deliver_in_3 (now deliver_in_3d) *)
   (* TODO hostLTS:15801: [[SYN]] flag set may be set in the final segment of a simultaneous open :*)
   let cb = conn.control_block in
   (* what is the current state? *)
@@ -240,7 +242,6 @@ let handle_conn t id conn seg =
     Log.err (fun m -> m "reset in %a %s" pp_fsm conn.tcp_state msg);
     drop (), Segment.dropwithreset seg
 
-(* as noted above, 3b is not relevant for us *)
 let handle t ~src ~dst data =
   match Segment.decode_and_validate ~src ~dst data with
   | Error (`Msg msg) ->

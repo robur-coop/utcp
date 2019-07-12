@@ -37,4 +37,5 @@ let close _t _con =
 let write _t _con _buf =
   assert false
 
-(* let read t con = assert false *)
+let read _t _con =
+  assert false
