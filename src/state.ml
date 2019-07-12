@@ -35,7 +35,7 @@ let pp_fsm ppf s =
 type control_block = {
   snd_una : Sequence.t ; (* send unacknowledged *)
   snd_nxt : Sequence.t ; (* send next *)
-  snd_wnd : int ; (* send window (32 bit should be enough for everyone!?) *)
+  (* snd_wnd : int ; (\* send window (32 bit should be enough for everyone!?) *\) *)
   snd_wl1 : Sequence.t ; (* sequence number used for last window update *)
   snd_wl2 : Sequence.t ; (* ack number used for last window update *)
   iss : Sequence.t ; (* initial send sequence number *)
@@ -45,10 +45,10 @@ type control_block = {
 }
 
 let pp_control ppf c =
-  Fmt.pf ppf "snd_una %a snd_nxt %a snd_wnd %d \
+  Fmt.pf ppf "snd_una %a snd_nxt %a \
               snd_wl1 %a snd_wl2 %a iss %a@. \
               rcv_wnd %d rcv_nxt %a irs %a"
-    Sequence.pp c.snd_una Sequence.pp c.snd_nxt c.snd_wnd
+    Sequence.pp c.snd_una Sequence.pp c.snd_nxt
     Sequence.pp c.snd_wl1 Sequence.pp c.snd_wl2
     Sequence.pp c.iss
     c.rcv_wnd Sequence.pp c.rcv_nxt Sequence.pp c.irs
@@ -80,8 +80,8 @@ type conn_state = {
   tcp_state : tcp_state ;
   control_block : control_block ;
   (* reassembly : Cstruct.t list ; (* TODO nicer data structure! *) *)
-  read_queue : Cstruct.t list ;
-  write_queue : Cstruct.t list ;
+  (* read_queue : Cstruct.t list ;
+   * write_queue : Cstruct.t list ; *)
 }
 
 let pp_conn_state ppf c =
@@ -89,7 +89,10 @@ let pp_conn_state ppf c =
 
 module IS = Set.Make(struct type t = int let compare = compare_int end)
 
+(* path mtu (its global to a stack) *)
 type t = {
+  rng : int -> Cstruct.t ;
+  ip : Ipaddr.V4.t ;
   listeners : IS.t ;
   connections : conn_state CM.t
 }
@@ -97,4 +100,4 @@ type t = {
 let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 
-let empty = { listeners = IS.empty ; connections = CM.empty }
+let empty rng ip = { rng ; ip ; listeners = IS.empty ; connections = CM.empty }

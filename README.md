@@ -45,7 +45,7 @@ TODO:
 - when to send data (793bis has some information about it)
 - path MTU discovery (RFC 1191, including array - also 793bis)
 - ICMP error handling!
-- ABC (not in the HOL4 model, though :/)
+- appropriate byte counting (RFC 3456, not in the HOL4 model, though :/)
 - increased initial window size
 - PAWS (well, maybe... really?)
 - SACK
@@ -70,7 +70,7 @@ We'll likely need to define a new ARCH for this implementation in the model and
 then hope it's good enough ;) (or only run tests which behave similat to
 FreeBSD).
 
-- Accurate Byte Counting (this is what i intend to implement)
+- Appropriate Byte Counting (this is what i intend to implement)
 - Initial window size (that may already be in my FreeBSD12 changeset)
 - Incoming urgent flag (not handled in the implementation)
 - More restrictive with flag combinations (uhm, likely... but then, half-closed connection are fun, maybe FIN+SYN is a valid combination ;)

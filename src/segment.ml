@@ -103,6 +103,11 @@ module Flags = struct
     subset yes t && is_empty (inter no t)
 
   let only f t = singleton f = t
+
+  let exact flags t = equal t (of_list flags)
+
+  let or_ack f t =
+    only f t || exact [ f ; `ACK ] t
 end
 
 type t = {
@@ -154,6 +159,16 @@ let dropwithreset seg =
 let make_syn_ack ?(options = []) cb ~src_port ~dst_port =
   { src_port ; dst_port ; seq = cb.State.iss ; ack = cb.rcv_nxt ;
     flags = Flags.(add `SYN (singleton `ACK)) ;
+    window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
+
+let make_syn ?(options = []) cb ~src_port ~dst_port =
+  { src_port ; dst_port ; seq = cb.State.iss ; ack = Sequence.zero ;
+    flags = Flags.singleton`SYN ;
+    window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
+
+let make_ack ?(options = []) cb ~src_port ~dst_port =
+  { src_port ; dst_port ; seq = cb.State.snd_nxt ; ack = cb.rcv_nxt ;
+    flags = Flags.singleton `ACK ;
     window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
 
 let checksum ~src ~dst buf =

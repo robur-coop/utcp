@@ -1,4 +1,5 @@
-(* (c) 2017 Hannes Mehnert, all rights reserved *)
+(* (c) 2017-2019 Hannes Mehnert, all rights reserved *)
+[@@@ocaml.warning "-23"]
 
 let src = Logs.Src.create "tcp.input" ~doc:"TCP input"
 module Log = (val Logs.src_log src : Logs.LOG)
@@ -41,8 +42,8 @@ let handle_noconn t id seg =
   match
     (* TL;DR: if there's a listener, and it is a SYN, we do sth useful. otherwise RST *)
     guard (IS.mem seg.Segment.dst_port t.listeners) () >>= fun () ->
-    guard (Segment.Flags.only `SYN seg.Segment.flags) () >>| fun () ->
     (* deliver_in_1 - passive open *)
+    guard (Segment.Flags.only `SYN seg.Segment.flags) () >>| fun () ->
     (* segment is acceptable -- checked above *)
     (* broadcast/multicast already handled by decode_and_validate *)
     (* best_match also done implicitly -- connection table already dealt with *)
@@ -50,18 +51,15 @@ let handle_noconn t id seg =
     (* TODO check RFC 1122 Section 4.2.2.13 whether this actually happens (socket reusage) *)
     (* TODO resource management: limit number of outstanding connection attempts *)
     let control_block =
-      let iss = (* random value *) Sequence.of_int32 7l
+      let iss = Sequence.of_int32 (Randomconv.int32 t.rng)
       and ack = Sequence.incr seg.seq (* ACK the SYN *)
-      and snd_wnd = 0 and rcv_wnd = 65000
+      and rcv_wnd = 65000
       in
-      { snd_una = iss ; snd_nxt = Sequence.incr iss ; snd_wnd ;
+      { snd_una = iss ; snd_nxt = Sequence.incr iss ;
         snd_wl1 = Sequence.zero ; snd_wl2 = Sequence.zero ;
         iss ; rcv_nxt = ack ; rcv_wnd ; irs = seg.seq }
     in
-    let conn_state =
-      { tcp_state = Syn_received ; control_block ;
-        read_queue = [] ; write_queue = [] }
-    in
+    let conn_state = { tcp_state = Syn_received ; control_block } in
     (* TODO options: mss, window scaling *)
     (* TODO compute buffer sizes: bandwidth-delay-product, rcvbufsize, sndbufsize, maxseg, snd_cwnd *)
     (* TODO start retransmission timer *)
@@ -93,9 +91,114 @@ let in_window cb seg =
     (Sequence.less_equal cb.rcv_nxt seq && Sequence.less seq max) ||
     (Sequence.less_equal cb.rcv_nxt rseq && Sequence.less rseq max)
 
-(* we likely need both escape hatches: drop segment and drop connection and (maybe) send reset *)
+let di3_topstuff cb seg =
+  Ok (cb, cb.rcv_wnd = 0 && seg.Segment.window > 0)
+
+let di3_ackstuff cb seg =
+  let snd_una =
+    if Segment.Flags.mem `ACK seg.Segment.flags then
+      Sequence.max cb.snd_una seg.Segment.ack
+    else
+      cb.snd_una
+  in
+  Ok { cb with snd_una }
+
+let di3_datastuff cb seg =
+  let rcv_wnd = seg.Segment.window (* really always? *)
+  and rcv_nxt =
+    if Sequence.equal seg.Segment.seq cb.rcv_nxt then begin
+      Log.info (fun m -> m "received %a" Cstruct.hexdump_pp seg.Segment.payload);
+      Sequence.addi seg.Segment.seq (Cstruct.len seg.Segment.payload)
+    end else (* push segment to reassembly queue *)
+      cb.rcv_nxt
+  in
+  Ok ({ cb with rcv_wnd ; rcv_nxt }, Sequence.greater rcv_nxt cb.rcv_nxt)
+
+let di3_ststuff conn seg =
+  let _cb = conn.control_block in
+  (* is our fin ACKED? *)
+  if Segment.Flags.mem `FIN seg.Segment.flags then
+    Ok (conn, false)
+  else
+    Ok (conn, false)
+
+let deliver_in_3 conn seg =
+  (* we expect at most FIN PSH ACK - we drop with reset all other combinations *)
+  let flags = seg.Segment.flags in
+  guard Segment.Flags.(is_empty flags || or_ack `FIN flags ||
+                       or_ack `PSH flags || exact [ `FIN ; `PSH ] flags ||
+                       exact [ `FIN ; `PSH ; `ACK  ] flags)
+    (`Reset "flags empty | or_ack FIN | or_ack PSH | FIN PSH | FIN PSH ACK") >>= fun () ->
+  (* PAWS, timers, rcv_wnd may have opened! *)
+  di3_topstuff conn.control_block seg >>= fun (cb', _wnd) ->
+  (* ACK processing *)
+  di3_ackstuff cb' seg >>= fun cb'' ->
+  (* may have some fresh data to report which needs to be acked *)
+  di3_datastuff cb'' seg >>= fun (cb''', ack) ->
+  (* state and FIN processing *)
+  di3_ststuff { conn with control_block = cb''' } seg >>| fun (conn', _fin) ->
+(*  if fin then
+    conn', Segment,make_fin fin
+    else
+*)
+  let out =
+    if ack then
+      Some (Segment.make_ack conn'.control_block ~src_port:seg.dst_port ~dst_port:seg.src_port)
+    else
+      None
+  in
+  conn', out
+
+let deliver_in_2 conn seg =
+  let cb = conn.control_block in
+  guard (Sequence.equal seg.Segment.ack cb.snd_nxt) (`Drop "ack = snd_nxt") >>| fun () ->
+  let control_block = {
+    cb with snd_una = cb.snd_nxt ;
+            rcv_nxt = Sequence.incr seg.Segment.seq ;
+            irs = seg.Segment.seq }
+  in
+  { conn with control_block ; tcp_state = Established },
+  Segment.make_ack control_block ~src_port:seg.Segment.dst_port ~dst_port:seg.Segment.src_port
+
+let deliver_in_2a conn seg =
+  (* well well, the remote could have leftover state and send us a ack+fin... but that's fine to drop (and unlikely to happen once we have random)
+     server.exe: [DEBUG] 10.0.42.2:20 -> 10.0.42.1:1234 handle_conn TCP syn sent cb snd_una 0 snd_nxt 1 snd_wl1 0 snd_wl2 0 iss 0 rcv_wnd 65000 rcv_nxt 0 irs 0 seg AF seq 3062921918 ack 1 window 65535 opts 0 bytes data
+     server.exe: [ERROR] dropping segment in syn sent failed condition RA *)
+  guard (Segment.Flags.exact [ `ACK ; `RST ] seg.Segment.flags) (`Drop "RA") >>= fun () ->
+  guard (Sequence.equal seg.Segment.ack conn.control_block.snd_nxt) (`Drop "ACK in-window")
+
+let deliver_in_3c_3d conn seg =
+  (* deliver_in_3c and syn_received parts of deliver_in_3 *)
+  (* TODO hostLTS:15801: [[SYN]] flag set may be set in the final segment of a simultaneous open :*)
+  let cb = conn.control_block in
+  (* what is the current state? *)
+  (* - we acked the initial syn, their seq should be rcv_nxt (or?) *)
+  (* - furthermore, it should be >= irs -- that's redundant with above *)
+  (* if their seq is good (but their ack isn't or it is no ack), reset *)
+  guard (Sequence.equal seg.Segment.seq cb.rcv_nxt) (`Drop "seq = rcv_nxt") >>= fun () ->
+  (* - we sent our syn, so we expect an appropriate ack for the syn! *)
+  (* - we didn't send out more data, so that ack should be exact *)
+  (* if their seq is not good, drop packet *)
+  guard (Segment.Flags.only `ACK seg.Segment.flags) (`Reset "only ACK flag") >>= fun () ->
+  (* hostLTS:15828 - well, more or less ;) *)
+  guard (Sequence.equal seg.Segment.ack cb.snd_nxt) (`Reset "ack = snd_nxt") >>| fun () ->
+  (* not (ack <= tcp_sock.cb.snd_una \/ ack > tcp_sock.cb.snd_max) *)
+  (* TODO we sent a fin (already) and our fin is acked stuff *)
+  (* TODO rtt measurement likely *)
+  (* paws (di3_topstuff) *)
+  (* expect (assume for now): no data in that segment !? *)
+  (* guard (Sequence.greater_equal seg.Segment.ack cb.iss) "ack >= iss" >>| fun () -> *)
+  let control_block = {
+    cb with snd_una = seg.Segment.ack ;
+            (* snd_wnd = seg.Segment.window ; *)
+            snd_wl1 = seg.Segment.seq ; (* need to check with model, from RFC 1122 4.2.2.20 *)
+            snd_wl2 = seg.Segment.ack ;
+  } in
+  (* if not cantsendmore established else if ourfinisacked fin_wait2 else fin_wait_1 *)
+  { conn with control_block ; tcp_state = Established }
+
 let handle_conn t id conn seg =
-  Log.debug (fun m -> m "handle_conn %a %a seg %a" Connection.pp id pp_conn_state conn Segment.pp seg);
+  Log.debug (fun m -> m "%a handle_conn %a@ seg %a" Connection.pp id pp_conn_state conn Segment.pp seg);
   let add conn' =
     Log.debug (fun m -> m "%a now %a" Connection.pp id pp_conn_state conn');
     { t with connections = CM.add id conn' t.connections }
@@ -103,68 +206,39 @@ let handle_conn t id conn seg =
     Log.debug (fun m -> m "%a dropped" Connection.pp id);
     { t with connections = CM.remove id t.connections }
   in
-  let cb = conn.control_block in
-  match conn.tcp_state with
-  | Syn_sent ->
-    (* deliver_in_2 / deliver_in_2a / deliver_in_2b *)
-    assert false
-  | Syn_received ->
-    (* deliver_in_3c and syn_received parts of deliver_in_3 *)
-    begin match
-        (* TODO hostLTS:15801: [[SYN]] flag set may be set in the final segment of a simultaneous open :*)
-        (* what is the current state? *)
-        (* - we acked the initial syn, their seq should be rcv_nxt (or?) *)
-        (* - furthermore, it should be >= irs -- that's redundant with above *)
-        (* if their seq is good (but their ack isn't or it is no ack), reset *)
-        guard (Sequence.equal seg.Segment.seq cb.rcv_nxt) (`Drop "seq = rcv_nxt") >>= fun () ->
-        (* - we sent our syn, so we expect an appropriate ack for the syn! *)
-        (* - we didn't send out more data, so that ack should be exact *)
-        (* if their seq is not good, drop packet *)
-        guard (Segment.Flags.only `ACK seg.Segment.flags) (`Reset "only ACK flag") >>= fun () ->
-        (* hostLTS:15828 - well, more or less ;) *)
-        guard (Sequence.equal seg.Segment.ack cb.snd_nxt) (`Reset "ack = snd_nxt") >>| fun () ->
-        (* not (ack <= tcp_sock.cb.snd_una \/ ack > tcp_sock.cb.snd_max) *)
-        (* TODO we sent a fin (already) and our fin is acked stuff *)
-        (* TODO rtt measurement likely *)
-        (* paws (di3_topstuff) *)
-        (* expect (assume for now): no data in that segment !? *)
-        (* guard (Sequence.greater_equal seg.Segment.ack cb.iss) "ack >= iss" >>| fun () -> *)
-        (* update other parts as well? wl1/wl2? *)
-        let control_block = { cb with snd_una = seg.Segment.ack ; snd_wnd = seg.Segment.window } in
-        (* if not cantsendmore established else if ourfinisacked fin_wait2 else fin_wait_1 *)
-        add { conn with tcp_state = Established ; control_block }, None
-      with
-      | Ok (t, a) -> t, a
-      | Error (`Drop msg) ->
-        Log.err (fun m -> m "dropping segment in syn_received failed condition %s" msg);
-        t, None
-      | Error (`Reset msg) ->
-        Log.err (fun m -> m "reset in syn_received %s" msg);
-        drop (), Segment.dropwithreset seg
-    end
-  | state -> (* always the same ;) *)
-    (* window handling etc., we'll end up in established likely (unless fin has been sent or received) *)
-    (* we diverge a bit from deliver_in_3 by first matching on state *)
-    (* we should handle the flags fin and rst, syn explicitly, and validate sequence numbers! *)
-    (* and need the cantrcvmore / cantsndmore flags *)
-    (* and retransmission timers and queues *)
-    match
-      (* sequence number and ack processing (drop or rst): *)
-      guard (in_window cb seg) (`Drop "in_window") >>| fun () ->
-      (* flag evaluation: what should we do with this segment? *)
-      (* ACK processing *)
-      (* RST + SYN processing -> immediate ack or drop *)
-      (* FIN processing *)
-      (* data processing *)
-      t, None
-    with
-    | Ok (t, a) -> t, a
-    | Error (`Drop msg) ->
-      Log.err (fun m -> m "dropping segment in %a failed condition %s" pp_fsm state msg);
-      t, None
-    | Error (`Reset msg) ->
-      Log.err (fun m -> m "reset in %a %s" pp_fsm state msg);
-      drop (), Segment.dropwithreset seg
+  let r = match conn.tcp_state with
+    | Syn_sent ->
+      let flags = seg.Segment.flags in
+      begin match Segment.Flags.(exact [ `SYN ; `ACK ] flags, only `SYN flags) with
+        | true, true -> assert false
+        | true, false -> deliver_in_2 conn seg >>| fun (c', o) -> add c', Some o
+        | false, true ->
+          (* deliver_in_2b *)
+          assert false
+        | false, false -> deliver_in_2a conn seg >>| fun () -> drop (), None
+      end
+    | Syn_received -> deliver_in_3c_3d conn seg >>| fun conn' -> add conn', None
+    | _ -> (* very similar: top, ack, data, state *)
+      guard (in_window conn.control_block seg) (`Drop "in_window") >>= fun () ->
+      let flags = seg.Segment.flags in
+      match Segment.Flags.(or_ack `RST flags, or_ack `SYN flags) with
+      | true, true -> assert false
+      | true, false ->
+        (* deliver_in_7 *)
+        assert false
+      | false, true ->
+        (* deliver_in_8 *)
+        assert false
+      | false, false -> deliver_in_3 conn seg >>| fun (conn', d) -> add conn', d
+  in
+  match r with
+  | Ok (t, a) -> t, a
+  | Error (`Drop msg) ->
+    Log.err (fun m -> m "dropping segment in %a failed condition %s" pp_fsm conn.tcp_state msg);
+    t, None
+  | Error (`Reset msg) ->
+    Log.err (fun m -> m "reset in %a %s" pp_fsm conn.tcp_state msg);
+    drop (), Segment.dropwithreset seg
 
 (* as noted above, 3b is not relevant for us *)
 let handle t ~src ~dst data =
@@ -174,7 +248,8 @@ let handle t ~src ~dst data =
     (t, [])
   | Ok (seg, id) ->
     (* deliver_in_3a deliver_in_4 are done now! *)
-    Log.info (fun m -> m "%a TCP %a" Connection.pp id Segment.pp seg) ;
+    let pkt = src, seg.Segment.src_port, dst, seg.Segment.dst_port in
+    Log.info (fun m -> m "%a TCP %a" Connection.pp pkt Segment.pp seg) ;
     let t', out = match CM.find_opt id t.connections with
       | None -> handle_noconn t id seg
       | Some conn -> handle_conn t id conn seg
@@ -188,11 +263,6 @@ let handle t ~src ~dst data =
 
 (*
 - timer : t -> t * Cstruct.t list * [ `Timeout of connection | `Error of connection ]
-
-other operations:
-- create_connection : t -> ?src:int -> Ipaddr.t -> int -> t * connection * Cstruct.t
-- close_connection : t -> connection -> t * Cstruct.t option
-- write : t -> connection -> Cstruct.t -> t * Cstruct.t option [may also fail if connection bad or half-closed]
 
 on individual sockets:
 - shutdown_read

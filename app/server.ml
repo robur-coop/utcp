@@ -4,8 +4,6 @@ module Ethernet = Ethernet.Make(Netif)
 module ARP = Arp.Make(Ethernet)(OS.Time)
 module IPv4 = Static_ipv4.Make(Mirage_random_test)(Mclock)(Ethernet)(ARP)
 
-let tcp_state = ref Tcp.State.(start_listen empty 23)
-
 let log_err ~pp_error = function
   | Ok _ -> ()
   | Error e -> Logs.err (fun m -> m "error %a" pp_error e)
@@ -16,31 +14,46 @@ let handle_events ip =
         IPv4.write ip dst `TCP (fun _ -> 0) [ out ] >|=
         log_err ~pp_error:IPv4.pp_error)
 
-let tcp ip ~src ~dst payload =
-  let tcp_state', events = Tcp.Input.handle !tcp_state ~src ~dst payload in
-  tcp_state := tcp_state' ;
-  handle_events ip events
-
 let cb ~proto ~src ~dst payload =
   Logs.app (fun m -> m "received proto %X frame %a -> %a (%d bytes)" proto
                Ipaddr.V4.pp src Ipaddr.V4.pp dst (Cstruct.len payload));
   Lwt.return_unit
 
 let jump () =
+  Printexc.record_backtrace true;
+  Mirage_random_test.initialize ();
   Lwt_main.run (
     Netif.connect "tap1" >>= fun tap ->
     Ethernet.connect tap >>= fun eth ->
     ARP.connect eth >>= fun arp ->
-    IPv4.connect
-      ~ip:(Ipaddr.V4.of_string_exn "10.0.42.2")
-      ~network:(Ipaddr.V4.Prefix.of_string_exn "10.0.42.2/24")
-      () eth arp >>= fun ip ->
+    let ip_addr = Ipaddr.V4.of_string_exn "10.0.42.2"
+    and network = Ipaddr.V4.Prefix.of_string_exn "10.0.42.2/24"
+    in
+    IPv4.connect ~ip:ip_addr ~network () eth arp >>= fun ip ->
+    let tcp, out =
+      let dst = Ipaddr.V4.of_string_exn "10.0.42.1" in
+      let init, out =
+        let s = Tcp.State.empty Mirage_random_test.generate ip_addr in
+        let s' = Tcp.State.start_listen s 23 in
+        Tcp.User.connect s' dst 1234
+      in
+      let s = ref init in
+      (fun ~src ~dst payload ->
+         let s', events = Tcp.Input.handle !s ~src ~dst payload in
+         s := s' ;
+         handle_events ip events),
+      (dst, out)
+    in
     let eth_input =
       Ethernet.input eth
         ~arpv4:(ARP.input arp)
-        ~ipv4:(IPv4.input ip ~tcp:(tcp ip) ~udp:(cb ~proto:17) ~default:cb)
+        ~ipv4:(IPv4.input ip ~tcp ~udp:(cb ~proto:17) ~default:cb)
         ~ipv6:(fun _ -> Lwt.return_unit)
     in
+    (* delay client a bit to have arp up and running *)
+    Lwt.async (fun () ->
+        Lwt_unix.sleep 2. >>= fun () ->
+        handle_events ip [ `Data out ]);
     Netif.listen tap ~header_size:14 eth_input >|=
     Rresult.R.error_to_msg ~pp_error:Netif.pp_error
   )
