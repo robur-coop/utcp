@@ -203,7 +203,6 @@ let deliver_in_3c_3d conn seg =
   (* not (ack <= tcp_sock.cb.snd_una \/ ack > tcp_sock.cb.snd_max) *)
   (* TODO rtt measurement likely *)
   (* expect (assume for now): no data in that segment !? *)
-  (* guard (Sequence.greater_equal seg.Segment.ack cb.iss) "ack >= iss" >>| fun () -> *)
   let control_block = {
     cb with snd_una = seg.Segment.ack ;
             (* snd_wnd = seg.Segment.window ; *)
