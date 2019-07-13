@@ -121,6 +121,11 @@ type t = {
   payload : Cstruct.t ;
 }
 
+let mss t =
+  List.fold_left
+    (fun acc -> function MaximumSegmentSize x -> Some x | _ -> acc)
+    None t.options
+
 (* we always take our IP as source, thus of_segment -- to be used for a
    received segment -- needs to swap *)
 let to_id ~src ~dst t = (dst, t.dst_port, src, t.src_port)
@@ -155,6 +160,12 @@ let dropwithreset seg =
            seq ; ack ;
            flags = Flags.add `RST flags ;
            window = 0 ; options = [] ; payload = Cstruct.empty }
+
+(* auxFns:1774 no ts and arch, though *)
+(* let tcp_output_really window_probe conn =
+ *   let cb = conn.control_block in
+ *   let snd_cwnd' =
+ *     if  *)
 
 let make_reset ?(options = []) cb ~src_port ~dst_port =
   { src_port ; dst_port ; seq = cb.State.snd_nxt (* or send_una + 1? *) ;

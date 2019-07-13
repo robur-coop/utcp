@@ -40,7 +40,7 @@ deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - not handled
 ??deliver_in_10 - stupid flag combinations are dropped (without reset)
 *)
 
-let handle_noconn t id seg =
+let handle_noconn t now id seg =
   match
     (* TL;DR: if there's a listener, and it is a SYN, we do sth useful. otherwise RST *)
     guard (IS.mem seg.Segment.dst_port t.listeners) () >>= fun () ->
@@ -52,25 +52,48 @@ let handle_noconn t id seg =
     (* there can't be anything in TIME_WAIT, otherwise we wouldn't end up here *)
     (* TODO check RFC 1122 Section 4.2.2.13 whether this actually happens (socket reusage) *)
     (* TODO resource management: limit number of outstanding connection attempts *)
-    let control_block =
-      let iss = Sequence.of_int32 (Randomconv.int32 t.rng)
-      and ack = Sequence.incr seg.seq (* ACK the SYN *)
-      and rcv_wnd = 65000
+    let conn =
+      let advmss = Subr.tcp_mssopt id in
+      let rcvbufsize, sndbufsize, t_maxseg', snd_cwnd' =
+        let bw_delay_product_for_rt = None in
+        Subr.calculate_buf_sizes advmss (Segment.mss seg)
+          bw_delay_product_for_rt Params.so_rcvbuf Params.so_sndbuf
       in
-      { snd_una = iss ; snd_nxt = Sequence.incr iss ;
-        snd_wl1 = Sequence.zero ; snd_wl2 = Sequence.zero ;
-        iss ; rcv_nxt = ack ; rcv_wnd ; irs = seg.seq }
+      let rcv_wnd = rcvbufsize in
+      let tf_doing_ws = false in (* TODO *)
+      let iss = Sequence.of_int32 (Randomconv.int32 t.rng)
+      and ack' = Sequence.incr seg.Segment.seq (* ACK the SYN *)
+      in
+      let t_rttseg = Some (now, Sequence.incr iss) in
+      let control_block = {
+        initial_cb with
+        tt_keep = Some (Timers.timer now () Params.tcptv_keep_idle) ;
+        tt_rexmt = Some (Timers.timer now (Rexmt, 0) Params.tcp_backoff.(0)) ;
+        iss ;
+        irs = seg.Segment.seq ;
+        rcv_wnd = rcvbufsize ;
+        tf_rxwin0sent = (rcv_wnd = 0) ;
+        rcv_adv = Sequence.addi ack' rcv_wnd ;
+        rcv_nxt = ack' ;
+        snd_una = iss ;
+        snd_max = Sequence.incr iss ;
+        snd_nxt = Sequence.incr iss ;
+        snd_cwnd = snd_cwnd' ;
+        t_maxseg = t_maxseg' ;
+        t_advmss = Some advmss ;
+        tf_doing_ws ;
+        last_ack_sent = ack' ;
+        t_rttseg }
+      in
+      conn_state ~rcvbufsize ~sndbufsize Syn_received control_block
     in
-    let conn_state = conn_state Syn_received control_block in
-    (* TODO options: mss, window scaling *)
-    (* TODO compute buffer sizes: bandwidth-delay-product, rcvbufsize, sndbufsize, maxseg, snd_cwnd *)
-    (* TODO start retransmission timer *)
+    (* TODO options: window scaling *)
     let reply =
-      Segment.make_syn_ack control_block
+      Segment.make_syn_ack conn.control_block
         ~src_port:seg.dst_port ~dst_port:seg.src_port
     in
-    Log.debug (fun m -> m "%a passive open %a" Connection.pp id pp_conn_state conn_state);
-    ({ t with connections = CM.add id conn_state t.connections }, Some reply)
+    Log.debug (fun m -> m "%a passive open %a" Connection.pp id pp_conn_state conn);
+    ({ t with connections = CM.add id conn t.connections }, Some reply)
   with
   | Ok (t, reply) -> t, reply
   | Error () ->
@@ -146,7 +169,7 @@ let deliver_in_3 conn seg =
   guard Segment.Flags.(is_empty flags || only `ACK flags || or_ack `FIN flags ||
                        or_ack `PSH flags || exact [ `FIN ; `PSH ] flags ||
                        exact [ `FIN ; `PSH ; `ACK  ] flags)
-    (`Reset "flags empty | or_ack FIN | or_ack PSH | FIN PSH | FIN PSH ACK") >>= fun () ->
+    (`Reset "flags empty | ACK | or_ack FIN | or_ack PSH | FIN PSH | FIN PSH ACK") >>= fun () ->
   (* PAWS, timers, rcv_wnd may have opened! *)
   di3_topstuff conn.control_block seg >>= fun (cb', _wnd) ->
   (* ACK processing *)
@@ -216,14 +239,15 @@ let deliver_in_7 conn seg =
   (* guard rcv_nxt = seg.seq *)
   let cb = conn.control_block in
   if Sequence.equal cb.rcv_nxt seg.Segment.seq then
-    Ok None
+    (* we rely that dropwithreset does not RST if a RST was received *)
+    Error (`Reset "received valid reset")
   else
-    Ok (Some (Segment.make_ack cb ~src_port:seg.dst_port ~dst_port:seg.src_port))
+    Ok (Segment.make_ack cb ~src_port:seg.dst_port ~dst_port:seg.src_port)
 
 let deliver_in_8 conn seg =
   Ok (Segment.make_ack conn.control_block ~src_port:seg.Segment.dst_port ~dst_port:seg.Segment.src_port)
 
-let handle_conn t id conn seg =
+let handle_conn t _now id conn seg =
   Log.debug (fun m -> m "%a handle_conn %a@ seg %a" Connection.pp id pp_conn_state conn Segment.pp seg);
   let add conn' =
     Log.debug (fun m -> m "%a now %a" Connection.pp id pp_conn_state conn');
@@ -248,9 +272,7 @@ let handle_conn t id conn seg =
       (* RFC 5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
       match Segment.Flags.(or_ack `RST flags, or_ack `SYN flags) with
       | true, true -> assert false
-      | true, false -> (deliver_in_7 conn seg >>| function
-        | None -> drop (), None
-        | Some seg' -> t, Some seg')
+      | true, false -> deliver_in_7 conn seg >>| fun seg' -> t, Some seg'
       | false, true -> deliver_in_8 conn seg >>| fun seg' -> t, Some seg'
       | false, false -> deliver_in_3 conn seg >>| fun (conn', d) -> add conn', d
   in
@@ -263,7 +285,7 @@ let handle_conn t id conn seg =
     Log.err (fun m -> m "reset in %a %s" pp_fsm conn.tcp_state msg);
     drop (), Segment.dropwithreset seg
 
-let handle t ~src ~dst data =
+let handle t now ~src ~dst data =
   match Segment.decode_and_validate ~src ~dst data with
   | Error (`Msg msg) ->
     Log.err (fun m -> m "dropping invalid segment %s" msg);
@@ -273,8 +295,8 @@ let handle t ~src ~dst data =
     let pkt = src, seg.Segment.src_port, dst, seg.Segment.dst_port in
     Log.info (fun m -> m "%a TCP %a" Connection.pp pkt Segment.pp seg) ;
     let t', out = match CM.find_opt id t.connections with
-      | None -> handle_noconn t id seg
-      | Some conn -> handle_conn t id conn seg
+      | None -> handle_noconn t now id seg
+      | Some conn -> handle_conn t now id conn seg
     in
     t', match out with
     | None -> Log.info (fun m -> m "no answer"); []

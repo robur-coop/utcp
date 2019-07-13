@@ -32,17 +32,145 @@ let pp_fsm ppf s =
   - duplicate acks count
   - congestion window, slow-start threshold
 *)
-type control_block = {
-  snd_una : Sequence.t ; (* send unacknowledged *)
-  snd_nxt : Sequence.t ; (* send next *)
-  (* snd_wnd : int ; (\* send window (32 bit should be enough for everyone!?) *\) *)
-  snd_wl1 : Sequence.t ; (* sequence number used for last window update *)
-  snd_wl2 : Sequence.t ; (* ack number used for last window update *)
-  iss : Sequence.t ; (* initial send sequence number *)
-  rcv_nxt : Sequence.t ; (* receive next *)
-  rcv_wnd : int ; (* receive window *)
-  irs : Sequence.t (* inital receive sequence number *)
+type rexmtmode = RexmtSyn | Rexmt | Persist
+
+(* hostTypes:182 *)
+type rttinf = {
+  t_rttupdated : int ; (*: number of times rtt sampled :*)
+  tf_srtt_valid : bool ; (*: estimate is currently believed to be valid :*)
+  t_srtt : Duration.t ; (*: smoothed round-trip time :*)
+  t_rttvar : Duration.t ; (*: variance in round-trip time :*)
+  t_rttmin : Duration.t ; (*: minimum rtt allowed :*)
+  t_lastrtt : Duration.t option ; (*: most recent instantaneous RTT obtained :*)
+  (*: Note this should really be an option type which is set to [[NONE]] if no
+    value has been obtained. The same applies to [[t_lastshift]] below. :*)
+  (* in BSD, this is the local variable rtt in tcp_xmit_timer(); we put it here
+     because we don't want to store rxtcur in the tcpcb *)
+  t_lastshift : int option ; (*: the last retransmission shift used :*)
+  t_wassyn : bool (*: whether that shift was [[RexmtSyn]] or not :*)
+  (* these two also are to avoid storing rxtcur in the tcpcb; they are somewhat
+     annoying because they are *only* required for the tcp_output test that
+     returns to slow start if the connection has been idle for >=1RTO *)
 }
+
+(* hostTypes:230 but dropped urg and ts stuff *)
+type control_block = {
+  (*: timers :*)
+  tt_rexmt : (rexmtmode * int) Timers.timed option; (*: retransmit timer, with mode and shift; [[NONE]] is idle :*)
+    (*: see |tcp_output.c:356ff| for more info. :*)
+    (*: as in BSD, the shift starts at zero, and is incremented each
+        time the timer fires.  So it is zero during the first interval,
+        1 after the first retransmit, etc. :*)
+  tt_keep : unit Timers.timed option ; (*: keepalive timer :*)
+  tt_2msl : unit Timers.timed option ; (*: $2*\mathit{MSL}$ [[TIME_WAIT]] timer :*)
+  tt_delack : unit Timers.timed option ; (*: delayed [[ACK]] timer :*)
+  tt_conn_est : unit Timers.timed option ; (*: connection-establishment timer, overlays keep in BSD :*)
+  tt_fin_wait_2 : unit Timers.timed option ; (*: [[FIN_WAIT_2]] timer, overlays 2msl in BSD :*)
+  t_idletime : Mtime.t ; (*: time since last segment received :*)
+
+  (*: flags, some corresponding to BSD |TF_| flags :*)
+  tf_needfin : bool ;
+  tf_shouldacknow : bool ;
+
+  (*: send variables :*)
+  snd_una : Sequence.t ; (*: lowest unacknowledged sequence number :*)
+  snd_max : Sequence.t ; (*: highest sequence number sent; used to recognise retransmits :*)
+  snd_nxt : Sequence.t ; (*: next sequence number to send :*)
+  snd_wl1 : Sequence.t ; (*: seq number of most recent window update segment :*)
+  snd_wl2 : Sequence.t ; (*: ack number of most recent window update segment :*)
+  iss : Sequence.t ; (* initial send sequence number *)
+  snd_wnd : int ; (*: send window size: always between 0 and 65535*2**14 :*)
+  snd_cwnd : int ; (*: congestion window :*)
+  snd_ssthresh : int ; (*: threshold between exponential and linear [[snd_cwnd]] expansion (for slow start):*)
+
+  (*: receive variables :*)
+  rcv_wnd : int ; (*: receive window size :*)
+  tf_rxwin0sent : bool ; (*: have advertised a zero window to receiver :*)
+  rcv_nxt : Sequence.t ; (*: lowest sequence number not yet received :*)
+  irs : Sequence.t ; (*: initial receive sequence number :*)
+  rcv_adv : Sequence.t ; (*: most recently advertised window :*)
+  last_ack_sent : Sequence.t ;  (*: last acknowledged sequence number :*)
+
+  (*: connection parameters :*)
+  t_maxseg : int ;           (*: maximum segment size on this connection :*)
+  t_advmss : int option ;    (*: the mss advertisment sent in our initial SYN :*)
+  tf_doing_ws : bool ;     (*: doing window scaling on this connection?  (result of negotiation) :*)
+  request_r_scale : int option  ;  (*: pending window scaling, if any (used during negotiation) :*)
+  snd_scale : int  ;     (*: window scaling for send window (0..14), applied to received advertisements (RFC1323) :*)
+  rcv_scale : int  ;     (*: window scaling for receive window (0..14), applied when we send advertisements (RFC1323) :*)
+
+  (*: round-trip time estimation :*)
+  t_rttseg : (Mtime.t * Sequence.t) option ;  (*: start time and sequence number of segment being timed :*)
+  t_rttinf : rttinf ;               (*: round-trip time estimator values :*)
+
+  (*: retransmission :*)
+  t_dupacks : int ; (*: number of consecutive duplicate acks received (typically 0..3ish; should this wrap at 64K/4G ack burst?) :*)
+  t_badrxtwin : Mtime.t ; (*: deadline for bad-retransmit recovery :*)
+  snd_cwnd_prev : int ; (*: [[snd_cwnd]] prior to retransmit (used in bad-retransmit recovery) :*)
+  snd_ssthresh_prev : int ; (*: [[snd_ssthresh]] prior to retransmit (used in bad-retransmit recovery) :*)
+  snd_recover : Sequence.t ; (*: highest sequence number sent at time of receipt of partial ack (used in RFC2581/RFC2582 fast recovery) :*)
+
+  (*: other :*)
+  (* t_segq :  tcpReassSegment list;  (\*: segment reassembly queue :*\)
+   * t_softerror : error option      (\*: current transient error; reported only if failure becomes permanent :*\) *)
+  (*: could cut this down to the actually-possible errors? :*)
+
+}
+
+(* auxFns:1066*)
+let initial_cb =
+  let initial_rttinf = {
+    t_rttupdated = 0;
+    tf_srtt_valid = false;
+    t_srtt = Params.tcptv_rtobase;
+    t_rttvar = Params.tcptv_rttvarbase;
+    t_rttmin = Params.tcptv_min;
+    t_lastrtt = None;
+    t_lastshift = None;
+    t_wassyn = false  (* if t_lastshift=0, this doesn't make a difference *)
+  } in
+  {
+    (* <| t_segq            := []; *)
+    tt_rexmt = None;
+    tt_keep = None;
+    tt_2msl = None;
+    tt_delack = None;
+    tt_conn_est = None;
+    tt_fin_wait_2 = None;
+    tf_needfin = false;
+    tf_shouldacknow = false;
+    snd_una = Sequence.zero;
+    snd_max = Sequence.zero;
+    snd_nxt = Sequence.zero;
+    snd_wl1 = Sequence.zero;
+    snd_wl2 = Sequence.zero;
+    iss = Sequence.zero;
+    snd_wnd = 0;
+    snd_cwnd = Params.tcp_maxwin lsl Params.tcp_maxwinscale;
+    snd_ssthresh = Params.tcp_maxwin lsl Params.tcp_maxwinscale;
+    rcv_wnd = 0;
+    tf_rxwin0sent = false;
+    rcv_nxt = Sequence.zero;
+    irs = Sequence.zero;
+    rcv_adv = Sequence.zero;
+    snd_recover = Sequence.zero;
+    t_maxseg = Params.mssdflt;
+    t_advmss = None;
+    t_rttseg = None;
+    t_rttinf = initial_rttinf ;
+    t_dupacks = 0;
+    t_idletime = Mtime.of_uint64_ns 0L;
+    (* t_softerror = None; *)
+    snd_scale = 0;
+    rcv_scale = 0;
+    request_r_scale = None; (* this like many other things is overwritten with
+                                     the chosen value later - cf tcp_newtcpcb() *)
+    tf_doing_ws = false;
+    last_ack_sent = Sequence.zero;
+    snd_cwnd_prev = 0;
+    snd_ssthresh_prev = 0;
+    t_badrxtwin = Mtime.of_uint64_ns 0L;
+  }
 
 let pp_control ppf c =
   Fmt.pf ppf "snd_una %a snd_nxt %a \
@@ -81,13 +209,17 @@ type conn_state = {
   control_block : control_block ; (* i think control_block should go into state *)
   cantrcvmore : bool ;
   cantsndmore : bool ;
+  rcvbufsize : int ;
+  sndbufsize : int ;
   (* reassembly : Cstruct.t list ; (* TODO nicer data structure! *) *)
   (* read_queue : Cstruct.t list ;
    * write_queue : Cstruct.t list ; *)
 }
 
-let conn_state tcp_state control_block = {
-  tcp_state ; control_block ; cantrcvmore = false ; cantsndmore = false
+let conn_state ~rcvbufsize ~sndbufsize tcp_state control_block = {
+  tcp_state ; control_block ;
+  cantrcvmore = false ; cantsndmore = false ;
+  rcvbufsize ; sndbufsize
 }
 
 let pp_conn_state ppf c =

@@ -7,28 +7,40 @@ open Rresult.R.Infix
 let src = Logs.Src.create "tcp.user" ~doc:"TCP user"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-let connect t ?src_port dst dst_port =
+let connect t now ?src_port dst dst_port =
   let src_port = match src_port with
     | None -> Randomconv.int16 t.rng
     | Some p -> p
   in
-  let control_block =
+  let conn =
     let iss = Sequence.of_int32 (Randomconv.int32 t.rng) in
-    {
-      iss ; snd_una = iss ; snd_nxt = Sequence.incr iss ;
-      snd_wl1 = iss ; snd_wl2 = Sequence.zero ;
-      rcv_wnd = 65000 ;
-      rcv_nxt = Sequence.zero ;
-      irs = Sequence.zero
-    }
+    let rcv_wnd = Params.so_rcvbuf in
+    let advmss = None in
+    let request_r_scale = None (* TODO *) in
+    let t_rttseg = Some (now, iss) in
+    let control_block = {
+      initial_cb with
+      tt_rexmt = Some (Timers.timer now (RexmtSyn, 0) Params.tcp_syn_backoff.(0)) ;
+      tt_conn_est = Some (Timers.timer now () Params.tcptv_keep_init) ;
+      snd_una = iss ;
+      snd_nxt = Sequence.incr iss ;
+      snd_max = Sequence.incr iss ;
+      iss ;
+      rcv_wnd ;
+      rcv_adv = Sequence.of_int32 (Int32.of_int rcv_wnd) ; (* rcv_nxt is 0 anyways, this is void *)
+      tf_rxwin0sent = (rcv_wnd = 0);
+      t_advmss = advmss ;
+      request_r_scale ;
+      t_rttseg
+    } in
+    conn_state ~rcvbufsize:rcv_wnd ~sndbufsize:Params.so_sndbuf Syn_sent control_block
   in
-  let seg = Segment.make_syn control_block ~src_port ~dst_port in
+  let seg = Segment.make_syn conn.control_block ~src_port ~dst_port in
   let data = Segment.encode_and_checksum ~src:t.ip ~dst seg in
   let id = t.ip, src_port, dst, dst_port in
   let connections =
-    let v = conn_state Syn_sent control_block in
-    Log.debug (fun m -> m "%a active open %a" Connection.pp id pp_conn_state v);
-    CM.add id v t.connections
+    Log.debug (fun m -> m "%a active open %a" Connection.pp id pp_conn_state conn);
+    CM.add id conn t.connections
   in
   { t with connections }, id, data
 

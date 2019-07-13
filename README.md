@@ -76,3 +76,11 @@ FreeBSD).
 - More restrictive with flag combinations (uhm, likely... but then, half-closed connection are fun, maybe FIN+SYN is a valid combination ;)
 - CLOSED state can't be observed
 - going from TIME_WAIT anywhere (i.e. when someone connects with a socket, and instead close on EOF does another connect - this may actually happen; if you're talking to this library, your second connect will fail.... hope you handle the case properly) - deliver_in_9 will never happen for us
+
+## Things to preserve and ensure
+
+- each incoming segment with reasonable window is handled properly
+- there's always a path (e.g. via timers) to drop the connection (with/out RST)
+
+- timers: is one sufficient (with either rexmtsyn, persist, idle, rexmt)?
+- tcp_output_really

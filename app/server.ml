@@ -35,11 +35,11 @@ let jump () =
       let init, conn, out =
         let s = Tcp.State.empty Mirage_random_test.generate ip_addr in
         let s' = Tcp.State.start_listen s 23 in
-        Tcp.User.connect s' dst 1234
+        Tcp.User.connect s' (Mtime_clock.now ()) dst 1234
       in
       let s = ref init in
       (fun ~src ~dst payload ->
-         let s', events = Tcp.Input.handle !s ~src ~dst payload in
+         let s', events = Tcp.Input.handle !s (Mtime_clock.now ()) ~src ~dst payload in
          s := s' ;
          handle_events ip events),
       (fun () ->
