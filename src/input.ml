@@ -60,15 +60,16 @@ let handle_noconn t now id seg =
           bw_delay_product_for_rt Params.so_rcvbuf Params.so_sndbuf
       in
       let rcv_wnd = rcvbufsize in
-      let tf_doing_ws = false in (* TODO *)
+      (* TODO options: window scaling *)
+      let tf_doing_ws = false in
       let iss = Sequence.of_int32 (Randomconv.int32 t.rng)
       and ack' = Sequence.incr seg.Segment.seq (* ACK the SYN *)
       in
-      let t_rttseg = Some (now, Sequence.incr iss) in
+      let t_rttseg = Some (now, iss) in
       let control_block = {
         initial_cb with
-        tt_keep = Some (Timers.timer now () Params.tcptv_keep_idle) ;
         tt_rexmt = Some (Timers.timer now (Rexmt, 0) Params.tcp_backoff.(0)) ;
+        t_idletime = now ;
         iss ;
         irs = seg.Segment.seq ;
         rcv_wnd = rcvbufsize ;
@@ -87,7 +88,6 @@ let handle_noconn t now id seg =
       in
       conn_state ~rcvbufsize ~sndbufsize Syn_received control_block
     in
-    (* TODO options: window scaling *)
     let reply =
       Segment.make_syn_ack conn.control_block
         ~src_port:seg.dst_port ~dst_port:seg.src_port

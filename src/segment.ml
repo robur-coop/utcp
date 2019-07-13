@@ -177,7 +177,12 @@ let make_syn_ack ?(options = []) cb ~src_port ~dst_port =
     flags = Flags.of_list [ `SYN ; `ACK ] ;
     window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
 
-let make_syn ?(options = []) cb ~src_port ~dst_port =
+(* auxFns:1333 *)
+let make_syn cb (_, src_port, _, dst_port) =
+  let options =
+    match cb.State.t_advmss with None -> [] | Some x -> [ MaximumSegmentSize x ]
+    (* TODO window scaling *)
+  in
   { src_port ; dst_port ; seq = cb.State.iss ; ack = Sequence.zero ;
     flags = Flags.singleton`SYN ;
     window = cb.rcv_wnd ; options ; payload = Cstruct.empty }

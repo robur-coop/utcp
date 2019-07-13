@@ -61,7 +61,7 @@ type control_block = {
     (*: as in BSD, the shift starts at zero, and is incremented each
         time the timer fires.  So it is zero during the first interval,
         1 after the first retransmit, etc. :*)
-  tt_keep : unit Timers.timed option ; (*: keepalive timer :*)
+  (* tt_keep : unit Timers.timed option ; (\*: keepalive timer :*\) *)
   tt_2msl : unit Timers.timed option ; (*: $2*\mathit{MSL}$ [[TIME_WAIT]] timer :*)
   tt_delack : unit Timers.timed option ; (*: delayed [[ACK]] timer :*)
   tt_conn_est : unit Timers.timed option ; (*: connection-establishment timer, overlays keep in BSD :*)
@@ -89,19 +89,20 @@ type control_block = {
   rcv_nxt : Sequence.t ; (*: lowest sequence number not yet received :*)
   irs : Sequence.t ; (*: initial receive sequence number :*)
   rcv_adv : Sequence.t ; (*: most recently advertised window :*)
-  last_ack_sent : Sequence.t ;  (*: last acknowledged sequence number :*)
+  last_ack_sent : Sequence.t ; (*: last acknowledged sequence number :*)
 
   (*: connection parameters :*)
-  t_maxseg : int ;           (*: maximum segment size on this connection :*)
-  t_advmss : int option ;    (*: the mss advertisment sent in our initial SYN :*)
-  tf_doing_ws : bool ;     (*: doing window scaling on this connection?  (result of negotiation) :*)
-  request_r_scale : int option  ;  (*: pending window scaling, if any (used during negotiation) :*)
-  snd_scale : int  ;     (*: window scaling for send window (0..14), applied to received advertisements (RFC1323) :*)
-  rcv_scale : int  ;     (*: window scaling for receive window (0..14), applied when we send advertisements (RFC1323) :*)
+  (* TODO move into tcp_state, at least t_advmss; tf_doing_ws/request_r_scale *)
+  t_maxseg : int ; (*: maximum segment size on this connection :*)
+  t_advmss : int option ; (*: the mss advertisment sent in our initial SYN :*)
+  tf_doing_ws : bool ; (*: doing window scaling on this connection?  (result of negotiation) :*)
+  request_r_scale : int option ; (*: pending window scaling, if any (used during negotiation) :*)
+  snd_scale : int ; (*: window scaling for send window (0..14), applied to received advertisements (RFC1323) :*)
+  rcv_scale : int ; (*: window scaling for receive window (0..14), applied when we send advertisements (RFC1323) :*)
 
   (*: round-trip time estimation :*)
-  t_rttseg : (Mtime.t * Sequence.t) option ;  (*: start time and sequence number of segment being timed :*)
-  t_rttinf : rttinf ;               (*: round-trip time estimator values :*)
+  t_rttseg : (Mtime.t * Sequence.t) option ; (*: start time and sequence number of segment being timed :*)
+  t_rttinf : rttinf ; (*: round-trip time estimator values :*)
 
   (*: retransmission :*)
   t_dupacks : int ; (*: number of consecutive duplicate acks received (typically 0..3ish; should this wrap at 64K/4G ack burst?) :*)
@@ -132,7 +133,7 @@ let initial_cb =
   {
     (* <| t_segq            := []; *)
     tt_rexmt = None;
-    tt_keep = None;
+    (* tt_keep = None; *)
     tt_2msl = None;
     tt_delack = None;
     tt_conn_est = None;
