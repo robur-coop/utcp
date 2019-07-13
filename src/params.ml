@@ -23,6 +23,8 @@ and dtsinval = Duration.of_day 24
 and tcp_maxwin = 65535
 and tcp_maxwinscale = 14
 and mssdflt = 536
+and ss_fltsz = 1
+and scale = 6
 
 (* updated from FreeBSD 13 *)
 and tcptv_msl = Duration.of_sec 30

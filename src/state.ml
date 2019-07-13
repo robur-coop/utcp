@@ -93,10 +93,11 @@ type control_block = {
 
   (*: connection parameters :*)
   (* TODO move into tcp_state, at least t_advmss; tf_doing_ws/request_r_scale *)
+  (* we also don't need that many options: we will do window scaling and MSS! *)
   t_maxseg : int ; (*: maximum segment size on this connection :*)
-  t_advmss : int option ; (*: the mss advertisment sent in our initial SYN :*)
+  t_advmss : int ; (*: the mss advertisment sent in our initial SYN :*)
   tf_doing_ws : bool ; (*: doing window scaling on this connection?  (result of negotiation) :*)
-  request_r_scale : int option ; (*: pending window scaling, if any (used during negotiation) :*)
+  request_r_scale : int ; (*: pending window scaling, if any (used during negotiation) :*)
   snd_scale : int ; (*: window scaling for send window (0..14), applied to received advertisements (RFC1323) :*)
   rcv_scale : int ; (*: window scaling for receive window (0..14), applied when we send advertisements (RFC1323) :*)
 
@@ -112,8 +113,8 @@ type control_block = {
   snd_recover : Sequence.t ; (*: highest sequence number sent at time of receipt of partial ack (used in RFC2581/RFC2582 fast recovery) :*)
 
   (*: other :*)
-  (* t_segq :  tcpReassSegment list;  (\*: segment reassembly queue :*\)
-   * t_softerror : error option      (\*: current transient error; reported only if failure becomes permanent :*\) *)
+  (* t_segq :  tcpReassSegment list;  (\*: segment reassembly queue :*\) *)
+  t_softerror : string option      (*: current transient error; reported only if failure becomes permanent :*)
   (*: could cut this down to the actually-possible errors? :*)
 
 }
@@ -156,16 +157,16 @@ let initial_cb =
     rcv_adv = Sequence.zero;
     snd_recover = Sequence.zero;
     t_maxseg = Params.mssdflt;
-    t_advmss = None;
+    t_advmss = Params.mssdflt;
     t_rttseg = None;
     t_rttinf = initial_rttinf ;
     t_dupacks = 0;
     t_idletime = Mtime.of_uint64_ns 0L;
-    (* t_softerror = None; *)
+    t_softerror = None;
     snd_scale = 0;
     rcv_scale = 0;
-    request_r_scale = None; (* this like many other things is overwritten with
-                                     the chosen value later - cf tcp_newtcpcb() *)
+    request_r_scale = 0; (* this like many other things is overwritten with
+                            the chosen value later - cf tcp_newtcpcb() *)
     tf_doing_ws = false;
     last_ack_sent = Sequence.zero;
     snd_cwnd_prev = 0;

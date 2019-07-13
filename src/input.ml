@@ -1,5 +1,4 @@
 (* (c) 2017-2019 Hannes Mehnert, all rights reserved *)
-[@@@ocaml.warning "-23"]
 
 let src = Logs.Src.create "tcp.input" ~doc:"TCP input"
 module Log = (val Logs.src_log src : Logs.LOG)
@@ -60,8 +59,11 @@ let handle_noconn t now id seg =
           bw_delay_product_for_rt Params.so_rcvbuf Params.so_sndbuf
       in
       let rcv_wnd = rcvbufsize in
-      (* TODO options: window scaling *)
-      let tf_doing_ws = false in
+      let tf_doing_ws, rcv_scale, snd_scale =
+        match Segment.ws seg with
+        | Some x when x <= Params.tcp_maxwinscale -> true, x, Params.scale
+        | _ -> false, 0, 0
+      in
       let iss = Sequence.of_int32 (Randomconv.int32 t.rng)
       and ack' = Sequence.incr seg.Segment.seq (* ACK the SYN *)
       in
@@ -81,17 +83,15 @@ let handle_noconn t now id seg =
         snd_nxt = Sequence.incr iss ;
         snd_cwnd = snd_cwnd' ;
         t_maxseg = t_maxseg' ;
-        t_advmss = Some advmss ;
+        t_advmss = advmss ;
         tf_doing_ws ;
+        rcv_scale ; snd_scale ;
         last_ack_sent = ack' ;
         t_rttseg }
       in
       conn_state ~rcvbufsize ~sndbufsize Syn_received control_block
     in
-    let reply =
-      Segment.make_syn_ack conn.control_block
-        ~src_port:seg.dst_port ~dst_port:seg.src_port
-    in
+    let reply = Segment.make_syn_ack conn.control_block id in
     Log.debug (fun m -> m "%a passive open %a" Connection.pp id pp_conn_state conn);
     ({ t with connections = CM.add id conn t.connections }, Some reply)
   with
@@ -163,7 +163,7 @@ let di3_ststuff conn rcvd_fin ourfinisacked =
   | Time_wait, _ -> Time_wait
   | _ -> assert false
 
-let deliver_in_3 conn seg =
+let deliver_in_3 id conn seg =
   (* we expect at most FIN PSH ACK - we drop with reset all other combinations *)
   let flags = seg.Segment.flags in
   guard Segment.Flags.(is_empty flags || only `ACK flags || or_ack `FIN flags ||
@@ -181,20 +181,100 @@ let deliver_in_3 conn seg =
   let tcp_state = di3_ststuff conn' fin ourfinisacked in
   { conn' with tcp_state },
   if ack then
-    Some (Segment.make_ack conn'.control_block ~src_port:seg.dst_port ~dst_port:seg.src_port)
+    Some (Segment.make_ack conn'.control_block
+            (match tcp_state with Close_wait -> true | _ -> false) id)
   else
     None
 
-let deliver_in_2 conn seg =
+let deliver_in_2 now id conn seg =
   let cb = conn.control_block in
   guard (Sequence.equal seg.Segment.ack cb.snd_nxt) (`Drop "ack = snd_nxt") >>| fun () ->
-  let control_block = {
-    cb with snd_una = cb.snd_nxt ;
-            rcv_nxt = Sequence.incr seg.Segment.seq ;
-            irs = seg.Segment.seq }
+  let tf_doing_ws, rcv_scale, snd_scale =
+    match Segment.ws seg with
+    | None -> false, 0, 0
+    | Some x -> true, cb.request_r_scale, x
   in
-  { conn with control_block ; tcp_state = Established },
-  Segment.make_ack control_block ~src_port:seg.Segment.dst_port ~dst_port:seg.Segment.src_port
+  let rcvbufsize, sndbufsize, t_maxseg, snd_cwnd =
+    let bw_delay_product_for_rt = None in
+    Subr.calculate_buf_sizes cb.t_advmss (Segment.mss seg) bw_delay_product_for_rt
+      conn.rcvbufsize conn.sndbufsize
+  in
+  let rcv_wnd = Subr.calculate_bsd_rcv_wnd conn in
+
+  let t_softerror, t_rttseg, t_rttinf, tt_rexmt =
+    (*: update RTT estimators from timestamp or roundtrip time :*)
+    let emission_time = match cb.t_rttseg with
+      | Some (ts0, seq0) when Sequence.greater seg.Segment.ack seq0 -> Some ts0
+      | _ -> None
+    in
+    (*: clear soft error, cancel timer, and update estimators if we successfully timed a segment round-trip :*)
+    let t_softerror', t_rttseg', t_rttinf' =
+      match emission_time with
+      | Some ts ->
+        None, None, Subr.update_rtt Mtime.(Span.to_uint64_ns (span now ts)) cb.t_rttinf
+      | _ ->
+        cb.t_softerror, cb.t_rttseg, cb.t_rttinf
+    in
+    (*: mess with retransmit timer if appropriate :*)
+    let tt_rexmt' =
+      if Sequence.equal seg.Segment.ack cb.snd_max then
+        (*: if acked everything, stop :*)
+        None
+        (*: [[needoutput = 1]] -- see below :*)
+      else cb.tt_rexmt
+
+    (*        match cb.tt_rexmt with*)
+(*        | Some (RexmtSyn, _) ->
+          (*: if partial ack, restart from current backoff value,
+              which is always zero because of the above updates to
+              the RTT estimators and shift value. :*)
+          start_tt_rexmtsyn h.arch 0 T t_rttinf' *)
+(*        | None | Some (Rexmt. _) ->
+          (*: ditto :*)
+          start_tt_rexmt h.arch 0 T t_rttinf' *)
+(*         |_ ->  else if emission_time <> NONE then
+               case cb.tt_rexmt of
+                  (*: bizarre but true. |tcp_input.c:1766| says c.f.~Phil Karn's retransmit algorithm :*)
+                  NONE => NONE
+                | SOME (Timed((mode,shift),d)) => SOME (Timed((mode,0),d))
+           else
+               (*: do nothing :*)
+               cb.tt_rexmt *)
+    in
+    t_softerror', t_rttseg', t_rttinf', tt_rexmt'
+  in
+
+  let rcv_nxt = Sequence.incr seg.seq in
+
+  let control_block = {
+    cb with
+    tt_rexmt ;
+    t_idletime = now ;
+    tt_conn_est = None ;
+    tt_delack = None ;
+    snd_una = Sequence.incr cb.iss ;
+    (* snd_nxt / snd_max when fin / closed / cantsndmore *)
+    snd_wl1 = Sequence.incr seg.seq ;
+    snd_wl2 = seg.ack ;
+    (* snd_wnd = win ; *)
+    snd_cwnd ;
+    rcv_scale ;
+    snd_scale ;
+    tf_doing_ws ;
+    irs = seg.seq ;
+    rcv_nxt ;
+    rcv_wnd ;
+    tf_rxwin0sent = (rcv_wnd = 0) ;
+    rcv_adv = Sequence.addi rcv_nxt ((min (rcv_wnd lsr rcv_scale) Params.tcp_maxwin) lsl rcv_scale) ;
+    t_maxseg ;
+    last_ack_sent = rcv_nxt ;
+    t_softerror ;
+    t_rttseg ;
+    t_rttinf ;
+  }
+  in
+  { conn with control_block ; tcp_state = Established ; rcvbufsize ; sndbufsize },
+  Segment.make_ack control_block false id
 
 let deliver_in_2b _conn _seg =
   (* simultaneous open: accept anything, send syn+ack *)
@@ -235,19 +315,19 @@ let deliver_in_3c_3d conn seg =
   (* if not cantsendmore established else if ourfinisacked fin_wait2 else fin_wait_1 *)
   { conn with control_block ; tcp_state = Established }
 
-let deliver_in_7 conn seg =
+let deliver_in_7 id conn seg =
   (* guard rcv_nxt = seg.seq *)
   let cb = conn.control_block in
   if Sequence.equal cb.rcv_nxt seg.Segment.seq then
     (* we rely that dropwithreset does not RST if a RST was received *)
     Error (`Reset "received valid reset")
   else
-    Ok (Segment.make_ack cb ~src_port:seg.dst_port ~dst_port:seg.src_port)
+    Ok (Segment.make_ack cb false id)
 
-let deliver_in_8 conn seg =
-  Ok (Segment.make_ack conn.control_block ~src_port:seg.Segment.dst_port ~dst_port:seg.Segment.src_port)
+let deliver_in_8 id conn _seg =
+  Ok (Segment.make_ack conn.control_block false id)
 
-let handle_conn t _now id conn seg =
+let handle_conn t now id conn seg =
   Log.debug (fun m -> m "%a handle_conn %a@ seg %a" Connection.pp id pp_conn_state conn Segment.pp seg);
   let add conn' =
     Log.debug (fun m -> m "%a now %a" Connection.pp id pp_conn_state conn');
@@ -261,7 +341,7 @@ let handle_conn t _now id conn seg =
       let flags = seg.Segment.flags in
       begin match Segment.Flags.(exact [ `SYN ; `ACK ] flags, only `SYN flags) with
         | true, true -> assert false
-        | true, false -> deliver_in_2 conn seg >>| fun (c', o) -> add c', Some o
+        | true, false -> deliver_in_2 now id conn seg >>| fun (c', o) -> add c', Some o
         | false, true -> deliver_in_2b conn seg >>| fun (c', o) -> add c', Some o
         | false, false -> deliver_in_2a conn seg >>| fun () -> drop (), None
       end
@@ -272,9 +352,9 @@ let handle_conn t _now id conn seg =
       (* RFC 5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
       match Segment.Flags.(or_ack `RST flags, or_ack `SYN flags) with
       | true, true -> assert false
-      | true, false -> deliver_in_7 conn seg >>| fun seg' -> t, Some seg'
-      | false, true -> deliver_in_8 conn seg >>| fun seg' -> t, Some seg'
-      | false, false -> deliver_in_3 conn seg >>| fun (conn', d) -> add conn', d
+      | true, false -> deliver_in_7 id conn seg >>| fun seg' -> t, Some seg'
+      | false, true -> deliver_in_8 id conn seg >>| fun seg' -> t, Some seg'
+      | false, false -> deliver_in_3 id conn seg >>| fun (conn', d) -> add conn', d
   in
   match r with
   | Ok (t, a) -> t, a

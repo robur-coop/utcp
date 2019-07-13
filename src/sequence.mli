@@ -12,6 +12,8 @@ val incr : t -> t
 
 val addi : t -> int -> t
 
+val window : t -> t -> int
+
 val less : t -> t -> bool
 val less_equal : t -> t -> bool
 val greater : t -> t -> bool

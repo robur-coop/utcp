@@ -43,11 +43,9 @@ let jump () =
          s := s' ;
          handle_events ip events),
       (fun () ->
-         match Tcp.User.reset !s conn with
-         | Error (`Msg msg) -> Logs.err (fun m -> m "close failed %s" msg) ; Lwt.return_unit
-         | Ok (s', out) ->
-           s := s' ;
-           handle_events ip [ `Data out ]),
+         match Tcp.User.close !s conn with
+         | Error (`Msg msg) -> Logs.err (fun m -> m "close failed %s" msg)
+         | Ok s' -> s := s'),
       (dst, out)
     in
     let eth_input =
@@ -60,7 +58,7 @@ let jump () =
     Lwt.async (fun () ->
         Lwt_unix.sleep 2. >>= fun () ->
         handle_events ip [ `Data out ] >>= fun () ->
-        Lwt_unix.sleep 1. >>= fun () ->
+        Lwt_unix.sleep 1. >|= fun () ->
         Logs.info (fun m -> m "closing!!");
         clo ());
     Netif.listen tap ~header_size:14 eth_input >|=

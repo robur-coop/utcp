@@ -10,6 +10,8 @@ let incr a = add a 1l
 
 let zero = 0l
 
+let window a b = Int32.to_int (Int32.sub a b)
+
 let addi a i = add a (Int32.of_int i)
 
 let of_int32 a = a

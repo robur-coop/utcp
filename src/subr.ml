@@ -66,3 +66,49 @@ let calculate_buf_sizes (* conn *) cb_t_maxseg seg_mss bw_delay_product_for_rt r
   (* compute initial cwnd *)
   let snd_cwnd = min (4 * t_maxseg'') (max (2 * t_maxseg'') 4380) in
   rcvbufsize'', sndbufsize'', t_maxseg'', snd_cwnd
+
+let calculate_bsd_rcv_wnd conn =
+  max (Sequence.window conn.control_block.rcv_adv conn.control_block.rcv_nxt)
+    (conn.rcvbufsize (* - LENGTH tcp_sock.rcvq *) )
+
+let update_rtt rtt ri =
+  let t_srtt', t_rttvar' =
+    if ri.tf_srtt_valid then
+      let delta     = Int64.(sub (sub rtt (Duration.of_ms 1)) ri.t_srtt) in
+      let vardelta  = Int64.(sub (abs delta) ri.t_rttvar) in
+      let t_srtt'   = max (Duration.of_ms 16) Int64.(add ri.t_srtt (shift_right delta 3))
+      and t_rttvar' = max (Duration.of_ms 32) Int64.(add ri.t_rttvar (shift_right vardelta 2))
+      (* BSD behaviour is never to let these go to zero, but clip at the least
+         positive value.  Since SRTT is measured in 1/32 tick and RTTVAR in
+         1/16 tick, these are the minimum values.  A more natural implementation
+         would clip these to zero. *)
+      in
+      t_srtt', t_rttvar'
+    else
+      let t_srtt' = rtt
+      and t_rttvar' = Int64.shift_right rtt 1
+      in
+      t_srtt', t_rttvar'
+  in
+  { ri with
+    t_rttupdated = ri.t_rttupdated + 1;
+    tf_srtt_valid = true;
+    t_srtt = t_srtt';
+    t_rttvar = t_rttvar';
+    t_lastrtt = Some rtt;
+    t_lastshift = Some 0;
+    t_wassyn = false  (* if t_lastshift=0, this doesn't make a difference *)
+    (* t_softerror, t_rttseg, and t_rxtcur must be handled by the caller *)
+  }
+
+(* auxFns:657 *)
+let computed_rto backoffs shift ri =
+  Int64.(mul backoffs.(shift)
+           (max ri.t_rttmin Int64.(add ri.t_srtt (shift_left ri.t_rttvar 2))))
+
+(* auxFns:663 *)
+let computed_rxtcur ri =
+  max ri.t_rttmin
+    (min Params.tcptv_rexmtmax
+       (computed_rto (if ri.t_wassyn then Params.tcp_syn_backoff else Params.tcp_backoff)
+          (match ri.t_lastshift with None -> 0 | Some x -> x) ri))
