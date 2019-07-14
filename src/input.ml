@@ -43,155 +43,53 @@ let dropwithreset (_, _, dst, _) seg =
   | None -> None
   | Some x -> Some (dst, x)
 
-let handle_noconn t now id seg =
-  match
-    (* TL;DR: if there's a listener, and it is a SYN, we do sth useful. otherwise RST *)
-    guard (IS.mem seg.Segment.dst_port t.listeners) () >>= fun () ->
-    (* deliver_in_1 - passive open *)
-    guard (Segment.Flags.only `SYN seg.Segment.flags) () >>| fun () ->
-    (* segment is acceptable -- checked above *)
-    (* broadcast/multicast already handled by decode_and_validate *)
-    (* best_match also done implicitly -- connection table already dealt with *)
-    (* there can't be anything in TIME_WAIT, otherwise we wouldn't end up here *)
-    (* TODO check RFC 1122 Section 4.2.2.13 whether this actually happens (socket reusage) *)
-    (* TODO resource management: limit number of outstanding connection attempts *)
-    let conn =
-      let advmss = Subr.tcp_mssopt id in
-      let rcvbufsize, sndbufsize, t_maxseg', snd_cwnd' =
-        let bw_delay_product_for_rt = None in
-        Subr.calculate_buf_sizes advmss (Segment.mss seg)
-          bw_delay_product_for_rt Params.so_rcvbuf Params.so_sndbuf
-      in
-      let rcv_wnd = rcvbufsize in
-      let tf_doing_ws, snd_scale =
-        match Segment.ws seg with
-        | Some x when x <= Params.tcp_maxwinscale -> true, x
-        | _ -> false, 0
-      in
-      let request_r_scale, rcv_scale =
-        if tf_doing_ws then Some Params.scale, Params.scale else None, 0
-      in
-      let iss = Sequence.of_int32 (Randomconv.int32 t.rng)
-      and ack' = Sequence.incr seg.Segment.seq (* ACK the SYN *)
-      in
-      let t_rttseg = Some (now, iss) in
-      let control_block = {
-        initial_cb with
-        tt_rexmt = Some (Timers.timer now (Rexmt, 0) Params.tcp_backoff.(0)) ;
-        t_idletime = now ;
-        iss ;
-        irs = seg.Segment.seq ;
-        rcv_wnd = rcvbufsize ;
-        tf_rxwin0sent = (rcv_wnd = 0) ;
-        rcv_adv = Sequence.addi ack' rcv_wnd ;
-        rcv_nxt = ack' ;
-        snd_una = iss ;
-        snd_max = Sequence.incr iss ;
-        snd_nxt = Sequence.incr iss ;
-        snd_cwnd = snd_cwnd' ;
-        t_maxseg = t_maxseg' ;
-        t_advmss = advmss ;
-        tf_doing_ws ; snd_scale ; rcv_scale ;
-        request_r_scale ;
-        last_ack_sent = ack' ;
-        t_rttseg }
-      in
-      conn_state ~rcvbufsize ~sndbufsize Syn_received control_block
+let deliver_in_1 rng now id seg =
+  let conn =
+    let advmss = Subr.tcp_mssopt id in
+    let rcvbufsize, sndbufsize, t_maxseg', snd_cwnd' =
+      let bw_delay_product_for_rt = None in
+      Subr.calculate_buf_sizes advmss (Segment.mss seg)
+        bw_delay_product_for_rt Params.so_rcvbuf Params.so_sndbuf
     in
-    let reply = Segment.make_syn_ack conn.control_block id in
-    Log.debug (fun m -> m "%a passive open %a" Connection.pp id pp_conn_state conn);
-    ({ t with connections = CM.add id conn t.connections }, Some reply)
-  with
-  | Ok (t, reply) -> t, reply
-  | Error () ->
-    (* deliver_in_1b - we do less checks and potentially send more resets *)
-    (* deliver_in_5 / deliver_in_6 *)
-    t, dropwithreset id seg
-
-let in_window cb seg =
-  (* from table in 793bis13 3.3 *)
-  let seq = seg.Segment.seq
-  and max = Sequence.addi cb.rcv_nxt cb.rcv_wnd
+    let rcv_wnd = rcvbufsize in
+    let tf_doing_ws, snd_scale =
+      match Segment.ws seg with
+      | Some x when x <= Params.tcp_maxwinscale -> true, x
+      | _ -> false, 0
+    in
+    let request_r_scale, rcv_scale =
+      if tf_doing_ws then Some Params.scale, Params.scale else None, 0
+    in
+    let iss = Sequence.of_int32 (Randomconv.int32 rng)
+    and ack' = Sequence.incr seg.Segment.seq (* ACK the SYN *)
+    in
+    let t_rttseg = Some (now, iss) in
+    let control_block = {
+      initial_cb with
+      tt_rexmt = Some (Timers.timer now (Rexmt, 0) Params.tcp_backoff.(0)) ;
+      t_idletime = now ;
+      iss ;
+      irs = seg.Segment.seq ;
+      rcv_wnd = rcvbufsize ;
+      tf_rxwin0sent = (rcv_wnd = 0) ;
+      rcv_adv = Sequence.addi ack' rcv_wnd ;
+      rcv_nxt = ack' ;
+      snd_una = iss ;
+      snd_max = Sequence.incr iss ;
+      snd_nxt = Sequence.incr iss ;
+      snd_cwnd = snd_cwnd' ;
+      t_maxseg = t_maxseg' ;
+      t_advmss = advmss ;
+      tf_doing_ws ; snd_scale ; rcv_scale ;
+      request_r_scale ;
+      last_ack_sent = ack' ;
+      t_rttseg }
+    in
+    conn_state ~rcvbufsize ~sndbufsize Syn_received control_block
   in
-  match Cstruct.len seg.Segment.payload, cb.rcv_wnd with
-  | 0, 0 -> Sequence.equal seq cb.rcv_nxt
-  | 0, _ -> Sequence.less_equal cb.rcv_nxt seq && Sequence.less seq max
-  | _, 0 -> false
-  | dl, _ ->
-    (*assert dl > 0*)
-    let rseq = Sequence.addi seq (pred dl) in
-    (Sequence.less_equal cb.rcv_nxt seq && Sequence.less seq max) ||
-    (Sequence.less_equal cb.rcv_nxt rseq && Sequence.less rseq max)
-
-let di3_topstuff cb seg =
-  Ok (cb, cb.rcv_wnd = 0 && seg.Segment.window > 0)
-
-let di3_ackstuff cb seg =
-  let snd_una, fin_acked =
-    if Segment.Flags.mem `ACK seg.Segment.flags then
-      Sequence.max cb.snd_una seg.Segment.ack,
-      Sequence.equal seg.Segment.ack (Sequence.incr cb.snd_nxt)
-    else
-      cb.snd_una, false
-  in
-  Ok ({ cb with snd_una }, fin_acked)
-
-let di3_datastuff cb seg =
-  let rcv_wnd = seg.Segment.window (* really always? *)
-  and rcv_nxt, fin =
-    if Sequence.equal seg.Segment.seq cb.rcv_nxt then begin
-      if Cstruct.len seg.Segment.payload > 0 then
-        Log.info (fun m -> m "received data: %a" Cstruct.hexdump_pp seg.Segment.payload);
-      let is_fin = Segment.Flags.mem `FIN seg.Segment.flags in
-      if is_fin then Log.info (fun m -> m "received fin");
-      let nxt = Sequence.addi seg.Segment.seq (Cstruct.len seg.Segment.payload) in
-      (if is_fin then Sequence.incr nxt else nxt), is_fin
-    end else (* push segment to reassembly queue *)
-      cb.rcv_nxt, false
-  in
-  (* may reassemble! *)
-  Ok ({ cb with rcv_wnd ; rcv_nxt }, Sequence.greater rcv_nxt cb.rcv_nxt, fin)
-
-let di3_ststuff conn rcvd_fin ourfinisacked =
-  match conn.tcp_state, rcvd_fin with
-  | Established, false -> Established
-  | Established, true -> Close_wait
-  | Close_wait, _ -> Close_wait
-  | Fin_wait_1, false when ourfinisacked -> Fin_wait_2
-  | Fin_wait_1, false -> Fin_wait_1
-  | Fin_wait_1, true when ourfinisacked -> Time_wait
-  | Fin_wait_1, true -> Closing
-  | Fin_wait_2, false -> Fin_wait_2
-  | Fin_wait_2, true -> Time_wait
-  | Closing, _ when ourfinisacked -> Time_wait
-  | Closing, _ -> Closing
-  | Last_ack, false -> Last_ack
-  | Last_ack, true -> assert false
-  | Time_wait, _ -> Time_wait
-  | _ -> assert false
-
-let deliver_in_3 id conn seg =
-  (* we expect at most FIN PSH ACK - we drop with reset all other combinations *)
-  let flags = seg.Segment.flags in
-  guard Segment.Flags.(is_empty flags || only `ACK flags || or_ack `FIN flags ||
-                       or_ack `PSH flags || exact [ `FIN ; `PSH ] flags ||
-                       exact [ `FIN ; `PSH ; `ACK  ] flags)
-    (`Reset "flags empty | ACK | or_ack FIN | or_ack PSH | FIN PSH | FIN PSH ACK") >>= fun () ->
-  (* PAWS, timers, rcv_wnd may have opened! *)
-  di3_topstuff conn.control_block seg >>= fun (cb', _wnd) ->
-  (* ACK processing *)
-  di3_ackstuff cb' seg >>= fun (cb'', ourfinisacked) ->
-  (* may have some fresh data to report which needs to be acked *)
-  di3_datastuff cb'' seg >>| fun (cb''', ack, fin) ->
-  (* state and FIN processing *)
-  let conn' = { conn with control_block = cb''' ; cantrcvmore = conn.cantrcvmore || fin } in
-  let tcp_state = di3_ststuff conn' fin ourfinisacked in
-  { conn' with tcp_state },
-  if ack then
-    Some (Segment.make_ack conn'.control_block
-            (match tcp_state with Close_wait -> true | _ -> false) id)
-  else
-    None
+  let reply = Segment.make_syn_ack conn.control_block id in
+  Log.debug (fun m -> m "%a passive open %a" Connection.pp id pp_conn_state conn);
+  conn, reply
 
 let deliver_in_2 now id conn seg =
   let cb = conn.control_block in
@@ -201,8 +99,9 @@ let deliver_in_2 now id conn seg =
     | None, _ -> false, 0, 0
     | Some x, Some y -> true, x, y
     | Some x, None ->
-      (* may our 3rd time retransmitted SYN hits them, and we don't know what they syn+acked *)
-      true, x, Params.scale (* TODO breaks once configurable.. *)
+      (* may our 3rd time retransmitted SYN hits them, and we don't know what
+         we sent (use Params.scale for now) *)
+      true, x, Params.scale
   in
   let rcvbufsize, sndbufsize, t_maxseg, snd_cwnd =
     let bw_delay_product_for_rt = None in
@@ -324,6 +223,91 @@ let deliver_in_3c_3d conn seg =
   (* if not cantsendmore established else if ourfinisacked fin_wait2 else fin_wait_1 *)
   { conn with control_block ; tcp_state = Established }
 
+let in_window cb seg =
+  (* from table in 793bis13 3.3 *)
+  let seq = seg.Segment.seq
+  and max = Sequence.addi cb.rcv_nxt cb.rcv_wnd
+  in
+  match Cstruct.len seg.Segment.payload, cb.rcv_wnd with
+  | 0, 0 -> Sequence.equal seq cb.rcv_nxt
+  | 0, _ -> Sequence.less_equal cb.rcv_nxt seq && Sequence.less seq max
+  | _, 0 -> false
+  | dl, _ ->
+    (*assert dl > 0*)
+    let rseq = Sequence.addi seq (pred dl) in
+    (Sequence.less_equal cb.rcv_nxt seq && Sequence.less seq max) ||
+    (Sequence.less_equal cb.rcv_nxt rseq && Sequence.less rseq max)
+
+let di3_topstuff cb seg =
+  Ok (cb, cb.rcv_wnd = 0 && seg.Segment.window > 0)
+
+let di3_ackstuff cb seg =
+  let snd_una, fin_acked =
+    if Segment.Flags.mem `ACK seg.Segment.flags then
+      Sequence.max cb.snd_una seg.Segment.ack,
+      Sequence.equal seg.Segment.ack (Sequence.incr cb.snd_nxt)
+    else
+      cb.snd_una, false
+  in
+  Ok ({ cb with snd_una }, fin_acked)
+
+let di3_datastuff cb seg =
+  let rcv_wnd = seg.Segment.window (* really always? *)
+  and rcv_nxt, fin =
+    if Sequence.equal seg.Segment.seq cb.rcv_nxt then begin
+      if Cstruct.len seg.Segment.payload > 0 then
+        Log.info (fun m -> m "received data: %a" Cstruct.hexdump_pp seg.Segment.payload);
+      let is_fin = Segment.Flags.mem `FIN seg.Segment.flags in
+      if is_fin then Log.info (fun m -> m "received fin");
+      let nxt = Sequence.addi seg.Segment.seq (Cstruct.len seg.Segment.payload) in
+      (if is_fin then Sequence.incr nxt else nxt), is_fin
+    end else (* push segment to reassembly queue *)
+      cb.rcv_nxt, false
+  in
+  (* may reassemble! *)
+  Ok ({ cb with rcv_wnd ; rcv_nxt }, Sequence.greater rcv_nxt cb.rcv_nxt, fin)
+
+let di3_ststuff conn rcvd_fin ourfinisacked =
+  match conn.tcp_state, rcvd_fin with
+  | Established, false -> Established
+  | Established, true -> Close_wait
+  | Close_wait, _ -> Close_wait
+  | Fin_wait_1, false when ourfinisacked -> Fin_wait_2
+  | Fin_wait_1, false -> Fin_wait_1
+  | Fin_wait_1, true when ourfinisacked -> Time_wait
+  | Fin_wait_1, true -> Closing
+  | Fin_wait_2, false -> Fin_wait_2
+  | Fin_wait_2, true -> Time_wait
+  | Closing, _ when ourfinisacked -> Time_wait
+  | Closing, _ -> Closing
+  | Last_ack, false -> Last_ack
+  | Last_ack, true -> assert false
+  | Time_wait, _ -> Time_wait
+  | _ -> assert false
+
+let deliver_in_3 id conn seg =
+  (* we expect at most FIN PSH ACK - we drop with reset all other combinations *)
+  let flags = seg.Segment.flags in
+  guard Segment.Flags.(is_empty flags || only `ACK flags || or_ack `FIN flags ||
+                       or_ack `PSH flags || exact [ `FIN ; `PSH ] flags ||
+                       exact [ `FIN ; `PSH ; `ACK  ] flags)
+    (`Reset "flags empty | ACK | or_ack FIN | or_ack PSH | FIN PSH | FIN PSH ACK") >>= fun () ->
+  (* PAWS, timers, rcv_wnd may have opened! *)
+  di3_topstuff conn.control_block seg >>= fun (cb', _wnd) ->
+  (* ACK processing *)
+  di3_ackstuff cb' seg >>= fun (cb'', ourfinisacked) ->
+  (* may have some fresh data to report which needs to be acked *)
+  di3_datastuff cb'' seg >>| fun (cb''', ack, fin) ->
+  (* state and FIN processing *)
+  let conn' = { conn with control_block = cb''' ; cantrcvmore = conn.cantrcvmore || fin } in
+  let tcp_state = di3_ststuff conn' fin ourfinisacked in
+  { conn' with tcp_state },
+  if ack then
+    Some (Segment.make_ack conn'.control_block
+            (match tcp_state with Close_wait -> true | _ -> false) id)
+  else
+    None
+
 let deliver_in_7 id conn seg =
   (* guard rcv_nxt = seg.seq *)
   let cb = conn.control_block in
@@ -335,6 +319,27 @@ let deliver_in_7 id conn seg =
 
 let deliver_in_8 id conn _seg =
   Ok (Segment.make_ack conn.control_block false id)
+
+let handle_noconn t now id seg =
+  match
+    (* TL;DR: if there's a listener, and it is a SYN, we do sth useful. otherwise RST *)
+    IS.mem seg.Segment.dst_port t.listeners, Segment.Flags.only `SYN seg.Segment.flags
+    (* deliver_in_1 - passive open *)
+  with
+  | true, true ->
+    (* there can't be anything in TIME_WAIT, otherwise we wouldn't end up here *)
+    (* TODO check RFC 1122 Section 4.2.2.13 whether this actually happens (socket reusage) *)
+    (* TODO resource management: limit number of outstanding connection attempts *)
+    let conn, reply = deliver_in_1 t.rng now id seg in
+    { t with connections = CM.add id conn t.connections }, Some reply
+  | listen, syn ->
+    if not listen then
+      Logs.warn (fun m -> m "dropping segment (no listener) %a" Segment.pp seg);
+    if not syn then
+      Logs.warn (fun m -> m "dropping segment (not only SYN) %a" Segment.pp seg);
+    (* deliver_in_1b - we do less checks and potentially send more resets *)
+    (* deliver_in_5 / deliver_in_6 *)
+    t, dropwithreset id seg
 
 let handle_conn t now id conn seg =
   Log.debug (fun m -> m "%a handle_conn %a@ seg %a" Connection.pp id pp_conn_state conn Segment.pp seg);
