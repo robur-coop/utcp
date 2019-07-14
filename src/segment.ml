@@ -156,10 +156,10 @@ let count_flags flags =
   (if Flags.mem `FIN flags then 1 else 0) + (if Flags.mem `SYN flags then 1 else 0)
 
 (* auxFns:1520 *)
-let make_rst_from_cb cb (_, src_port, _, dst_port) =
-  { src_port ; dst_port ; seq = cb.State.snd_nxt ; ack = cb.rcv_nxt ;
-    flags = Flags.(add `ACK (singleton `RST)) ;
-    window = 0 ; options = [] ; payload = Cstruct.empty }
+let make_rst_from_cb cb (_, src_port, dst, dst_port) =
+  dst, { src_port ; dst_port ; seq = cb.State.snd_nxt ; ack = cb.rcv_nxt ;
+         flags = Flags.(add `ACK (singleton `RST)) ;
+         window = 0 ; options = [] ; payload = Cstruct.empty }
 
 (* auxFns:2219 *)
 let dropwithreset seg =
@@ -438,35 +438,35 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
     { conn with tcp_state ; control_block }, (dst, seg)
 
 (* auxFns:1384 *)
-let make_syn_ack cb (_, src_port, _, dst_port) =
+let make_syn_ack cb (_, src_port, dst, dst_port) =
   let options =
     MaximumSegmentSize cb.State.t_advmss ::
     (match cb.request_r_scale with None -> [] | Some sc -> [ WindowScale sc ])
   in
-  { src_port ; dst_port ; seq = cb.iss ; ack = cb.rcv_nxt ;
-    flags = Flags.of_list [ `SYN ; `ACK ] ;
-    window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
+  dst, { src_port ; dst_port ; seq = cb.iss ; ack = cb.rcv_nxt ;
+         flags = Flags.of_list [ `SYN ; `ACK ] ;
+         window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
 
 (* auxFns:1333 *)
-let make_syn cb (_, src_port, _, dst_port) =
+let make_syn cb (_, src_port, dst, dst_port) =
   let options =
     MaximumSegmentSize cb.State.t_advmss ::
     (match cb.request_r_scale with None -> [] | Some sc -> [ WindowScale sc ])
   in
-  { src_port ; dst_port ; seq = cb.State.iss ; ack = Sequence.zero ;
-    flags = Flags.singleton`SYN ;
-    window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
+  dst, { src_port ; dst_port ; seq = cb.State.iss ; ack = Sequence.zero ;
+         flags = Flags.singleton`SYN ;
+         window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
 
 (* auxFns:1437 *)
-let make_ack cb fin (_, src_port, _, dst_port) =
+let make_ack cb fin (_, src_port, dst, dst_port) =
   (* no need to clip, Segment does this for us *)
   let window = cb.State.rcv_wnd lsr cb.rcv_scale in
   (* sack *)
-  { src_port ; dst_port ;
-    seq = if fin then cb.snd_una else cb.snd_nxt ;
-    ack = cb.rcv_nxt ;
-    flags = Flags.add `ACK (if fin then Flags.singleton `FIN else Flags.empty) ;
-    window ; options = [] ; payload = Cstruct.empty }
+  dst, { src_port ; dst_port ;
+         seq = if fin then cb.snd_una else cb.snd_nxt ;
+         ack = cb.rcv_nxt ;
+         flags = Flags.add `ACK (if fin then Flags.singleton `FIN else Flags.empty) ;
+         window ; options = [] ; payload = Cstruct.empty }
 
 let checksum ~src ~dst buf =
   let plen = Cstruct.len buf in

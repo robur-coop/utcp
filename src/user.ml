@@ -36,7 +36,7 @@ let connect t now ?src_port dst dst_port =
     } in
     conn_state ~rcvbufsize:rcv_wnd ~sndbufsize:Params.so_sndbuf Syn_sent control_block
   in
-  let seg = Segment.make_syn conn.control_block id in
+  let _, seg = Segment.make_syn conn.control_block id in
   let data = Segment.encode_and_checksum ~src:t.ip ~dst seg in
   let connections =
     Log.debug (fun m -> m "%a active open %a" Connection.pp id pp_conn_state conn);

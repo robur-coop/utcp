@@ -38,6 +38,10 @@ deliver_in_8 - recv SYN in yy - handle_conn
 deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - not handled
 ??deliver_in_10 - stupid flag combinations are dropped (without reset)
 *)
+let dropwithreset (_, _, dst, _) seg =
+  match Segment.dropwithreset seg with
+  | None -> None
+  | Some x -> Some (dst, x)
 
 let handle_noconn t now id seg =
   match
@@ -102,7 +106,7 @@ let handle_noconn t now id seg =
   | Error () ->
     (* deliver_in_1b - we do less checks and potentially send more resets *)
     (* deliver_in_5 / deliver_in_6 *)
-    t, Segment.dropwithreset seg
+    t, dropwithreset id seg
 
 let in_window cb seg =
   (* from table in 793bis13 3.3 *)
@@ -368,7 +372,7 @@ let handle_conn t now id conn seg =
     t, None
   | Error (`Reset msg) ->
     Log.err (fun m -> m "reset in %a %s" pp_fsm conn.tcp_state msg);
-    drop (), Segment.dropwithreset seg
+    drop (), dropwithreset id seg
 
 let handle t now ~src ~dst data =
   match Segment.decode_and_validate ~src ~dst data with
@@ -385,8 +389,9 @@ let handle t now ~src ~dst data =
     in
     t', match out with
     | None -> Log.info (fun m -> m "no answer"); []
-    | Some d ->
+    | Some (dst', d) ->
       Log.info (fun m -> m "answer %a" Segment.pp d);
+      if Ipaddr.V4.compare dst' src <> 0 then Log.err (fun m -> m "bad IP %a vs %a" Ipaddr.V4.pp dst' Ipaddr.V4.pp src);
       [ `Data (src, Segment.encode_and_checksum ~src:dst ~dst:src d) ]
 
 (* - timer : t -> t * Cstruct.t list * [ `Timeout of connection | `Error of connection ]
