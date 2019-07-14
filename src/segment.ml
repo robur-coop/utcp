@@ -155,6 +155,13 @@ let pp ppf t =
 let count_flags flags =
   (if Flags.mem `FIN flags then 1 else 0) + (if Flags.mem `SYN flags then 1 else 0)
 
+(* auxFns:1520 *)
+let make_rst_from_cb cb (_, src_port, _, dst_port) =
+  { src_port ; dst_port ; seq = cb.State.snd_nxt ; ack = cb.rcv_nxt ;
+    flags = Flags.(add `ACK (singleton `RST)) ;
+    window = 0 ; options = [] ; payload = Cstruct.empty }
+
+(* auxFns:2219 *)
 let dropwithreset seg =
   if Flags.mem `RST seg.flags then
     None
@@ -176,6 +183,13 @@ let dropwithreset seg =
            seq ; ack ;
            flags = Flags.add `RST flags ;
            window = 0 ; options = [] ; payload = Cstruct.empty }
+
+(* auxFns:2331 *)
+let drop_and_close id conn =
+  match conn.State.tcp_state with
+  | Syn_sent -> None
+  | _ -> Some (make_rst_from_cb conn.control_block id)
+ (* timed out and error handling (if err = timedout then cb.t_softerror ) *)
 
 (* auxFns:1625 *)
 let tcp_do_output now conn =
@@ -427,7 +441,7 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
 let make_syn_ack cb (_, src_port, _, dst_port) =
   let options =
     MaximumSegmentSize cb.State.t_advmss ::
-    (if cb.tf_doing_ws then [ WindowScale cb.request_r_scale ] else [])
+    (match cb.request_r_scale with None -> [] | Some sc -> [ WindowScale sc ])
   in
   { src_port ; dst_port ; seq = cb.iss ; ack = cb.rcv_nxt ;
     flags = Flags.of_list [ `SYN ; `ACK ] ;
@@ -436,8 +450,8 @@ let make_syn_ack cb (_, src_port, _, dst_port) =
 (* auxFns:1333 *)
 let make_syn cb (_, src_port, _, dst_port) =
   let options =
-    [ MaximumSegmentSize cb.State.t_advmss ;
-      WindowScale cb.request_r_scale ]
+    MaximumSegmentSize cb.State.t_advmss ::
+    (match cb.request_r_scale with None -> [] | Some sc -> [ WindowScale sc ])
   in
   { src_port ; dst_port ; seq = cb.State.iss ; ack = Sequence.zero ;
     flags = Flags.singleton`SYN ;

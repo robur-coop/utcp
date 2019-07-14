@@ -20,7 +20,8 @@ let tcp_maxseg conn =
   let optlen = match conn.tcp_state with
     | Syn_received | Syn_sent ->
       let maxseg_length = 4
-      and window_sc_length = 3 + 1
+      and window_sc_length =
+        match conn.control_block.request_r_scale with None -> 0 | Some _ -> 3 + 1
       in
       maxseg_length + window_sc_length
       (* if (tp->t_flags & TF_SACK_PERMIT)

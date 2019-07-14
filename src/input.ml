@@ -64,7 +64,9 @@ let handle_noconn t now id seg =
         | Some x when x <= Params.tcp_maxwinscale -> true, x
         | _ -> false, 0
       in
-      let request_r_scale, rcv_scale = if tf_doing_ws then Params.scale, Params.scale else 0, 0 in
+      let request_r_scale, rcv_scale =
+        if tf_doing_ws then Some Params.scale, Params.scale else None, 0
+      in
       let iss = Sequence.of_int32 (Randomconv.int32 t.rng)
       and ack' = Sequence.incr seg.Segment.seq (* ACK the SYN *)
       in
@@ -190,10 +192,13 @@ let deliver_in_3 id conn seg =
 let deliver_in_2 now id conn seg =
   let cb = conn.control_block in
   guard (Sequence.equal seg.Segment.ack cb.snd_nxt) (`Drop "ack = snd_nxt") >>| fun () ->
-  let tf_doing_ws, rcv_scale, snd_scale =
-    match Segment.ws seg with
-    | None -> false, 0, 0
-    | Some x -> true, cb.request_r_scale, x
+  let tf_doing_ws, snd_scale, rcv_scale =
+    match Segment.ws seg, cb.request_r_scale with
+    | None, _ -> false, 0, 0
+    | Some x, Some y -> true, x, y
+    | Some x, None ->
+      (* may our 3rd time retransmitted SYN hits them, and we don't know what they syn+acked *)
+      true, x, Params.scale (* TODO breaks once configurable.. *)
   in
   let rcvbufsize, sndbufsize, t_maxseg, snd_cwnd =
     let bw_delay_product_for_rt = None in

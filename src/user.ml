@@ -28,7 +28,7 @@ let connect t now ?src_port dst dst_port =
       snd_max = Sequence.incr iss ;
       iss ;
       rcv_wnd ;
-      request_r_scale = Params.scale ;
+      request_r_scale = Some Params.scale ;
       rcv_adv = Sequence.of_int32 (Int32.of_int rcv_wnd) ; (* rcv_nxt is 0 anyways, this is void *)
       tf_rxwin0sent = (rcv_wnd = 0);
       t_advmss = advmss ;

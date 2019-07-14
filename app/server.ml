@@ -39,6 +39,11 @@ let jump () =
         s'
       in
       let s = ref init in
+      let _ = Lwt_engine.on_timer 0.1 true (fun _ ->
+          let s', outs = Tcp.Tcptimer.timer !s (Mtime_clock.now ()) in
+          s := s' ;
+          Lwt.async (fun () -> handle_events ip (List.map (fun (dst, pkt) -> `Data (dst, pkt)) outs)))
+      in
       (fun ~src ~dst payload ->
          let s', events = Tcp.Input.handle !s (Mtime_clock.now ()) ~src ~dst payload in
          s := s' ;
