@@ -58,6 +58,8 @@ type rttinf = {
 (* hostTypes:230 but dropped urg and ts stuff *)
 type control_block = {
   (*: timers :*)
+  (* TODO pretty sure we can consolidate them to one or two fields *)
+  (* additionally, not all are allowed in all tcp states *)
   tt_rexmt : (rexmtmode * int) Timers.timed option; (*: retransmit timer, with mode and shift; [[NONE]] is idle :*)
     (*: see |tcp_output.c:356ff| for more info. :*)
     (*: as in BSD, the shift starts at zero, and is incremented each
