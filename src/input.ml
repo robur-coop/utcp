@@ -210,8 +210,7 @@ let deliver_in_2 now id conn seg =
     (*: clear soft error, cancel timer, and update estimators if we successfully timed a segment round-trip :*)
     let t_softerror', t_rttseg', t_rttinf' =
       match emission_time with
-      | Some ts ->
-        None, None, Subr.update_rtt Mtime.(Span.to_uint64_ns (span now ts)) cb.t_rttinf
+      | Some ts -> None, None, Subr.update_rtt (Mtime.span now ts) cb.t_rttinf
       | _ ->
         cb.t_softerror, cb.t_rttseg, cb.t_rttinf
     in

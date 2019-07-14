@@ -167,8 +167,7 @@ let initial_cb =
     t_softerror = None;
     snd_scale = 0;
     rcv_scale = 0;
-    request_r_scale = 0; (* this like many other things is overwritten with
-                            the chosen value later - cf tcp_newtcpcb() *)
+    request_r_scale = Params.scale;
     tf_doing_ws = false;
     last_ack_sent = Sequence.zero;
     snd_cwnd_prev = 0;

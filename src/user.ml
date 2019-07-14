@@ -18,7 +18,6 @@ let connect t now ?src_port dst dst_port =
     let iss = Sequence.of_int32 (Randomconv.int32 t.rng) in
     let rcv_wnd = Params.so_rcvbuf in
     let advmss = Subr.tcp_mssopt id in
-    let request_r_scale = Params.scale in
     let t_rttseg = Some (now, iss) in
     let control_block = {
       initial_cb with
@@ -32,7 +31,6 @@ let connect t now ?src_port dst dst_port =
       rcv_adv = Sequence.of_int32 (Int32.of_int rcv_wnd) ; (* rcv_nxt is 0 anyways, this is void *)
       tf_rxwin0sent = (rcv_wnd = 0);
       t_advmss = advmss ;
-      request_r_scale ;
       t_rttseg
     } in
     conn_state ~rcvbufsize:rcv_wnd ~sndbufsize:Params.so_sndbuf Syn_sent control_block
@@ -57,35 +55,18 @@ let close t id =
   | Some conn ->
     guard (behind_established conn.tcp_state) (`Msg "not yet established") >>| fun () ->
     let control_block = { conn.control_block with tf_shouldacknow = true } in
-    let conn' = { conn with control_block ; cantsndmore = true ; cantrcvmore = true } in
+    let conn' = { conn with control_block ; cantsndmore = true ; cantrcvmore = true ; rcvq = Cstruct.empty } in
     { t with connections = CM.add id conn' t.connections }
-
-let send_space t id =
-  match CM.find_opt id t.connections with
-  | None -> 0
-  | Some conn ->
-    if behind_established conn.tcp_state && not conn.cantsndmore then
-      conn.sndbufsize - Cstruct.len conn.sndq
-    else
-      0
 
 let send t id buf =
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->
     guard (behind_established conn.tcp_state) (`Msg "not yet established") >>= fun () ->
-    guard (not conn.cantsndmore) (`Msg "cant write") >>= fun () ->
-    guard (conn.sndbufsize - Cstruct.len conn.sndq > 0)
-      (`Msg "send queue full") >>| fun () ->
-    let sndq, written =
-      let left = conn.sndbufsize - Cstruct.len conn.sndq in
-      if left >= Cstruct.len buf then
-        Cstruct.append conn.sndq buf, Cstruct.len buf
-      else
-        Cstruct.append conn.sndq (Cstruct.sub buf 0 left), left
-    in
+    guard (not conn.cantsndmore) (`Msg "cant write") >>| fun () ->
+    let sndq = Cstruct.append conn.sndq buf in
     let conn' = { conn with sndq } in
-    { t with connections = CM.add id conn' t.connections }, written
+    { t with connections = CM.add id conn' t.connections }
 
 let recv t id =
   match CM.find_opt id t.connections with

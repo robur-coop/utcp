@@ -4,9 +4,9 @@ open State
 (* tcp_input.c:3736 *)
 let tcp_mssopt _conn =
   let mss = Params.mssdflt
-  and maxmtu = (* tcp_maxmtu - lookup the routing entry of this connection *) 0
+  and maxmtu = 1500 (* tcp_maxmtu - lookup the routing entry of this connection *)
   and min_protoh = 40
-  and thcmtu = (* tcp_hc_getmtu (from hostcache) *) 0
+  and thcmtu = 0 (* tcp_hc_getmtu (from hostcache) *)
   in
   if maxmtu > 0 && thcmtu > 0 then
     (min maxmtu thcmtu) - min_protoh
@@ -52,8 +52,7 @@ let calculate_buf_sizes (* conn *) cb_t_maxseg seg_mss bw_delay_product_for_rt r
     if rcvbufsize' < t_maxseg' then
       rcvbufsize', rcvbufsize'
     else
-      min Params.sb_max (roundup t_maxseg' rcvbufsize'),
-      t_maxseg'
+      min Params.sb_max (roundup t_maxseg' rcvbufsize'), t_maxseg'
   in
   (* buffootle: snd *)
   let sndbufsize' = match bw_delay_product_for_rt with None -> sndbufsize | Some x -> x in
@@ -69,9 +68,10 @@ let calculate_buf_sizes (* conn *) cb_t_maxseg seg_mss bw_delay_product_for_rt r
 
 let calculate_bsd_rcv_wnd conn =
   max (Sequence.window conn.control_block.rcv_adv conn.control_block.rcv_nxt)
-    (conn.rcvbufsize (* - LENGTH tcp_sock.rcvq *) )
+    (conn.rcvbufsize - Cstruct.len conn.rcvq)
 
 let update_rtt rtt ri =
+  let rtt = Mtime.Span.to_uint64_ns rtt in
   let t_srtt', t_rttvar' =
     if ri.tf_srtt_valid then
       let delta     = Int64.(sub (sub rtt (Duration.of_ms 1)) ri.t_srtt) in
@@ -110,5 +110,6 @@ let computed_rto backoffs shift ri =
 let computed_rxtcur ri =
   max ri.t_rttmin
     (min Params.tcptv_rexmtmax
-       (computed_rto (if ri.t_wassyn then Params.tcp_syn_backoff else Params.tcp_backoff)
+       (computed_rto
+          (if ri.t_wassyn then Params.tcp_syn_backoff else Params.tcp_backoff)
           (match ri.t_lastshift with None -> 0 | Some x -> x) ri))
