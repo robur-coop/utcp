@@ -98,6 +98,14 @@ type control_block = {
   (* we also don't need that many options: we will do window scaling and MSS! *)
   t_maxseg : int ; (*: maximum segment size on this connection :*)
   t_advmss : int ; (*: the mss advertisment sent in our initial SYN :*)
+
+  (* currently: false, 0, 0, 0 in initial_cb;
+     deliver_in_1 sets tf_doing_ws, request_r_scale, snd_scale, rcv_scale
+     connect_1 sets request_r_scale
+     Segment.make_syn/make_syn_ack use request_r_scale! (make_syn unconditionally, make_syn_ack if tf_doing_ws)
+     deliver_in_2 sets tf_doing_ws, snd_scale, rcv_scale
+     --> only once we're in established, the values should be used! (retransmissions handle this?)
+ *)
   tf_doing_ws : bool ; (*: doing window scaling on this connection?  (result of negotiation) :*)
   request_r_scale : int ; (*: pending window scaling, if any (used during negotiation) :*)
   snd_scale : int ; (*: window scaling for send window (0..14), applied to received advertisements (RFC1323) :*)
@@ -167,7 +175,7 @@ let initial_cb =
     t_softerror = None;
     snd_scale = 0;
     rcv_scale = 0;
-    request_r_scale = Params.scale;
+    request_r_scale = 0;
     tf_doing_ws = false;
     last_ack_sent = Sequence.zero;
     snd_cwnd_prev = 0;
@@ -176,13 +184,34 @@ let initial_cb =
   }
 
 let pp_control ppf c =
-  Fmt.pf ppf "snd_una %a snd_nxt %a \
-              snd_wl1 %a snd_wl2 %a iss %a@. \
-              rcv_wnd %d rcv_nxt %a irs %a"
-    Sequence.pp c.snd_una Sequence.pp c.snd_nxt
-    Sequence.pp c.snd_wl1 Sequence.pp c.snd_wl2
-    Sequence.pp c.iss
-    c.rcv_wnd Sequence.pp c.rcv_nxt Sequence.pp c.irs
+  Fmt.pf ppf "needfin %B@ shouldacknow %B@ snd_una %a@ snd_max %a@ snd_nxt %a@ snd_wl1 %a@ snd_wl2 %a@ iss %a@ \
+              snd_wnd %d@ snd_cwnd %d@ snd_sshtresh %d@ \
+              rcv_wnd %d@ tf_rxwin0sent %B@ rcv_nxt %a@ irs %a@ src_adv %a@ \
+              snd_recover %a@ t_maxseg %d@ t_advmss %d@ snd_scale %d@ rcv_scale %d@ request_r_scale %d@ tf_doing_ws %B"
+    c.tf_needfin c.tf_shouldacknow
+    Sequence.pp c.snd_una Sequence.pp c.snd_max Sequence.pp c.snd_nxt
+    Sequence.pp c.snd_wl1 Sequence.pp c.snd_wl2 Sequence.pp c.iss
+    c.snd_wnd c.snd_cwnd c.snd_ssthresh c.rcv_wnd c.tf_rxwin0sent
+    Sequence.pp c.rcv_nxt Sequence.pp c.irs Sequence.pp c.rcv_adv
+    Sequence.pp c.snd_recover c.t_maxseg c.t_advmss
+    c.snd_scale c.rcv_scale c.request_r_scale c.tf_doing_ws
+(*
+    tt_rexmt = None;
+    (* tt_keep = None; *)
+    tt_2msl = None;
+    tt_delack = None;
+    tt_conn_est = None;
+    tt_fin_wait_2 = None;
+    t_rttseg = None;
+    t_rttinf = initial_rttinf ;
+    t_dupacks = 0;
+    t_idletime = Mtime.of_uint64_ns 0L;
+    t_softerror = None;
+    snd_cwnd_prev = 0;
+    snd_ssthresh_prev = 0;
+    t_badrxtwin = Mtime.of_uint64_ns 0L;
+    last_ack_sent = Sequence.zero;
+  *)
 
 let compare_int (a : int) (b : int) = compare a b
 
@@ -217,8 +246,6 @@ type conn_state = {
   sndq : Cstruct.t ;
   rcvq : Cstruct.t ;
   (* reassembly : Cstruct.t list ; (* TODO nicer data structure! *) *)
-  (* read_queue : Cstruct.t list ;
-   * write_queue : Cstruct.t list ; *)
 }
 
 let conn_state ~rcvbufsize ~sndbufsize tcp_state control_block = {

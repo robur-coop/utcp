@@ -59,11 +59,12 @@ let handle_noconn t now id seg =
           bw_delay_product_for_rt Params.so_rcvbuf Params.so_sndbuf
       in
       let rcv_wnd = rcvbufsize in
-      let tf_doing_ws, rcv_scale, snd_scale =
+      let tf_doing_ws, snd_scale =
         match Segment.ws seg with
-        | Some x when x <= Params.tcp_maxwinscale -> true, x, Params.scale
-        | _ -> false, 0, 0
+        | Some x when x <= Params.tcp_maxwinscale -> true, x
+        | _ -> false, 0
       in
+      let request_r_scale, rcv_scale = if tf_doing_ws then Params.scale, Params.scale else 0, 0 in
       let iss = Sequence.of_int32 (Randomconv.int32 t.rng)
       and ack' = Sequence.incr seg.Segment.seq (* ACK the SYN *)
       in
@@ -84,8 +85,8 @@ let handle_noconn t now id seg =
         snd_cwnd = snd_cwnd' ;
         t_maxseg = t_maxseg' ;
         t_advmss = advmss ;
-        tf_doing_ws ;
-        rcv_scale ; snd_scale ;
+        tf_doing_ws ; snd_scale ; rcv_scale ;
+        request_r_scale ;
         last_ack_sent = ack' ;
         t_rttseg }
       in

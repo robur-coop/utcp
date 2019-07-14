@@ -30,23 +30,24 @@ let jump () =
     and network = Ipaddr.V4.Prefix.of_string_exn "10.0.42.2/24"
     in
     IPv4.connect ~ip:ip_addr ~network () eth arp >>= fun ip ->
-    let tcp, clo, out =
-      let dst = Ipaddr.V4.of_string_exn "10.0.42.1" in
-      let init, conn, out =
+    let tcp (*, clo, out *) =
+      (* let dst = Ipaddr.V4.of_string_exn "10.0.42.1" in *)
+      let init (*, conn, out *) =
         let s = Tcp.State.empty Mirage_random_test.generate ip_addr in
         let s' = Tcp.State.start_listen s 23 in
-        Tcp.User.connect s' (Mtime_clock.now ()) dst 1234
+        (* Tcp.User.connect s' (Mtime_clock.now ()) dst 1234 *)
+        s'
       in
       let s = ref init in
       (fun ~src ~dst payload ->
          let s', events = Tcp.Input.handle !s (Mtime_clock.now ()) ~src ~dst payload in
          s := s' ;
-         handle_events ip events),
+         handle_events ip events) (*,
       (fun () ->
          match Tcp.User.close !s conn with
          | Error (`Msg msg) -> Logs.err (fun m -> m "close failed %s" msg)
-         | Ok s' -> s := s'),
-      (dst, out)
+         | Ok s' -> s := s'b),
+         (dst, out) *)
     in
     let eth_input =
       Ethernet.input eth
@@ -55,12 +56,12 @@ let jump () =
         ~ipv6:(fun _ -> Lwt.return_unit)
     in
     (* delay client a bit to have arp up and running *)
-    Lwt.async (fun () ->
+(*    Lwt.async (fun () ->
         Lwt_unix.sleep 2. >>= fun () ->
         handle_events ip [ `Data out ] >>= fun () ->
         Lwt_unix.sleep 1. >|= fun () ->
         Logs.info (fun m -> m "closing!!");
-        clo ());
+        clo ()); *)
     Netif.listen tap ~header_size:14 eth_input >|=
     Rresult.R.error_to_msg ~pp_error:Netif.pp_error
   )

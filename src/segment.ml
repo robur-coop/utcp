@@ -326,12 +326,13 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
    let psh = dlen > 0 && Sequence.equal (Sequence.addi cb.State.snd_nxt dlen) last_sndq_data_seq in
 
    (*: Calculate size of the receive window (based upon available buffer space) :*)
-   let rcv_wnd'' = Subr.calculate_bsd_rcv_wnd conn in
    let rcv_wnd' =
+     let window_size = Sequence.window cb.State.rcv_adv cb.State.rcv_nxt in
      match conn.State.tcp_state with
-     | Time_wait -> Sequence.window cb.State.rcv_adv cb.State.rcv_nxt
+     | Time_wait -> window_size
      | _ ->
-       max (Sequence.window cb.State.rcv_adv cb.State.rcv_nxt)
+       let rcv_wnd'' = Subr.calculate_bsd_rcv_wnd conn in
+       max window_size
          (min (Params.tcp_maxwin lsl cb.State.rcv_scale)
             (if rcv_wnd'' < conn.rcvbufsize / 4 && rcv_wnd'' < cb.State.t_maxseg
              then 0  (*: Silly window avoidance: shouldn't advertise a tiny window :*)
@@ -339,14 +340,13 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
     in
     (*: Advertise an appropriately scaled receive window :*)
     (*: Assert the advertised window is within a sensible range :*)
-    let window = min (rcv_wnd' lsr cb.State.rcv_scale) 65535 in
     let flags = Flags.of_list
         (`ACK :: (if psh then [ `PSH ] else []) @ (if fin then [ `FIN ] else []))
     in
     let seg =
       { src_port ; dst_port ; seq = snd_nxt;
-        ack = cb.State.rcv_nxt; flags ; window ; options = [] ;
-        payload = data_to_send
+        ack = cb.State.rcv_nxt; flags ; window = rcv_wnd' lsr cb.rcv_scale ;
+        options = [] ; payload = data_to_send
       }
     in
 
@@ -425,14 +425,13 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
 
 (* auxFns:1384 *)
 let make_syn_ack cb (_, src_port, _, dst_port) =
-  let window = min cb.State.rcv_wnd 65535 in
   let options =
-    MaximumSegmentSize cb.t_advmss ::
+    MaximumSegmentSize cb.State.t_advmss ::
     (if cb.tf_doing_ws then [ WindowScale cb.request_r_scale ] else [])
   in
-  { src_port ; dst_port ; seq = cb.State.iss ; ack = cb.rcv_nxt ;
+  { src_port ; dst_port ; seq = cb.iss ; ack = cb.rcv_nxt ;
     flags = Flags.of_list [ `SYN ; `ACK ] ;
-    window ; options ; payload = Cstruct.empty }
+    window = cb.rcv_wnd ; options ; payload = Cstruct.empty }
 
 (* auxFns:1333 *)
 let make_syn cb (_, src_port, _, dst_port) =
@@ -446,7 +445,8 @@ let make_syn cb (_, src_port, _, dst_port) =
 
 (* auxFns:1437 *)
 let make_ack cb fin (_, src_port, _, dst_port) =
-  let window = min (cb.State.rcv_wnd lsr cb.rcv_scale) 65535 in
+  (* no need to clip, Segment does this for us *)
+  let window = cb.State.rcv_wnd lsr cb.rcv_scale in
   (* sack *)
   { src_port ; dst_port ;
     seq = if fin then cb.snd_una else cb.snd_nxt ;
