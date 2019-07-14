@@ -177,6 +177,100 @@ let dropwithreset seg =
            flags = Flags.add `RST flags ;
            window = 0 ; options = [] ; payload = Cstruct.empty }
 
+(* auxFns:1625 *)
+let tcp_do_output now conn =
+  let cb = conn.State.control_block in
+  let snd_cwnd =
+    let rxtcur = Subr.computed_rxtcur cb.State.t_rttinf in
+    let than = match Mtime.add_span cb.State.t_idletime (Mtime.Span.of_uint64_ns rxtcur) with
+      | None -> assert false
+      | Some ms -> ms
+    in
+    if Sequence.equal cb.State.snd_max cb.State.snd_una && Mtime.is_later ~than now then
+      (*: The connection is idle and has been for >= 1RTO :*)
+      (*: Reduce [[snd_cwnd]] to commence slow start :*)
+      cb.State.t_maxseg * Params.ss_fltsz
+    else
+      cb.State.snd_cwnd
+  in
+  (*: Calculate the amount of unused send window :*)
+  let win = min cb.State.snd_wnd snd_cwnd in
+  let snd_wnd_unused = win - (Sequence.window cb.State.snd_nxt cb.State.snd_una) in
+
+  (*: Is it possible that a FIN may need to be sent? :*)
+  let fin_required =
+    conn.State.cantsndmore &&
+    match conn.State.tcp_state with Fin_wait_2 | Time_wait -> false | _ -> true
+  in
+
+  (*: Under BSD, we may need to send a [[FIN]] in state [[SYN_SENT]] or [[SYN_RECEIVED]], so we may
+      effectively still have a [[SYN]] on the send queue. :*)
+  let syn_not_acked = match conn.State.tcp_state with Syn_sent | Syn_received -> true | _ -> false in
+
+  (*: Is there data or a FIN to transmit? :*)
+  let last_sndq_data_seq = Sequence.addi cb.State.snd_una (Cstruct.len conn.State.sndq) in
+  let last_sndq_data_and_fin_seq =
+    Sequence.(addi (addi last_sndq_data_seq (if fin_required then 1 else 0))
+                (if syn_not_acked then 1 else 0))
+  in
+  let have_data_to_send = Sequence.less cb.snd_nxt last_sndq_data_seq in
+  let have_data_or_fin_to_send = Sequence.less cb.snd_nxt last_sndq_data_and_fin_seq in
+
+  (*: The amount by which the right edge of the advertised window could be moved :*)
+  let window_update_delta =
+    (min (Params.tcp_maxwin lsl cb.State.rcv_scale))
+       (conn.rcvbufsize - Cstruct.len conn.rcvq) -
+    Sequence.window cb.State.rcv_adv cb.State.rcv_nxt
+  in
+
+  (*: Send a window update? This occurs when (a) the advertised window can be increased by at
+      least two maximum segment sizes, or (b) the advertised window can be increased by at least
+      half the receive buffer size. See |tcp_output.c:322ff|. :*)
+  let need_to_send_a_window_update =
+    window_update_delta >= 2 * cb.State.t_maxseg || 2 * window_update_delta >= conn.rcvbufsize
+  in
+
+  (*: Note that silly window avoidance and [[max_sndwnd]] need to be dealt with here; see |tcp_output.c:309| :*)
+
+  (*: Can a segment be transmitted? :*)
+  let do_output =
+    (*: Data to send and the send window has some space, or a FIN can be sent :*)
+    (have_data_or_fin_to_send &&
+     (have_data_to_send && snd_wnd_unused > 0)) ||  (* don't need space if only sending FIN *)
+    (*: Can send a window update :*)
+    need_to_send_a_window_update ||
+    (*: An ACK should be sent immediately (e.g. in reply to a window probe) :*)
+    cb.State.tf_shouldacknow
+  in
+
+  (*
+  let persist_fun =
+    let cant_send = not do_output && Cstruct.len tcp_sock.sndq = 0 && cb.State.tt_rexmt = None in
+    let window_shrunk = win = 0 && snd_wnd_unused < 0 in  (*: [[win = 0]] if in [[SYN_SENT]], but still may send FIN :*)
+                                                     (* (bsd_arch arch ==> tcp_sock.st <> SYN_SENT)) in *)
+    if cant_send then  (* takes priority over window_shrunk; note this needs to be checked *)
+      (*: Can not transmit a segment despite a non-empty send queue and no running persist or
+          retransmit timer. Must be the case that the receiver's advertised window is now zero, so
+          start the persist timer. Normal: |tcp_output.c:378ff| :*)
+      SOME \cb. cb with <| tt_rexmt := start_tt_persist 0 cb.t_rttinf arch |>
+else if window_shrunk then
+        (*: The receiver's advertised window is zero and the receiver has retracted window space
+            that it had previously advertised. Reset [[snd_nxt]] to [[snd_una]] because the data
+            from [[snd_una]] to [[snd_nxt]] has likely not been buffered by the receiver and should
+            be retransmitted. Bizzarely (on FreeBSD 4.6-RELEASE), if the persist timer is running
+            reset its shift value :*)
+        (* Window shrunk: |tcp_output.c:250ff| *)
+        SOME \cb.
+         cb with <| tt_rexmt := case cb.tt_rexmt of
+                        SOME (Timed((Persist,shift),d)) => SOME (Timed((Persist,0),d))
+                        | _593 => start_tt_persist 0 cb.t_rttinf arch ;
+                    snd_nxt := cb.snd_una |>
+      else
+        (*: Otherwise, leave the persist timer alone :*)
+        NONE
+    in *)
+  do_output (*, persist_fun *)
+
 (* auxFns:1774 no ts and arch, though *)
 let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
    let cb = conn.State.control_block in
@@ -195,16 +289,16 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
    in
    let win0 = min cb.State.snd_wnd snd_cwnd in
    let win = if window_probe && win0 = 0 then 1 else win0 in
-   let _snd_wnd_unused = win - (Sequence.window cb.State.snd_nxt cb.State.snd_una) in
+   let snd_wnd_unused = win - (Sequence.window cb.State.snd_nxt cb.State.snd_una) in
    let fin_required =
      conn.State.cantsndmore &&
      match conn.State.tcp_state with State.Fin_wait_2 | State.Time_wait -> false | _ -> true
    in
-   let last_sndq_data_seq = cb.State.snd_una (* + LENGTH tcp_sock.sndq *) in
+   let last_sndq_data_seq = Sequence.addi cb.State.snd_una (Cstruct.len conn.sndq) in
    (*: The data to send in this segment (if any) :*)
-   (* let data' = DROP (Num (cb.snd_nxt - cb.snd_una)) tcp_sock.sndq in
-    * let data_to_send = TAKE (MIN (clip_int_to_num snd_wnd_unused) cb.t_maxseg) data' in *)
-   let data_to_send = Cstruct.empty in
+   let data' = Cstruct.shift conn.State.sndq (Sequence.window cb.State.snd_nxt cb.State.snd_una) in
+   let data_to_send = Cstruct.sub data' 0 (min (max 0 snd_wnd_unused) cb.State.t_maxseg) in
+   let dlen = Cstruct.len data_to_send in
 
    (*: Should [[FIN]] be set in this segment? :*)
    let fin = fin_required && Sequence.(greater_equal (addi cb.State.snd_nxt (Cstruct.len data_to_send)) last_sndq_data_seq) in
@@ -219,7 +313,7 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
        data has yet been sent over the socket  :*)
    let snd_nxt =
      if fin &&
-        Sequence.equal (Sequence.addi cb.State.snd_nxt (Cstruct.len data_to_send)) (Sequence.incr last_sndq_data_seq) &&
+        Sequence.equal (Sequence.addi cb.State.snd_nxt dlen) (Sequence.incr last_sndq_data_seq) &&
         not (Sequence.equal cb.State.snd_una cb.State.iss) ||
         Sequence.window cb.State.snd_nxt cb.State.iss = 2
      then
@@ -229,7 +323,7 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
    in
 
    (*: The BSD way: set [[PSH]] whenever sending the last byte of data in the send queue :*)
-   let psh = Cstruct.len data_to_send > 0 && Sequence.equal (Sequence.addi cb.State.snd_nxt (Cstruct.len data_to_send)) last_sndq_data_seq in
+   let psh = dlen > 0 && Sequence.equal (Sequence.addi cb.State.snd_nxt dlen) last_sndq_data_seq in
 
    (*: Calculate size of the receive window (based upon available buffer space) :*)
    let rcv_wnd'' = Subr.calculate_bsd_rcv_wnd conn in
@@ -268,8 +362,7 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
     in
 
     (*: Updated values to store in the control block after the segment is output :*)
-    let snd_nxt' = Sequence.(addi (addi snd_nxt (Cstruct.len data_to_send))
-                               (if fin then 1 else 0))
+    let snd_nxt' = Sequence.(addi (addi snd_nxt dlen) (if fin then 1 else 0))
     in
     let snd_max = max cb.State.snd_max snd_nxt' in
 
@@ -304,7 +397,7 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
         segment being emitted is not a retransmit, and (d) the segment is not a window probe :*)
     let t_rttseg =
       if cb.State.t_rttseg = None &&
-         (Cstruct.len data_to_send > 0 || fin) &&
+         (dlen > 0 || fin) &&
          Sequence.greater snd_nxt' cb.State.snd_max &&
          not window_probe
       then

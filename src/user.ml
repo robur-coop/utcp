@@ -1,9 +1,9 @@
 (* (c) 2019 Hannes Mehnert, all rights reserved *)
-[@@@ocaml.warning "-33"]
-
 open State
 
 open Rresult.R.Infix
+
+let guard p e = if p then Ok () else Error e
 
 let src = Logs.Src.create "tcp.user" ~doc:"TCP user"
 module Log = (val Logs.src_log src : Logs.LOG)
@@ -55,12 +55,44 @@ let close t id =
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->
+    guard (behind_established conn.tcp_state) (`Msg "not yet established") >>| fun () ->
     let control_block = { conn.control_block with tf_shouldacknow = true } in
     let conn' = { conn with control_block ; cantsndmore = true ; cantrcvmore = true } in
-    Ok { t with connections = CM.add id conn' t.connections }
+    { t with connections = CM.add id conn' t.connections }
 
-let send _t _id _buf =
-  assert false
+let send_space t id =
+  match CM.find_opt id t.connections with
+  | None -> 0
+  | Some conn ->
+    if behind_established conn.tcp_state && not conn.cantsndmore then
+      conn.sndbufsize - Cstruct.len conn.sndq
+    else
+      0
 
-let recv _t _id =
-  assert false
+let send t id buf =
+  match CM.find_opt id t.connections with
+  | None -> Error (`Msg "no connection")
+  | Some conn ->
+    guard (behind_established conn.tcp_state) (`Msg "not yet established") >>= fun () ->
+    guard (not conn.cantsndmore) (`Msg "cant write") >>= fun () ->
+    guard (conn.sndbufsize - Cstruct.len conn.sndq > 0)
+      (`Msg "send queue full") >>| fun () ->
+    let sndq, written =
+      let left = conn.sndbufsize - Cstruct.len conn.sndq in
+      if left >= Cstruct.len buf then
+        Cstruct.append conn.sndq buf, Cstruct.len buf
+      else
+        Cstruct.append conn.sndq (Cstruct.sub buf 0 left), left
+    in
+    let conn' = { conn with sndq } in
+    { t with connections = CM.add id conn' t.connections }, written
+
+let recv t id =
+  match CM.find_opt id t.connections with
+  | None -> Error (`Msg "no connection")
+  | Some conn ->
+    guard (behind_established conn.tcp_state) (`Msg "not yet connected") >>= fun () ->
+    guard (not conn.cantrcvmore) (`Msg "cant recv, EOF") >>| fun () ->
+    let rcvq = conn.rcvq in
+    let conn' = { conn with rcvq = Cstruct.empty } in
+    { t with connections = CM.add id conn' t.connections }, rcvq

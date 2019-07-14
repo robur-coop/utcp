@@ -84,3 +84,21 @@ FreeBSD).
 
 - timers: is one sufficient (with either rexmtsyn, persist, idle, rexmt)?
 - tcp_output_really
+
+## TODO
+
+- just copied over various functions which need to be properly tested:
+ - RTT measurement
+ - window scaling (properly applied in decode and encode)
+ - maximum segment size computation
+ - all duration and timer computations...
+ - rto / retransmissions should actually work
+- need a tick from the outside and act on expired timers!
+- data may be spliced somewhere in, now that there are sndq and rcvq
+
+- deliver_in_3 needs to be completed, others extended with extendedcb
+
+- tcp_output_really and tcp_do_output have quite some code shared...
+
+- segment reassembly
+- keepalive is in the model, could easily be copied over

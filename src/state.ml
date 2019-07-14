@@ -13,6 +13,8 @@ type tcp_state =
   | Fin_wait_2
   | Time_wait
 
+let behind_established = function Syn_sent | Syn_received -> false | _ -> true
+
 let pp_fsm ppf s =
   Fmt.string ppf @@
   match s with
@@ -213,6 +215,8 @@ type conn_state = {
   cantsndmore : bool ;
   rcvbufsize : int ;
   sndbufsize : int ;
+  sndq : Cstruct.t ;
+  rcvq : Cstruct.t ;
   (* reassembly : Cstruct.t list ; (* TODO nicer data structure! *) *)
   (* read_queue : Cstruct.t list ;
    * write_queue : Cstruct.t list ; *)
@@ -221,6 +225,7 @@ type conn_state = {
 let conn_state ~rcvbufsize ~sndbufsize tcp_state control_block = {
   tcp_state ; control_block ;
   cantrcvmore = false ; cantsndmore = false ;
+  sndq = Cstruct.empty ; rcvq = Cstruct.empty ;
   rcvbufsize ; sndbufsize
 }
 
