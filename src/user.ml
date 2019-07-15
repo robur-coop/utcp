@@ -21,7 +21,7 @@ let connect t now ?src_port dst dst_port =
     let t_rttseg = Some (now, iss) in
     let control_block = {
       initial_cb with
-      tt_rexmt = Some (Timers.timer now (RexmtSyn, 0) Params.tcp_syn_backoff.(0)) ;
+      tt_rexmt = Subr.start_tt_rexmt_syn now 0 false initial_cb.t_rttinf ;
       tt_conn_est = Some (Timers.timer now () Params.tcptv_keep_init) ;
       snd_una = iss ;
       snd_nxt = Sequence.incr iss ;

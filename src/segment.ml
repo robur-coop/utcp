@@ -257,33 +257,33 @@ let tcp_do_output now conn =
     cb.State.tf_shouldacknow
   in
 
-  (*
   let persist_fun =
-    let cant_send = not do_output && Cstruct.len tcp_sock.sndq = 0 && cb.State.tt_rexmt = None in
+    let cant_send = not do_output && Cstruct.len conn.sndq = 0 && cb.State.tt_rexmt = None in
     let window_shrunk = win = 0 && snd_wnd_unused < 0 in  (*: [[win = 0]] if in [[SYN_SENT]], but still may send FIN :*)
                                                      (* (bsd_arch arch ==> tcp_sock.st <> SYN_SENT)) in *)
     if cant_send then  (* takes priority over window_shrunk; note this needs to be checked *)
       (*: Can not transmit a segment despite a non-empty send queue and no running persist or
           retransmit timer. Must be the case that the receiver's advertised window is now zero, so
           start the persist timer. Normal: |tcp_output.c:378ff| :*)
-      SOME \cb. cb with <| tt_rexmt := start_tt_persist 0 cb.t_rttinf arch |>
-else if window_shrunk then
+      Some (fun cb -> { cb with State.tt_rexmt = Subr.start_tt_persist now 0 cb.State.t_rttinf })
+    else if window_shrunk then
         (*: The receiver's advertised window is zero and the receiver has retracted window space
             that it had previously advertised. Reset [[snd_nxt]] to [[snd_una]] because the data
             from [[snd_una]] to [[snd_nxt]] has likely not been buffered by the receiver and should
             be retransmitted. Bizzarely (on FreeBSD 4.6-RELEASE), if the persist timer is running
             reset its shift value :*)
         (* Window shrunk: |tcp_output.c:250ff| *)
-        SOME \cb.
-         cb with <| tt_rexmt := case cb.tt_rexmt of
-                        SOME (Timed((Persist,shift),d)) => SOME (Timed((Persist,0),d))
-                        | _593 => start_tt_persist 0 cb.t_rttinf arch ;
-                    snd_nxt := cb.snd_una |>
-      else
-        (*: Otherwise, leave the persist timer alone :*)
-        NONE
-    in *)
-  do_output (*, persist_fun *)
+      Some (fun cb ->
+          let tt_rexmt = match cb.State.tt_rexmt with
+            | Some ((Persist, _), d) -> Some ((State.Persist, 0), d)
+            | _ -> Subr.start_tt_persist now 0 cb.t_rttinf
+          in
+          { cb with tt_rexmt ; snd_nxt = cb.snd_una })
+    else
+      (*: Otherwise, leave the persist timer alone :*)
+      None
+  in
+  do_output, persist_fun
 
 (* auxFns:1774 no ts and arch, though *)
 let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =

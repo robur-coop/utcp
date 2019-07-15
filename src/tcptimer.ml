@@ -23,7 +23,7 @@ let timer_tt_rexmtsyn now shift id conn =
       let maxseg = Subr.tcp_maxseg conn in
       let control_block = {
         cb with
-        tt_rexmt = Some (Timers.timer now (RexmtSyn, succ shift) Params.tcp_syn_backoff.(succ shift)) ;
+        tt_rexmt = Subr.start_tt_rexmt_syn now (succ shift) false cb.t_rttinf ;
         t_rttinf = { t_rttinf with t_lastshift = Some (succ shift) ; t_wassyn = true } ;
         request_r_scale ;
         snd_nxt = Sequence.incr cb.iss ;
@@ -70,7 +70,7 @@ let timer_tt_rexmt now shift id conn =
       in
       let control_block = {
         cb with
-        tt_rexmt = Some (Timers.timer now (Rexmt, succ shift) Params.tcp_backoff.(succ shift)) ;
+        tt_rexmt = Subr.start_tt_rexmt now (succ shift) false cb.t_rttinf ;
         t_rttinf = { t_rttinf with t_lastshift = Some (succ shift) ; t_wassyn = false } ;
         snd_nxt = cb.snd_una ;
         snd_recover = cb.snd_max ;
@@ -87,15 +87,11 @@ let timer_tt_rexmt now shift id conn =
       Some c', Some out
 
 let timer_tt_persist now shift id conn =
-  (* <| tt_rexmt := start_tt_persist (shift+1) tcp_sock.cb.t_rttinf h.arch |> |>) |> in *)
-  (* TODO the above takes rto / rttinf into account *)
   if succ shift >= Array.length Params.tcp_backoff then begin
     Log.err (fun m -> m "persist timer shift exceeded backoff array length");
     Some conn, None
   end else
-    let tt_rexmt =
-      Some (Timers.timer now (Persist, succ shift) Params.tcp_backoff.(succ shift))
-    in
+    let tt_rexmt = Subr.start_tt_persist now (succ shift) conn.control_block.t_rttinf in
     let control_block = { conn.control_block with tt_rexmt } in
     let conn' = { conn with control_block } in
     let conn', seg = Segment.tcp_output_really now id true conn' in
@@ -172,9 +168,6 @@ let ctr = ref 0
 (* expected to be called every 100msec - we have slow timers (500ms) and fast timers (200ms) used by delayed ack *)
 let timer t now =
   incr ctr ;
-  CM.iter (fun id conn ->
-      Log.debug (fun m -> m "timer %a is %a" Connection.pp id pp_conn_state conn))
-    t.connections ;
   let t, outs =
     if !ctr mod 2 = 0 then fast_timer t now
     else if !ctr mod 5 = 0 then slow_timer t now

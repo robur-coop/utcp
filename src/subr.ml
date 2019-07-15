@@ -114,3 +114,30 @@ let computed_rxtcur ri =
        (computed_rto
           (if ri.t_wassyn then Params.tcp_syn_backoff else Params.tcp_backoff)
           (match ri.t_lastshift with None -> 0 | Some x -> x) ri))
+
+(* auxFns:692 *)
+let start_tt_rexmt_gen mode backoffs now shift wantmin ri =
+  let rxtcur =
+    max (if wantmin then
+           max ri.t_rttmin
+             (match ri.t_lastrtt with None -> 0L | Some v -> Int64.add v (Duration.of_ms 2))
+         else ri.t_rttmin)
+      (min Params.tcptv_rexmtmax (* better not be infinite! *)
+         (computed_rto backoffs shift ri))
+  in
+  Logs.debug (fun m -> m "starting rexmt timer %a (backoff is %a)"
+                Duration.pp rxtcur Duration.pp backoffs.(shift));
+  Some (Timers.timer now (mode, shift) rxtcur)
+
+let start_tt_rexmt_syn = start_tt_rexmt_gen RexmtSyn Params.tcp_syn_backoff
+
+let start_tt_rexmt = start_tt_rexmt_gen Rexmt Params.tcp_backoff
+
+let start_tt_persist now shift ri =
+  let cur = max Params.tcptv_persmin (* better not be infinite! *)
+      (min Params.tcptv_persmax (* better not be infinite! *)
+         (computed_rto Params.tcp_backoff shift ri))
+  in
+  Logs.debug (fun m -> m "starting persist timer %a (backoff is %a)"
+                Duration.pp cur Duration.pp Params.tcp_backoff.(shift));
+  Some (Timers.timer now (Persist, shift) cur)

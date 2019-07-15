@@ -66,7 +66,7 @@ let deliver_in_1 rng now id seg =
     let t_rttseg = Some (now, iss) in
     let control_block = {
       initial_cb with
-      tt_rexmt = Some (Timers.timer now (Rexmt, 0) Params.tcp_backoff.(0)) ;
+      tt_rexmt = Subr.start_tt_rexmt now 0 false initial_cb.t_rttinf ;
       t_idletime = now ;
       iss ;
       irs = seg.Segment.seq ;
@@ -129,25 +129,21 @@ let deliver_in_2 now id conn seg =
         (*: if acked everything, stop :*)
         None
         (*: [[needoutput = 1]] -- see below :*)
-      else cb.tt_rexmt
-
-    (*        match cb.tt_rexmt with*)
-(*        | Some (RexmtSyn, _) ->
+      else match cb.tt_rexmt with
+        | Some ((RexmtSyn, _), _) ->
           (*: if partial ack, restart from current backoff value,
               which is always zero because of the above updates to
               the RTT estimators and shift value. :*)
-          start_tt_rexmtsyn h.arch 0 T t_rttinf' *)
-(*        | None | Some (Rexmt. _) ->
+          Subr.start_tt_rexmt_syn now 0 true t_rttinf'
+        | Some ((Rexmt, _), _) ->
           (*: ditto :*)
-          start_tt_rexmt h.arch 0 T t_rttinf' *)
-(*         |_ ->  else if emission_time <> NONE then
-               case cb.tt_rexmt of
-                  (*: bizarre but true. |tcp_input.c:1766| says c.f.~Phil Karn's retransmit algorithm :*)
-                  NONE => NONE
-                | SOME (Timed((mode,shift),d)) => SOME (Timed((mode,0),d))
-           else
-               (*: do nothing :*)
-               cb.tt_rexmt *)
+          Subr.start_tt_rexmt now 0 true t_rttinf'
+        | Some ((Persist, _), _) when emission_time <> None ->
+          (* hannes 2019-07-15 looked a bit longer at the further conditionals,
+             and Persist when emission_time was the only case left (and now its
+             very symmetric...) *)
+          Subr.start_tt_persist now 0 t_rttinf'
+        | c -> c
     in
     t_softerror', t_rttseg', t_rttinf', tt_rexmt'
   in
@@ -253,39 +249,50 @@ let di3_ackstuff cb seg =
 
 let di3_datastuff cb seg =
   let rcv_wnd = seg.Segment.window (* really always? *)
-  and rcv_nxt, fin =
+  and rcv_nxt, fin, data =
     if Sequence.equal seg.Segment.seq cb.rcv_nxt then begin
       if Cstruct.len seg.Segment.payload > 0 then
         Log.info (fun m -> m "received data: %a" Cstruct.hexdump_pp seg.Segment.payload);
       let is_fin = Segment.Flags.mem `FIN seg.Segment.flags in
       if is_fin then Log.info (fun m -> m "received fin");
       let nxt = Sequence.addi seg.Segment.seq (Cstruct.len seg.Segment.payload) in
-      (if is_fin then Sequence.incr nxt else nxt), is_fin
+      (if is_fin then Sequence.incr nxt else nxt), is_fin, seg.Segment.payload
     end else (* push segment to reassembly queue *)
-      cb.rcv_nxt, false
+      cb.rcv_nxt, false, Cstruct.empty
   in
   (* may reassemble! *)
-  Ok ({ cb with rcv_wnd ; rcv_nxt }, Sequence.greater rcv_nxt cb.rcv_nxt, fin)
+  Ok ({ cb with rcv_wnd ; rcv_nxt }, fin, data)
 
-let di3_ststuff conn rcvd_fin ourfinisacked =
+let di3_ststuff now conn rcvd_fin ourfinisacked =
+  let enter_time_wait =
+    let control_block = {
+      conn.control_block with
+      tt_2msl = Some (Timers.timer now () (Int64.shift_left Params.tcptv_msl 1)) ;
+      tt_rexmt = None ;
+      tt_delack = None ;
+      tt_conn_est = None ;
+      tt_fin_wait_2 = None ;
+    } in { conn with tcp_state = Time_wait ; control_block }
+  and state tcp_state = { conn with tcp_state }
+  in
   match conn.tcp_state, rcvd_fin with
-  | Established, false -> Established
-  | Established, true -> Close_wait
-  | Close_wait, _ -> Close_wait
-  | Fin_wait_1, false when ourfinisacked -> Fin_wait_2
-  | Fin_wait_1, false -> Fin_wait_1
-  | Fin_wait_1, true when ourfinisacked -> Time_wait
-  | Fin_wait_1, true -> Closing
-  | Fin_wait_2, false -> Fin_wait_2
-  | Fin_wait_2, true -> Time_wait
-  | Closing, _ when ourfinisacked -> Time_wait
-  | Closing, _ -> Closing
-  | Last_ack, false -> Last_ack
+  | Established, false -> conn
+  | Established, true -> state Close_wait
+  | Close_wait, _ -> conn
+  | Fin_wait_1, false when ourfinisacked -> state Fin_wait_2
+  | Fin_wait_1, false -> conn
+  | Fin_wait_1, true when ourfinisacked -> enter_time_wait
+  | Fin_wait_1, true -> state Closing
+  | Fin_wait_2, false -> conn
+  | Fin_wait_2, true -> enter_time_wait
+  | Closing, _ when ourfinisacked -> enter_time_wait
+  | Closing, _ -> conn
+  | Last_ack, false -> conn
   | Last_ack, true -> assert false
-  | Time_wait, _ -> Time_wait
+  | Time_wait, _ -> enter_time_wait
   | _ -> assert false
 
-let deliver_in_3 id conn seg =
+let deliver_in_3 now _id conn seg =
   (* we expect at most FIN PSH ACK - we drop with reset all other combinations *)
   let flags = seg.Segment.flags in
   guard Segment.Flags.(is_empty flags || only `ACK flags || or_ack `FIN flags ||
@@ -297,16 +304,15 @@ let deliver_in_3 id conn seg =
   (* ACK processing *)
   di3_ackstuff cb' seg >>= fun (cb'', ourfinisacked) ->
   (* may have some fresh data to report which needs to be acked *)
-  di3_datastuff cb'' seg >>| fun (cb''', ack, fin) ->
+  di3_datastuff cb'' seg >>| fun (cb''', fin, data) ->
   (* state and FIN processing *)
-  let conn' = { conn with control_block = cb''' ; cantrcvmore = conn.cantrcvmore || fin } in
-  let tcp_state = di3_ststuff conn' fin ourfinisacked in
-  { conn' with tcp_state },
-  if ack then
-    Some (Segment.make_ack conn'.control_block
-            (match tcp_state with Close_wait -> true | _ -> false) id)
-  else
-    None
+  let conn' = {
+    conn with
+    control_block = cb''' ;
+    cantrcvmore = conn.cantrcvmore || fin ;
+    rcvq = Cstruct.append conn.rcvq data
+  } in
+  di3_ststuff now conn' fin ourfinisacked
 
 let deliver_in_7 id conn seg =
   (* guard rcv_nxt = seg.seq *)
@@ -368,7 +374,7 @@ let handle_conn t now id conn seg =
       | true, true -> assert false
       | true, false -> deliver_in_7 id conn seg >>| fun seg' -> t, Some seg'
       | false, true -> deliver_in_8 id conn seg >>| fun seg' -> t, Some seg'
-      | false, false -> deliver_in_3 id conn seg >>| fun (conn', d) -> add conn', d
+      | false, false -> deliver_in_3 now id conn seg >>| fun conn' -> add conn', None
   in
   match r with
   | Ok (t, a) -> t, a

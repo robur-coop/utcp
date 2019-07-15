@@ -23,7 +23,7 @@ let jump () =
   Printexc.record_backtrace true;
   Mirage_random_test.initialize ();
   Lwt_main.run (
-    Netif.connect "tap1" >>= fun tap ->
+    Netif.connect "tap2" >>= fun tap ->
     Ethernet.connect tap >>= fun eth ->
     ARP.connect eth >>= fun arp ->
     let ip_addr = Ipaddr.V4.of_string_exn "10.0.42.2"
