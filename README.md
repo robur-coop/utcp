@@ -77,10 +77,15 @@ FreeBSD).
 - CLOSED state can't be observed
 - going from TIME_WAIT anywhere (i.e. when someone connects with a socket, and instead close on EOF does another connect - this may actually happen; if you're talking to this library, your second connect will fail.... hope you handle the case properly) - deliver_in_9 will never happen for us
 
+Model anomalies:
+- is tcp option size computation good in timer_tt_rexmtsyn_1? (misses MSS)
+- tt_persist doesn't check whether shift + 1 is < tcp_maxrxtshift
+
 ## Things to preserve and ensure
 
 - each incoming segment with reasonable window is handled properly
 - there's always a path (e.g. via timers) to drop the connection (with/out RST)
+  - that'll be hard
 
 - timers: is one sufficient (with either rexmtsyn, persist, idle, rexmt)?
 - tcp_output_really
@@ -89,16 +94,21 @@ FreeBSD).
 
 - just copied over various functions which need to be properly tested:
  - RTT measurement
- - window scaling (properly applied in decode and encode)
  - maximum segment size computation
  - all duration and timer computations...
- - rto / retransmissions should actually work
-- need a tick from the outside and act on expired timers!
-- data may be spliced somewhere in, now that there are sndq and rcvq
+- should data = [] be more explicitly assert in early handshake?
 
 - deliver_in_3 needs to be completed, others extended with extendedcb
 
-- tcp_output_really and tcp_do_output have quite some code shared...
+- timer: start_tt_* functions that use rto should be put into place
+
+- error propagation: cb can get some errors (from ip / icmp)
+   (maybe temporary) which are preserved in softerror, and bubble up
+   [also timeouts] <- this is to-be-returned when connect/read/write/close fails
+- icmp also for path-mtu
+- when is t_maxseg set? is it modified at all?
 
 - segment reassembly
+- put cc in a separate module, follow FreeBSD design ack_received / after_idle / conf_signal / post_recovery
+- tcp_output_really and tcp_do_output have quite some code shared...
 - keepalive is in the model, could easily be copied over
