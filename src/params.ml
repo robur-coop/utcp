@@ -38,6 +38,8 @@ and tcptv_keepintvl = Duration.of_sec 75
 and tcptv_keepvnt = 8
 and tcptv_finwait2_timeout = Duration.of_sec 60
 
+let tcptv_maxidle = Int64.shift_left tcptv_keepintvl 3
+
 and tcptv_min = Duration.of_ms 30
 and tcptv_cpu_var = Duration.of_ms 200
 and tcptv_rexmtmax = Duration.of_sec 64
