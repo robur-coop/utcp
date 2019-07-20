@@ -977,7 +977,13 @@ let handle_conn t now id conn seg =
       | true, true -> assert false
       | true, false -> deliver_in_7 id conn seg >>| fun seg' -> t, Some seg'
       | false, true -> deliver_in_8 id conn seg >>| fun seg' -> t, Some seg'
-      | false, false -> deliver_in_3 now id conn seg >>| fun (conn', out) -> add conn', out
+      | false, false ->
+        deliver_in_3 now id conn seg >>= fun (conn', out) ->
+        let conn'', out' = match out with
+          | None -> Segment.tcp_output_perhaps now id conn'
+          | Some x -> conn', Some x
+        in
+        Ok (add conn'', out')
   in
   match r with
   | Ok (t, a) -> t, a

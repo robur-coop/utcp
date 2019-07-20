@@ -79,6 +79,7 @@ FreeBSD).
 - We have infinite resources (well, of course not, but: on the send edge the buffer is provided by the caller (and then owned by us); on the receive side the buffer is provided by the caller as well)
   -> we don't really allocate data (apart from some records/..), but we nevertheless limit rcvbufsize to 2^16 (should be user-configurable)
 - There is no bandwidth limitation, output always succeeds (this simplifies a lot)!
+  -> no rollback / enqueue_or_fail
 
 Model anomalies:
 - is tcp option size computation good in timer_tt_rexmtsyn_1? (missing MSS)
@@ -104,6 +105,13 @@ Model anomalies:
       segments are transmitted!
 
 ## TODO
+
+- suspicious that someone/somehow deliver_out_1 needs to be triggered... but at
+  which points in time? at the end of <got a segment from network and didn't
+  provoke a reply>? <got some data from user>?
+  i think delack timer is properly initialised when needed (but getting a FIN
+  leads to no reply (though tf_shouldacknow is true now))
+  -- maybe i'm just missing a tcp_output(_perhaps?) call
 
 - just copied over various functions which need to be properly tested:
  - RTT measurement
@@ -138,6 +146,8 @@ Model anomalies:
 - keepalive is in the model, could easily be copied over
 
 - recheck with draft793bis whether (all of) our transitions are legitimate and none is really missing
+
+- make the bsd_fast_path a fast path for us ;)
 
 ## Testing
 
