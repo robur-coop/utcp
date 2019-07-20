@@ -147,6 +147,8 @@ Model anomalies:
 
 - recheck with draft793bis whether (all of) our transitions are legitimate and none is really missing
 
+- further avoiding allocations: sndq and rcvq should be lists of cstruct (no need for Cstruct.append!)
+
 - make the bsd_fast_path a fast path for us ;)
 
 ## Testing

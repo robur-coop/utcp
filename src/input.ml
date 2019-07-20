@@ -994,22 +994,27 @@ let handle_conn t now id conn seg =
     Log.err (fun m -> m "reset in %a %s" pp_fsm conn.tcp_state msg);
     drop (), dropwithreset id seg
 
-let handle t now ~src ~dst data =
+let handle_segment t now id seg =
+  Log.info (fun m -> m "%a TCP %a" Connection.pp id Segment.pp seg) ;
+  let t', out = match CM.find_opt id t.connections with
+    | None -> handle_noconn t now id seg
+    | Some conn -> handle_conn t now id conn seg
+  in
+  t', out
+
+let handle_buf t now ~src ~dst data =
   match Segment.decode_and_validate ~src ~dst data with
   | Error (`Msg msg) ->
     Log.err (fun m -> m "dropping invalid segment %s" msg);
     (t, [])
   | Ok (seg, id) ->
     (* deliver_in_3a deliver_in_4 are done now! *)
-    let pkt = src, seg.Segment.src_port, dst, seg.Segment.dst_port in
-    Log.info (fun m -> m "%a TCP %a" Connection.pp pkt Segment.pp seg) ;
-    let t', out = match CM.find_opt id t.connections with
-      | None -> handle_noconn t now id seg
-      | Some conn -> handle_conn t now id conn seg
-    in
+    let t', out = handle_segment t now id seg in
     t', match out with
     | None -> Log.info (fun m -> m "no answer"); []
     | Some (dst', d) ->
       Log.info (fun m -> m "answer %a" Segment.pp d);
-      if Ipaddr.V4.compare dst' src <> 0 then Log.err (fun m -> m "bad IP %a vs %a" Ipaddr.V4.pp dst' Ipaddr.V4.pp src);
+      let src, _, dst, _ = id in
+      if Ipaddr.V4.compare dst' src <> 0 then
+        Log.err (fun m -> m "bad IP %a vs %a" Ipaddr.V4.pp dst' Ipaddr.V4.pp src);
       [ `Data (src, Segment.encode_and_checksum ~src:dst ~dst:src d) ]

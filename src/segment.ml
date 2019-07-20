@@ -9,6 +9,12 @@ type option =
   | WindowScale of int
   | Unknown of int * Cstruct.t
 
+let equal_option a b = match a, b with
+  | MaximumSegmentSize a, MaximumSegmentSize b -> a = b
+  | WindowScale a, WindowScale b -> a = b
+  | Unknown (t, v), Unknown (t', v') -> t = t' && Cstruct.equal v v'
+  | _ -> false
+
 let pp_option ppf = function
   | MaximumSegmentSize mss -> Fmt.pf ppf "MSS %d" mss
   | WindowScale f -> Fmt.pf ppf "window scale %d" f
@@ -152,6 +158,14 @@ type t = {
   options : option list ;
   payload : Cstruct.t ;
 }
+
+let equal a b =
+  a.src_port = b.src_port && a.dst_port = b.dst_port &&
+  Sequence.equal a.seq b.seq && Sequence.equal a.ack b.ack &&
+  Flags.equal a.flags b.flags && a.window = b.window &&
+  List.length a.options = List.length b.options &&
+  List.for_all2 equal_option a.options b.options &&
+  Cstruct.equal a.payload b.payload
 
 let mss t =
   List.fold_left

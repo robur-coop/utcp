@@ -45,7 +45,7 @@ let jump () =
           Lwt.async (fun () -> handle_events ip (List.map (fun (dst, pkt) -> `Data (dst, pkt)) outs)))
       in
       (fun ~src ~dst payload ->
-         let s', events = Tcp.Input.handle !s (Mtime_clock.now ()) ~src ~dst payload in
+         let s', events = Tcp.Input.handle_buf !s (Mtime_clock.now ()) ~src ~dst payload in
          s := s' ;
          handle_events ip events) (*,
       (fun () ->
