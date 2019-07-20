@@ -102,6 +102,10 @@ let update_rtt rtt ri =
     (* t_softerror, t_rttseg, and t_rxtcur must be handled by the caller *)
   }
 
+(* auxFns:864 *)
+let expand_cwnd ssthresh maxseg maxwin cwnd =
+  min maxwin (cwnd + (if cwnd > ssthresh then max 1 ((maxseg * maxseg) / cwnd) else maxseg))
+
 (* auxFns:657 *)
 let computed_rto backoffs shift ri =
   Int64.(mul backoffs.(shift)

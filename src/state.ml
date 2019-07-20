@@ -15,6 +15,10 @@ type tcp_state =
 
 let behind_established = function Syn_sent | Syn_received -> false | _ -> true
 
+let is_connected = function
+  | Established | Close_wait | Fin_wait_1 | Closing | Last_ack | Fin_wait_2 -> true
+  | _ -> false
+
 let pp_fsm ppf s =
   Fmt.string ppf @@
   match s with
@@ -27,14 +31,6 @@ let pp_fsm ppf s =
   | Time_wait -> "time wait"
   | Close_wait -> "close wait"
   | Last_ack -> "last ack"
-
-(* TODO:
-  - missing ticks for timers
-  - last_ack for delayed ack (what about delayed ack? is it worth it, even though SACK?)
-  - duplicate acks count
-  - congestion window, slow-start threshold
-*)
-type rexmtmode = RexmtSyn | Rexmt | Persist
 
 (* hostTypes:182 *)
 type rttinf = {
@@ -54,6 +50,12 @@ type rttinf = {
      annoying because they are *only* required for the tcp_output test that
      returns to slow start if the connection has been idle for >=1RTO *)
 }
+
+type rexmtmode = RexmtSyn | Rexmt | Persist
+
+let mode_of = function
+  | None -> None
+  | Some ((x, _), _) -> Some x
 
 (* hostTypes:230 but dropped urg and ts stuff *)
 type control_block = {

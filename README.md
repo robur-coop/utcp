@@ -47,7 +47,6 @@ TODO:
 - ICMP error handling!
 - appropriate byte counting (RFC 3456, not in the HOL4 model, though :/)
 - increased initial window size
-- PAWS (well, maybe... really?)
 - SACK
 - CC
 
@@ -73,22 +72,36 @@ FreeBSD).
 - Appropriate Byte Counting (this is what i intend to implement)
 - Initial window size (that may already be in my FreeBSD12 changeset)
 - Incoming urgent flag (not handled in the implementation)
-- More restrictive with flag combinations (uhm, likely... but then, half-closed connection are fun, maybe FIN+SYN is a valid combination ;)
+- More restrictive with flag combinations (only one of SYN FIN RST)
 - CLOSED state can't be observed
 - going from TIME_WAIT anywhere (i.e. when someone connects with a socket, and instead close on EOF does another connect - this may actually happen; if you're talking to this library, your second connect will fail.... hope you handle the case properly) - deliver_in_9 will never happen for us
+- TCP_NEWRENO is true (we skip the conditionals)
+- We have infinite resources (well, of course not, but: on the send edge the buffer is provided by the caller (and then owned by us); on the receive side the buffer is provided by the caller as well)
+  -> we don't really allocate data (apart from some records/..), but we nevertheless limit rcvbufsize to 2^16 (should be user-configurable)
+- There is no bandwidth limitation, output always succeeds (this simplifies a lot)!
 
 Model anomalies:
-- is tcp option size computation good in timer_tt_rexmtsyn_1? (misses MSS)
+- is tcp option size computation good in timer_tt_rexmtsyn_1? (missing MSS)
 - tt_persist doesn't check whether shift + 1 is < tcp_maxrxtshift
+- di3_ackstuff: hostLTS:452 "ack <= snd_una", but text "strictly less than snd_una"
+- di3_newackstuff: hostLTS:251 uses "cb'.snd_nxt" which is the same (and a no-op)
 
 ## Things to preserve and ensure
 
 - each incoming segment with reasonable window is handled properly
 - there's always a path (e.g. via timers) to drop the connection (with/out RST)
   - that'll be hard
-
 - timers: is one sufficient (with either rexmtsyn, persist, idle, rexmt)?
-- tcp_output_really
+  - no, at least time_wait and fin_wait_2 are special afaict
+  - see also comment in hostTypes:301
+- esp in the connection setup states (syn_sent/syn_received) and connection
+  teardown states (close_wait/fin_wait_1/..) ensure that the pcb will eventually
+  be discarded
+- what about outgoing segments? should Input.handle be able to return
+  (a) an optional Segment.t (as in deliver_in_* [apart from 3])
+  (b) a list of Segment.t
+  --> b sounds more plausible - and ACK may open snd_wnd so that multiple data
+      segments are transmitted!
 
 ## TODO
 
@@ -97,10 +110,14 @@ Model anomalies:
  - maximum segment size computation
  - all duration and timer computations...
 - should data = [] be more explicitly assert in early handshake?
+  - from what I understand
+    - SYN may not carry data (apart from TFO where server may send data in SYN+ACK)
+    - RST may carry data (that's the "error message"), FreeBSD may (used to?) send random sndq data
 
-- deliver_in_3 needs to be completed, others extended with extendedcb
-
-- timer: start_tt_* functions that use rto should be put into place
+- FLAGS rework
+  - ack : Sequence.t option ; push : bool ; control : [ `SYN | `FIN | `RST ]
+- provide a Sequence.Infix module with < <= > >= = + ++ (where + is weird: Sequence.t -> int -> Sequence.t)
+- error handling (temporary errors / error types to present)
 
 - error propagation: cb can get some errors (from ip / icmp)
    (maybe temporary) which are preserved in softerror, and bubble up
@@ -108,7 +125,50 @@ Model anomalies:
 - icmp also for path-mtu
 - when is t_maxseg set? is it modified at all?
 
+- t_badrxtwin <- meh (don't understand its value and usage)
+
+- really need to ensure that we're not talking to ourselves in Segment.decode_and_verify...
+
+- what about multiple local ip addresses? (boils down to how to select IP in connect_1 [and avoid all t.ip...] well, and dropwithreset that crafts a RST of a segment)
+  (we could embed peer IP into control-block / socket)
+
 - segment reassembly
 - put cc in a separate module, follow FreeBSD design ack_received / after_idle / conf_signal / post_recovery
 - tcp_output_really and tcp_do_output have quite some code shared...
 - keepalive is in the model, could easily be copied over
+
+- recheck with draft793bis whether (all of) our transitions are legitimate and none is really missing
+
+## Testing
+
+- packetdrill-like scripts!?
+- luckily with a pure API we can test this directly (no need for sockets, and
+  actual wire transmission)
+- downside is we need to develop/adapt a syntax for packet building (and
+  expected answers within time boundaries), and write the test cases
+  (but then I'm not really able to find well-engineered tests with packetdrill
+   - yes, the FreeBSD suite is nice, but contains quite some copy + paste)
+   also, packetdrill is GPL (but lots of tests BSD3)
+- maybe we can have both -- first our own tests, at a later point write a
+  packetdrill remote helper that translates commands into OCaml calls and
+  this way execute and evaluate those tests
+- https://github.com/freebsd-net/tcp-testsuite/tree/master/state-event-engine
+- there's also tthee (part of netsem), extensive ad-hoc tests (with remote
+  helpers) of unix sockets API - the traces have been evaluated with FreeBSD
+  4.6 to some degree!
+
+## Further notes
+
+- from rationale.txt:208 cantrcvmore: this is equivalent to ``st IN {CLOSE_WAIT,
+  LAST_ACK, CLOSING; TIME_WAIT; CLOSED}``.  And FIN_WAIT_1???
+  invariants.txt:101
+  If cantrcvmore is set, then rcvq never grows.
+  Hypothesis:
+  cantrcvmore <== st IN { CLOSE_WAIT; LAST_ACK; FIN_WAIT_1;
+                          FIN_WAIT_2; CLOSING; TIME_WAIT }
+  ~cantrcvmore <== st IN { ESTABLISHED; SYN_SENT; SYN_RCVD }
+  think we don't care in LISTEN or CLOSED.
+  ==> if we believe this, we should remove cantrcvmore.
+  (note that cantsndmore is different; it merely records that we intend
+  to send a FIN (and change state) at some point in the future (not
+  necessarily now).)

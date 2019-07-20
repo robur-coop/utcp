@@ -77,7 +77,28 @@ let decode_options data =
   go 0 []
 
 module Flags = struct
+  (* this is likely inefficient. the model uses explicit fields (and YY_discard
+     bindings.
 
+     not all combinations are of interest anyways:
+     - PSH is rarely interesting (we will set whenever sndq is empty, when we
+           receive, we should (explicitly) trigger a notify)
+     - ACK is commonly in all segments (apart from the initial SYN!)
+           research whether there are any interesting non-ack segments!?
+     - FIN|SYN|RST are mutually exclusive (well, they are not, but I don't care
+           about segments that have more than one of the three set
+
+     when constructing, there's make_syn / make_syn_ack / make_rst explicit
+     anyways - FIN goes through tcp_really_output with cansndmore on the
+     connection
+
+     -> we can ensure "only valid combinations" (by shifting + comparison), and
+        then dress the type accordingly (flag : [`FIN | `SYN | `RST]), push
+        being a bool, and ack being merged with the Sequence.t into an option!
+
+     this way we get away from these cumbersome set / subset tests, drop bad
+     segments early (net.inet.tcp.drop_synfin), and use proper types for the
+     relevant flags. *)
   include Set.Make(struct
       type t = [ `FIN | `SYN | `RST | `PSH | `ACK ]
       let compare = compare
@@ -192,7 +213,7 @@ let drop_and_close id conn =
  (* timed out and error handling (if err = timedout then cb.t_softerror ) *)
 
 (* auxFns:1625 *)
-let tcp_do_output now conn =
+let tcp_output_required now conn =
   let cb = conn.State.control_block in
   let snd_cwnd =
     let rxtcur = Subr.computed_rxtcur cb.State.t_rttinf in
@@ -210,17 +231,14 @@ let tcp_do_output now conn =
   (*: Calculate the amount of unused send window :*)
   let win = min cb.State.snd_wnd snd_cwnd in
   let snd_wnd_unused = win - (Sequence.window cb.State.snd_nxt cb.State.snd_una) in
-
   (*: Is it possible that a FIN may need to be sent? :*)
   let fin_required =
     conn.State.cantsndmore &&
     match conn.State.tcp_state with Fin_wait_2 | Time_wait -> false | _ -> true
   in
-
   (*: Under BSD, we may need to send a [[FIN]] in state [[SYN_SENT]] or [[SYN_RECEIVED]], so we may
       effectively still have a [[SYN]] on the send queue. :*)
   let syn_not_acked = match conn.State.tcp_state with Syn_sent | Syn_received -> true | _ -> false in
-
   (*: Is there data or a FIN to transmit? :*)
   let last_sndq_data_seq = Sequence.addi cb.State.snd_una (Cstruct.len conn.State.sndq) in
   let last_sndq_data_and_fin_seq =
@@ -229,34 +247,30 @@ let tcp_do_output now conn =
   in
   let have_data_to_send = Sequence.less cb.snd_nxt last_sndq_data_seq in
   let have_data_or_fin_to_send = Sequence.less cb.snd_nxt last_sndq_data_and_fin_seq in
-
   (*: The amount by which the right edge of the advertised window could be moved :*)
   let window_update_delta =
     (min (Params.tcp_maxwin lsl cb.State.rcv_scale))
        (conn.rcvbufsize - Cstruct.len conn.rcvq) -
     Sequence.window cb.State.rcv_adv cb.State.rcv_nxt
   in
-
   (*: Send a window update? This occurs when (a) the advertised window can be increased by at
       least two maximum segment sizes, or (b) the advertised window can be increased by at least
       half the receive buffer size. See |tcp_output.c:322ff|. :*)
   let need_to_send_a_window_update =
     window_update_delta >= 2 * cb.State.t_maxseg || 2 * window_update_delta >= conn.rcvbufsize
   in
-
-  (*: Note that silly window avoidance and [[max_sndwnd]] need to be dealt with here; see |tcp_output.c:309| :*)
-
+  (*: Note that silly window avoidance and [[max_sndwnd]] need to be dealt with
+     here; see |tcp_output.c:309| :*)
   (*: Can a segment be transmitted? :*)
   let do_output =
     (*: Data to send and the send window has some space, or a FIN can be sent :*)
     (have_data_or_fin_to_send &&
-     (have_data_to_send && snd_wnd_unused > 0)) ||  (* don't need space if only sending FIN *)
+     (have_data_to_send && snd_wnd_unused > 0)) || (* don't need space if only sending FIN *)
     (*: Can send a window update :*)
     need_to_send_a_window_update ||
     (*: An ACK should be sent immediately (e.g. in reply to a window probe) :*)
     cb.State.tf_shouldacknow
   in
-
   let persist_fun =
     let cant_send = not do_output && Cstruct.len conn.sndq = 0 && cb.State.tt_rexmt = None in
     let window_shrunk = win = 0 && snd_wnd_unused < 0 in  (*: [[win = 0]] if in [[SYN_SENT]], but still may send FIN :*)
@@ -311,16 +325,12 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
    let last_sndq_data_seq = Sequence.addi cb.State.snd_una (Cstruct.len conn.sndq) in
    (*: The data to send in this segment (if any) :*)
    let data' = Cstruct.shift conn.State.sndq (Sequence.window cb.State.snd_nxt cb.State.snd_una) in
-   let data_to_send = Cstruct.sub data' 0 (min (max 0 snd_wnd_unused) cb.State.t_maxseg) in
+   let data_to_send =
+     Cstruct.sub data' 0 (min (Cstruct.len data') (min (max 0 snd_wnd_unused) cb.State.t_maxseg))
+   in
    let dlen = Cstruct.len data_to_send in
-
    (*: Should [[FIN]] be set in this segment? :*)
    let fin = fin_required && Sequence.(greater_equal (addi cb.State.snd_nxt (Cstruct.len data_to_send)) last_sndq_data_seq) in
-
-   (*: Should [[ACK]] be set in this segment? Under BSD, it is not set if the socket is in [[SYN_SENT]]
-       and emitting a [[FIN]] segment due to [[shutdown()]] having been called. :*)
-   (* let ack = if (bsd_arch arch /\ FIN /\ tcp_sock.st = SYN_SENT) then F else T in *)
-
    (*: If this socket has previously sent a [[FIN]] which has not yet been acked, and [[snd_nxt]]
        is past the [[FIN]]'s sequence number, then [[snd_nxt]] should be set to the sequence number
        of the [[FIN]] flag, i.e. a retransmission. Check that [[snd_una <> iss]] as in this case no
@@ -335,10 +345,8 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
      else
        cb.State.snd_nxt
    in
-
    (*: The BSD way: set [[PSH]] whenever sending the last byte of data in the send queue :*)
    let psh = dlen > 0 && Sequence.equal (Sequence.addi cb.State.snd_nxt dlen) last_sndq_data_seq in
-
    (*: Calculate size of the receive window (based upon available buffer space) :*)
    let rcv_wnd' =
      let window_size = Sequence.window cb.State.rcv_adv cb.State.rcv_nxt in
@@ -363,7 +371,6 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
         options = [] ; payload = data_to_send
       }
     in
-
     (*: If emitting a [[FIN]] for the first time then change TCP state :*)
     let tcp_state =
       if fin then
@@ -374,38 +381,28 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
       else
         conn.State.tcp_state
     in
-
     (*: Updated values to store in the control block after the segment is output :*)
-    let snd_nxt' = Sequence.(addi (addi snd_nxt dlen) (if fin then 1 else 0))
-    in
+    let snd_nxt' = Sequence.(addi (addi snd_nxt dlen) (if fin then 1 else 0)) in
     let snd_max = max cb.State.snd_max snd_nxt' in
-
     (*: Following a |tcp_output| code walkthrough by SB: :*)
-    let tt_rexmt = None in
-(*      match cb.State.tt_rexmt with
-      | None ->
-
-      if (mode_of cb.tt_rexmt = NONE \/
-		       (mode_of cb.tt_rexmt = SOME(Persist) /\ ~window_probe)) /\
-                        snd_nxt'' > cb.snd_una then
-                       (*: If the retransmit timer is not running, or the persist timer is running
-                           and this segment isn't a window probe, and this segment contains data or
-                           a [[FIN]] that occurs past [[snd_una]] (i.e.~new data), then start the
-                           retransmit timer. Note: if the persist timer is running it will be
-                           implicitly stopped :*)
-                       start_tt_rexmt arch 0 F cb.t_rttinf
-		    else if (window_probe \/ (IS_SOME tcp_sock.sndurp)) /\ win0 <> 0 /\
-                       mode_of cb.tt_rexmt = SOME(Persist) then
-                       (*: If the segment is a window probe or urgent data is being sent, and in
-                           either case the send window is not closed, stop any running persist
-                           timer. Note: if [[window_probe]] is [[T]] then a persist timer will
-                           always be running but this isn't necessarily true when urgent data is
-                           being sent :*)
-                       NONE (*: stop persisting :*)
-                    else
-		       (*: Otherwise, leave the timers alone :*)
-                       cb.tt_rexmt in *)
-
+    let tt_rexmt =
+      if (State.mode_of cb.tt_rexmt = None ||
+	  (State.mode_of cb.tt_rexmt = Some State.Persist && not window_probe)) &&
+         Sequence.greater snd_nxt' cb.snd_una then
+        (*: If the retransmit timer is not running, or the persist timer is
+           running and this segment isn't a window probe, and this segment
+           contains data or a [[FIN]] that occurs past [[snd_una]] (i.e.~new
+           data), then start the retransmit timer. Note: if the persist timer is
+           running it will be implicitly stopped :*)
+        Subr.start_tt_rexmt now 0 false cb.t_rttinf
+      else if window_probe && win0 <> 0 then
+        (*: If the segment is a window probe, and in either case the send window
+           is not closed, stop any running persist timer. :*)
+        None (*: stop persisting :*)
+      else
+	(*: Otherwise, leave the timers alone :*)
+        cb.tt_rexmt
+    in
     (*: Time this segment if it is sensible to do so, i.e.~the following conditions hold : (a) a
         segment is not already being timed, and (b) data or a FIN are being sent, and (c) the
         segment being emitted is not a retransmit, and (d) the segment is not a window probe :*)
@@ -419,7 +416,6 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
       else
         cb.State.t_rttseg
     in
-
     (*: Update the socket :*)
     let control_block = {
       cb with
@@ -436,6 +432,21 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
     }
     in
     { conn with tcp_state ; control_block }, (dst, seg)
+
+(* auxFns:2000 *)
+let tcp_output_perhaps now id conn =
+  let do_output, persist_fun = tcp_output_required now conn in
+  let conn' = match persist_fun with
+    | None -> conn
+    | Some f ->
+      let control_block = f conn.control_block in
+      { conn with control_block }
+  in
+  if do_output then
+    let conn'', seg = tcp_output_really now id false conn' in
+    conn'', Some seg
+  else
+    conn', None
 
 (* auxFns:1384 *)
 let make_syn_ack cb (_, src_port, dst, dst_port) =
