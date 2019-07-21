@@ -124,6 +124,8 @@ Model anomalies:
 
 - FLAGS rework
   - ack : Sequence.t option ; push : bool ; control : [ `SYN | `FIN | `RST ]
+  --> we then need to error with "has reset" and "has_ack" and "seq of Sequence.t" (to properly reply)
+  --> or just drop such segments without notifying the other side..
 - provide a Sequence.Infix module with < <= > >= = + ++ (where + is weird: Sequence.t -> int -> Sequence.t)
 - error handling (temporary errors / error types to present)
 
@@ -169,6 +171,25 @@ Model anomalies:
   helpers) of unix sockets API - the traces have been evaluated with FreeBSD
   4.6 to some degree!
 
+### Test notes
+
+a matrix from testing LISTEN and CLOSED ports, tested with FreeBSD and Linux:
+
+                 LISTEN               CLOSED
+            FreeBSD   Linux      FreeBSD     Linux
+NONE           -        -          RST+ACK(2) RST+ACK(2)
+FIN            -        -          RST+ACK(2) RST+ACK(2)
+FIN+ACK(+data)  RST     RST        RST        RST
+ACK(+data)      RST     RST        RST        RST
+RST(+ACK)(+SYN)(+FIN)-  -           -          -
+SYN          SYN+ACK    SYN+ACK    RST+ACK(2) RST+ACK(2)
+SYN+ACK         RST     RST        RST        RST
+SYN+FIN+data SYN+ACK(1)   -        RST+ACK(2) RST+ACK(2)
+SYN+data     SYN+ACK(1) SYN+ACK(1) RST+ACK(2) RST+ACK(2)
+
+1: only the SYN is acked, not FIN or data!
+2: ACK includes data and fin
+
 ## Further notes
 
 - from rationale.txt:208 cantrcvmore: this is equivalent to ``st IN {CLOSE_WAIT,
@@ -184,3 +205,21 @@ Model anomalies:
   (note that cantsndmore is different; it merely records that we intend
   to send a FIN (and change state) at some point in the future (not
   necessarily now).)
+
+- a "read shutdown" leads in FreeBSD to drop any incoming data (but still
+  processing segments AFAICT), imagine we set window size to 0 (so the remote
+  won't ever bother sending us more data) <- will reduce required bandwidth
+  on the flip side: the remote stack will start a timer to figure out when the
+  window opens again, since it can't know that window==0 will stay forever
+  ~> need to research the actual behaviour once the write part is finished as
+     well and we send a fin (the other side may still try to send us their sndq,
+     until some timeout)
+  ~~> for app-level protocols (i.e. TLS) for proper teardown they want to send
+      some data (alert close_notify), which will be avoided
+  ~> may negatively impact the other tcp state (and keep us in fin_wait_2 for
+     a long time (with the timer being reset by window probes))
+  ~> likely depends on the LINGER option set on the other side, whether to wait
+     in close() until delivered
+
+- RCVTIMEO and SNDTIMEO <- what exactly do they time? until accepted in
+  sndq/rcvq?

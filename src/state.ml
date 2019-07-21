@@ -13,18 +13,6 @@ type tcp_state =
   | Fin_wait_2
   | Time_wait
 
-let equal_tcp_state a b = match a, b with
-  | Syn_sent, Syn_sent
-  | Syn_received, Syn_received
-  | Established, Established
-  | Close_wait, Close_wait
-  | Fin_wait_1, Fin_wait_1
-  | Closing, Closing
-  | Last_ack, Last_ack
-  | Fin_wait_2, Fin_wait_2
-  | Time_wait, Time_wait -> true
-  | _ -> false
-
 let behind_established = function Syn_sent | Syn_received -> false | _ -> true
 
 let is_connected = function
@@ -62,22 +50,6 @@ type rttinf = {
      annoying because they are *only* required for the tcp_output test that
      returns to slow start if the connection has been idle for >=1RTO *)
 }
-
-let equal_rttinf a b =
-  a.t_rttupdated = b.t_rttupdated &&
-  a.tf_srtt_valid = b.tf_srtt_valid &&
-  a.t_srtt = b.t_srtt &&
-  a.t_rttvar = b.t_rttvar &&
-  a.t_rttmin = b.t_rttmin &&
-  (match a.t_lastrtt, b.t_lastrtt with
-   | None, None -> true
-   | Some a, Some b -> a = b
-   | _ -> false) &&
-  (match a.t_lastshift, b.t_lastshift with
-   | None, None -> true
-   | Some a, Some b -> a = b
-   | _ -> false) &&
-  a.t_wassyn = b.t_wassyn
 
 type rexmtmode = RexmtSyn | Rexmt | Persist
 
@@ -162,69 +134,6 @@ type control_block = {
 
 }
 
-let equal_timer_opt eq a b = match a, b with
-  | None, None -> true
-  | Some (a, d), Some (b, d') -> d = d' && eq a b
-  | _ -> false
-
-let equal_control_block a b =
-  equal_timer_opt
-    (fun (mode, shift) (mode', shift') -> mode = mode' && shift = shift')
-    a.tt_rexmt b.tt_rexmt &&
-  equal_timer_opt (fun () () -> true) a.tt_2msl b.tt_2msl &&
-  equal_timer_opt (fun () () -> true) a.tt_delack b.tt_delack &&
-  equal_timer_opt (fun () () -> true) a.tt_conn_est b.tt_conn_est &&
-  equal_timer_opt (fun () () -> true) a.tt_fin_wait_2 b.tt_fin_wait_2 &&
-
-  Mtime.equal a.t_idletime b.t_idletime &&
-  a.tf_needfin = b.tf_needfin &&
-  a.tf_shouldacknow = b.tf_shouldacknow &&
-
-  Sequence.equal a.snd_una b.snd_una &&
-  Sequence.equal a.snd_max b.snd_max &&
-  Sequence.equal a.snd_nxt b.snd_nxt &&
-  Sequence.equal a.snd_wl1 b.snd_wl1 &&
-  Sequence.equal a.snd_wl2 b.snd_wl2 &&
-  Sequence.equal a.iss b.iss &&
-  a.snd_wnd = b.snd_wnd &&
-  a.snd_cwnd = b.snd_cwnd &&
-  a.snd_ssthresh = b.snd_ssthresh &&
-
-  a.rcv_wnd = b.rcv_wnd &&
-  a.tf_rxwin0sent = b.tf_rxwin0sent &&
-  Sequence.equal a.rcv_nxt b.rcv_nxt &&
-  Sequence.equal a.irs b.irs &&
-  Sequence.equal a.rcv_adv b.rcv_adv &&
-  Sequence.equal a.last_ack_sent b.last_ack_sent &&
-
-  a.t_maxseg = b.t_maxseg &&
-  a.t_advmss = b.t_advmss &&
-
-  a.tf_doing_ws = b.tf_doing_ws &&
-  (match a.request_r_scale, b.request_r_scale with
-   | None, None -> true
-   | Some a, Some b -> a = b
-   | _ -> false) &&
-  a.snd_scale = b.snd_scale &&
-  a.rcv_scale = b.rcv_scale &&
-
-  (match a.t_rttseg, b.t_rttseg with
-   | None, None -> true
-   | Some (ts, seq), Some (ts', seq') -> Mtime.equal ts ts' && Sequence.equal seq seq'
-   | _ -> false) &&
-  equal_rttinf a.t_rttinf b.t_rttinf &&
-
-  a.t_dupacks = b.t_dupacks &&
-  Mtime.equal a.t_badrxtwin b.t_badrxtwin &&
-  a.snd_cwnd_prev = b.snd_cwnd_prev &&
-  a.snd_ssthresh_prev = b.snd_ssthresh_prev &&
-  Sequence.equal a.snd_recover b.snd_recover &&
-
-  (match a.t_softerror, b.t_softerror with
-   | None, None -> true
-   | Some a, Some b -> String.equal a b
-   | _ -> false)
-
 (* auxFns:1066*)
 let initial_cb =
   let initial_rttinf = {
@@ -282,7 +191,7 @@ let initial_cb =
 let pp_control ppf c =
   Fmt.pf ppf "needfin %B@ shouldacknow %B@ snd_una %a@ snd_max %a@ snd_nxt %a@ snd_wl1 %a@ snd_wl2 %a@ iss %a@ \
               snd_wnd %d@ snd_cwnd %d@ snd_sshtresh %d@ \
-              rcv_wnd %d@ tf_rxwin0sent %B@ rcv_nxt %a@ irs %a@ src_adv %a@ \
+              rcv_wnd %d@ tf_rxwin0sent %B@ rcv_nxt %a@ irs %a@ rcv_adv %a@ \
               snd_recover %a@ t_maxseg %d@ t_advmss %d@ snd_scale %d@ rcv_scale %d@ request_r_scale %a@ tf_doing_ws %B"
     c.tf_needfin c.tf_shouldacknow
     Sequence.pp c.snd_una Sequence.pp c.snd_max Sequence.pp c.snd_nxt
@@ -344,15 +253,6 @@ type conn_state = {
   (* reassembly : Cstruct.t list ; (* TODO nicer data structure! *) *)
 }
 
-let equal_conn_state a b =
-  equal_tcp_state a.tcp_state b.tcp_state &&
-  a.cantrcvmore = b.cantrcvmore &&
-  a.cantsndmore = b.cantsndmore &&
-  a.rcvbufsize = b.rcvbufsize &&
-  Cstruct.equal a.sndq b.sndq &&
-  Cstruct.equal a.rcvq b.rcvq &&
-  equal_control_block a.control_block b.control_block
-
 let conn_state ~rcvbufsize ~sndbufsize tcp_state control_block = {
   tcp_state ; control_block ;
   cantrcvmore = false ; cantsndmore = false ;
@@ -372,11 +272,6 @@ type t = {
   listeners : IS.t ;
   connections : conn_state CM.t
 }
-
-let equal a b =
-  Ipaddr.V4.compare a.ip b.ip = 0 &&
-  IS.equal a.listeners b.listeners &&
-  CM.equal equal_conn_state a.connections b.connections
 
 let pp ppf t =
   Fmt.pf ppf "IP %a, listener %a, connections: %a"
