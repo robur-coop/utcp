@@ -942,12 +942,18 @@ let handle_noconn t now id seg =
     (* TODO resource management: limit number of outstanding connection attempts *)
     let conn, reply = deliver_in_1 t.rng now id seg in
     { t with connections = CM.add id conn t.connections }, Some reply
-  | listen, syn ->
-    if not listen then
-      Logs.warn (fun m -> m "dropping segment (no listener) %a" Segment.pp seg);
+  | true, false ->
+    (* deliver_in_1b *)
+    let out =
+      if Segment.Flags.mem `ACK seg.Segment.flags then
+        dropwithreset id seg
+      else
+        None
+    in
+    t, out
+  | false, syn ->
     if not syn then
       Logs.warn (fun m -> m "dropping segment (not only SYN) %a" Segment.pp seg);
-    (* deliver_in_1b - we do less checks and potentially send more resets *)
     (* deliver_in_5 / deliver_in_6 *)
     t, dropwithreset id seg
 

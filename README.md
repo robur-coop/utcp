@@ -184,7 +184,7 @@ ACK(+data)      RST     RST        RST        RST
 RST(+ACK)(+SYN)(+FIN)-  -           -          -
 SYN          SYN+ACK    SYN+ACK    RST+ACK(2) RST+ACK(2)
 SYN+ACK         RST     RST        RST        RST
-SYN+FIN+data SYN+ACK(1)   -        RST+ACK(2) RST+ACK(2)
+SYN+FIN(+data)SYN+ACK(1)  -        RST+ACK(2) RST+ACK(2)
 SYN+data     SYN+ACK(1) SYN+ACK(1) RST+ACK(2) RST+ACK(2)
 
 1: only the SYN is acked, not FIN or data!

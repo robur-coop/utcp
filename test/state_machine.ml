@@ -198,18 +198,20 @@ let listen () =
   (* what we could: SYN+ACK, FIN+ACK, RST+data, FIN+data, SYN+ACK+data, FIN+ACK+data *)
   (* in addition, we should test various options *)
   let seg = { basic_seg with seq = Sequence.of_int32 42l } in
-  let rst = { basic_seg with
-              src_port = seg.dst_port ; dst_port = seg.src_port ;
-              flags = Segment.Flags.of_list [`ACK ; `RST ] ; ack = seg.seq } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, Some (your_ip, rst))
+  Alcotest.(check test_full_handle __LOC__ (tcp, None)
               (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg)) ;
   let seg' = { seg with flags = Segment.Flags.singleton `ACK ; ack = Sequence.of_int32 23l } in
-  let rst' = { rst with flags = Segment.Flags.singleton `RST ; ack = Sequence.zero ; seq = seg'.ack } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, Some (your_ip, rst'))
+  let rst = { basic_seg with
+               src_port = seg.dst_port ; dst_port = seg.src_port ;
+               seq = seg'.ack ; ack = Sequence.zero ;
+               flags = Segment.Flags.singleton `RST ;
+            }
+  in
+  Alcotest.(check test_full_handle __LOC__ (tcp, Some (your_ip, rst))
               (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg')) ;
   let seg'' = { seg with flags = Segment.Flags.singleton `SYN } in
   let seq = Sequence.of_int32 0xA5A5A5A5l in
-  let ans = { rst with ack = Sequence.incr rst.ack ; seq ;
+  let ans = { rst with ack = Sequence.incr seg''.seq ; seq ;
                        flags = Segment.Flags.of_list [ `SYN ; `ACK ] ;
                        window = 1 lsl 16 - 1 ; options = [ Segment.MaximumSegmentSize 1460 ] }
   in
@@ -227,12 +229,10 @@ let listen () =
   Alcotest.(check test_full_handle __LOC__ (tcp, None)
               (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg''')) ;
   let seg'''' = { seg with flags = Segment.Flags.singleton `FIN } in
-  let rst''' = { rst with ack = Sequence.incr rst.ack } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, Some (your_ip, rst'''))
+  Alcotest.(check test_full_handle __LOC__ (tcp, None)
               (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg'''')) ;
   let seg''''' = { seg with flags = Segment.Flags.of_list [ `SYN ; `FIN ] } in
-  let rst'''' = { rst with ack = Sequence.(incr (incr rst.ack)) } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, Some (your_ip, rst''''))
+  Alcotest.(check test_full_handle __LOC__ (tcp, None)
               (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg''''')) ;
   (* syn with data -- we ack the SYN only, sender expected to re-send data *)
   let seg'''''' = { seg with flags = Segment.Flags.singleton `SYN ; payload = Cstruct.create 100 } in
