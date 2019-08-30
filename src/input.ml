@@ -24,7 +24,11 @@ deliver_in_3d - valid ack in (Syn_received + ACK -- normal 3WS) - handle_conn
 deliver_in_4 - drop non-sane or martian segment - validate_segment fails
 deliver_in_5 - drop with RST sth not matching any socket - handle_noconn
 deliver_in_6 - drop sane segment in CLOSED - not handled (no CLOSED, handle_noconn may reset)
-deliver_in_7 - recv RST and zap - handle_conn
+deliver_in_7 - recv RST and zap non-CLOSED/LISTEN/SYN_SENT/SYN_RECEIVED/TIME_WAIT - handle_conn
+deliver_in_7a - recv RST and zap SYN_RECEIVED state
+deliver_in_7b - recv RST and ignore in LISTEN
+deliver_in_7c - recv RST and ignore in SYN_SENT/TIME_WAIT
+deliver_in_7d - recv RST and zap SYN_SENT
 deliver_in_8 - recv SYN in yy - handle_conn
 deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - not handled
 ??deliver_in_10 - stupid flag combinations are dropped (without reset)
@@ -168,7 +172,7 @@ let deliver_in_2 now id conn seg =
   { conn with control_block ; tcp_state = Established ; rcvbufsize ; sndbufsize },
   Segment.make_ack control_block false id
 
-let deliver_in_2b _conn _seg =
+let deliver_in_2b _now _id _conn _seg =
   (* simultaneous open: accept anything, send syn+ack *)
   assert false
 
@@ -182,7 +186,8 @@ let deliver_in_2a conn seg =
 let deliver_in_3c_3d conn seg =
   (* deliver_in_3c and syn_received parts of deliver_in_3 (now deliver_in_3d) *)
   (* TODO hostLTS:15801: [[SYN]] flag set may be set in the final segment of a
-     simultaneous open (does this change anything for us?) :*)
+     simultaneous open (does this change anything for us?) *)
+  (* yes: seq may be cb.irs and flags = syn+ack (simultaneous open!) *)
   let cb = conn.control_block in
   (* what is the current state? *)
   (* - we acked the initial syn, their seq should be rcv_nxt (or?) *)
@@ -191,10 +196,11 @@ let deliver_in_3c_3d conn seg =
   guard (Sequence.equal seg.Segment.seq cb.rcv_nxt) (`Drop "seq = rcv_nxt") >>= fun () ->
   (* - we sent our syn, so we expect an appropriate ack for the syn! *)
   (* - we didn't send out more data, so that ack should be exact *)
-  (* if their seq is not good, drop packet *)
+  (* if their seq is not good, drop packet -- TODO allow syn *)
   guard (Segment.Flags.only `ACK seg.Segment.flags) (`Reset "only ACK flag") >>= fun () ->
   (* hostLTS:15828 - well, more or less ;) *)
   (* auxFns:2252 ack < snd_una || snd_max < ack -> break LAND DoS, prevent ACK storm *)
+  (* TODO what is an acceptable ack? snd_nxt, if <> what to do? *)
   guard (Sequence.equal seg.Segment.ack cb.snd_nxt) (`Reset "ack = snd_nxt") >>| fun () ->
   (* not (ack <= tcp_sock.cb.snd_una \/ ack > tcp_sock.cb.snd_max) *)
   (* TODO rtt measurement likely, reset idle time! *)
@@ -975,7 +981,23 @@ let handle_conn t now id conn seg =
         | false, true -> deliver_in_2b conn seg >>| fun (c', o) -> add c', Some o
         | false, false -> deliver_in_2a conn seg >>| fun () -> drop (), None
       end
-    | Syn_received -> deliver_in_3c_3d conn seg >>| fun conn' -> add conn', None
+    | Syn_received ->
+      (* expected is:
+          - ACK with proper seg (3d) ~> ok established
+          - stupid ACK 3c -> drop
+          - RST (=rcv_nxt) 7a -> zap
+          - RST 7e -> drop
+          - RST in-window -> challenge-ack
+         may hit as well (ignore):
+          - FIN [grmbl - just not ack it, will then be handled in established]
+          - SYN (simultaneous open..)
+         model uses di_3 (there's no separate 3d)
+
+         according to 793, once simultaneous open ends us in syn_received, that
+         even may emit syn+ack (with seq = iss) to move forward [but then, as
+         well just an ack is possible with seq = iss + 1]
+      *)
+      deliver_in_3c_3d conn seg >>| fun conn' -> add conn', None
     | _ ->
       guard (in_window conn.control_block seg) (`Drop "in_window") >>= fun () ->
       (* RFC 5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)

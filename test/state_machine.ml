@@ -144,7 +144,8 @@ and src_port = 4321
 let quad = my_ip, listen_port, your_ip, src_port
 
 (* a TCP stack listening on port 1234 *)
-let tcp = State.start_listen (State.empty static_rng my_ip) listen_port
+let tcp = State.empty static_rng my_ip
+let tcp_listen = State.start_listen tcp listen_port
 
 let basic_seg = {
   Segment.src_port ; dst_port = listen_port ; seq = Tcp.Sequence.zero ;
@@ -152,102 +153,204 @@ let basic_seg = {
   options = [] ; payload = Cstruct.empty
 }
 
-(* now we need to put the stack into a TCP state, and push various segments,
-   compare whether the return value is what we expect *)
-let no_state () =
-  (* when the TCP stack does not know the quadruple at all [and there is no
-     listener], we expect either drop or RST (never RST a RST) *)
-  (* what we test: NONE, ACK, SYN, RST, FIN, SYN+FIN, SYN+data *)
-  (* what we could: SYN+ACK, FIN+ACK, RST+data, FIN+data, SYN+ACK+data, FIN+ACK+data *)
-  let dst_port = 1235 in
-  let quad = my_ip, dst_port, your_ip, src_port in
-  let seg = { basic_seg with dst_port ; seq = Sequence.of_int32 42l } in
-  let rst = { basic_seg with
-              src_port = seg.dst_port ; dst_port = seg.src_port ;
-              flags = Segment.Flags.of_list [`ACK ; `RST ] ; ack = seg.seq } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, Some (your_ip, rst))
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg)) ;
-  let seg' = { seg with flags = Segment.Flags.singleton `ACK ; ack = Sequence.of_int32 23l } in
-  let rst' = { rst with flags = Segment.Flags.singleton `RST ; ack = Sequence.zero ; seq = seg'.ack } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, Some (your_ip, rst'))
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg')) ;
-  let seg'' = { seg with flags = Segment.Flags.singleton `SYN } in
-  let rst'' = { rst with ack = Sequence.incr rst.ack } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, Some (your_ip, rst''))
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg'')) ;
-  let seg''' = { seg with flags = Segment.Flags.singleton `RST } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, None)
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg''')) ;
-  let seg'''' = { seg with flags = Segment.Flags.singleton `FIN } in
-  let rst''' = { rst with ack = Sequence.incr rst.ack } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, Some (your_ip, rst'''))
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg'''')) ;
-  let seg''''' = { seg with flags = Segment.Flags.of_list [ `SYN ; `FIN ] } in
-  let rst'''' = { rst with ack = Sequence.(incr (incr rst.ack)) } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, Some (your_ip, rst''''))
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg''''')) ;
-  let seg'''''' = { seg with flags = Segment.Flags.singleton `SYN ; payload = Cstruct.create 100 } in
-  let rst''''' = { rst with ack = Sequence.(addi rst.ack 101) } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, Some (your_ip, rst'''''))
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg''''''))
+let initial_seq = Sequence.of_int32 42l
+and initial_ack = Sequence.of_int32 23l
+and rng_seq = Sequence.of_int32 0xA5A5A5A5l
 
-let listen () =
-  (* for a listen socket, anything apart from SYN should be RST (well, not RST) *)
-  (* a SYN should lead to a new pcb in Syn_received state *)
-  (* what we test: NONE, ACK, SYN, RST, FIN, SYN+FIN, SYN+data *)
-  (* what we could: SYN+ACK, FIN+ACK, RST+data, FIN+data, SYN+ACK+data, FIN+ACK+data *)
-  (* in addition, we should test various options *)
-  let seg = { basic_seg with seq = Sequence.of_int32 42l } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, None)
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg)) ;
-  let seg' = { seg with flags = Segment.Flags.singleton `ACK ; ack = Sequence.of_int32 23l } in
-  let rst = { basic_seg with
-               src_port = seg.dst_port ; dst_port = seg.src_port ;
-               seq = seg'.ack ; ack = Sequence.zero ;
-               flags = Segment.Flags.singleton `RST ;
-            }
+(* 8 different input segments for testing our state machine *)
+let test_segs ack payload =
+  let seg = { basic_seg with seq = initial_seq }
+  and with_ack f = Segment.Flags.(add `ACK (singleton f))
+  and str =
+    let l = Cstruct.len payload in
+    if l = 0 then "" else "+" ^ string_of_int l ^ " bytes data"
+  in [
+    "NONE" ^ str, { seg with payload } ;
+    "ACK" ^ str, { seg with flags = Segment.Flags.singleton `ACK ; ack ; payload } ;
+    "SYN" ^ str, { seg with flags = Segment.Flags.singleton `SYN ; payload } ;
+    "RST" ^ str, { seg with flags = Segment.Flags.singleton `RST ; payload } ;
+    "FIN" ^ str, { seg with flags = Segment.Flags.singleton `FIN ; payload } ;
+    "SYN+ACK" ^ str, { seg with flags = with_ack `SYN ; ack ; payload } ;
+    "RST+ACK" ^ str, { seg with flags = with_ack `RST ; ack ; payload } ;
+    "FIN+ACK" ^ str, { seg with flags = with_ack `FIN ; ack ; payload } ;
+  ]
+
+(* we encode the answers to each of these 16 segments for each state *)
+let no_state dl =
+  let rst = {
+    basic_seg with src_port = listen_port ; dst_port = src_port ;
+    flags = Segment.Flags.singleton `RST ; seq = initial_ack
+  } in
+  let rst_ack = {
+    rst with flags = Segment.Flags.of_list [ `RST ; `ACK ] ; ack = initial_seq ;
+             seq = Sequence.zero
+  } in [
+    Some { rst_ack with ack = Sequence.addi rst_ack.ack dl };
+    Some rst ;
+    Some { rst_ack with ack = Sequence.(incr (addi rst_ack.ack dl)) } ;
+    None ;
+    Some { rst_ack with ack = Sequence.(incr (addi rst_ack.ack dl)) } ;
+    Some rst ;
+    None ;
+    Some rst ;
+  ]
+
+let test_closed =
+  let test_all s p =
+    List.map2 (fun (name, seg) (cnt, reply) ->
+        "closed" ^ s ^ string_of_int cnt, `Quick,
+        fun () ->
+          Alcotest.check test_full_handle ("CLOSED, seg " ^ name) (tcp, reply)
+            (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg))
+      (test_segs initial_ack p)
+      (List.mapi (fun i v ->
+           i, match v with None -> None | Some s -> Some (your_ip, s))
+          (no_state (Cstruct.len p)))
   in
-  Alcotest.(check test_full_handle __LOC__ (tcp, Some (your_ip, rst))
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg')) ;
-  let seg'' = { seg with flags = Segment.Flags.singleton `SYN } in
-  let seq = Sequence.of_int32 0xA5A5A5A5l in
-  let ans = { rst with ack = Sequence.incr seg''.seq ; seq ;
-                       flags = Segment.Flags.of_list [ `SYN ; `ACK ] ;
-                       window = 1 lsl 16 - 1 ; options = [ Segment.MaximumSegmentSize 1460 ] }
+  test_all " " Cstruct.empty @ test_all "+data " (Cstruct.create 20)
+
+let listen =
+  let rst = {
+    basic_seg with src_port = listen_port ; dst_port = src_port ;
+                   seq = initial_ack ; ack = Sequence.zero ;
+                   flags = Segment.Flags.singleton `RST ;
+  } in
+  let synack = {
+    rst with seq = rng_seq ; ack = Sequence.incr initial_seq ;
+             flags = Segment.Flags.of_list [ `SYN ; `ACK ] ;
+             window = 1 lsl 16 - 1 ;
+             options = [ Segment.MaximumSegmentSize 1460 ] }
   in
   let tcp' =
-    let conn =
-      State.conn_state ~rcvbufsize:Params.so_rcvbuf
-        ~sndbufsize:Params.so_sndbuf Syn_received State.initial_cb
-    in
-    { tcp with connections = State.CM.add quad conn tcp.connections }
+    let conn = State.conn_state ~rcvbufsize:0 ~sndbufsize:0 Syn_received State.initial_cb in
+    { tcp_listen with connections = State.CM.add quad conn tcp_listen.connections }
+  in [
+    tcp_listen, None ;
+    tcp_listen, Some rst ;
+    tcp', Some synack ;
+    tcp_listen, None ;
+    tcp_listen, None ;
+    tcp_listen, Some rst ;
+    tcp_listen, None ;
+    tcp_listen, Some rst ;
+  ]
+
+(* TODO we should test various TCP options in the SYN (and test cb)! *)
+let test_listen =
+  let test_all s p =
+    List.map2 (fun (name, seg) (cnt, tcp, reply) ->
+        "listen" ^ s ^ string_of_int cnt, `Quick,
+        fun () ->
+          Alcotest.check test_handle ("LISTEN, seg " ^ name) (tcp, reply)
+            (Input.handle_segment tcp_listen (Mtime.of_uint64_ns 0L) quad seg))
+      (test_segs initial_ack p)
+      (List.mapi (fun i (s, v) ->
+           i, s, match v with None -> None | Some s -> Some (your_ip, s))
+          listen)
   in
-  Alcotest.(check test_handle __LOC__
-              (tcp', Some (your_ip, ans))
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg'')) ;
-  let seg''' = { seg with flags = Segment.Flags.singleton `RST } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, None)
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg''')) ;
-  let seg'''' = { seg with flags = Segment.Flags.singleton `FIN } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, None)
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg'''')) ;
-  let seg''''' = { seg with flags = Segment.Flags.of_list [ `SYN ; `FIN ] } in
-  Alcotest.(check test_full_handle __LOC__ (tcp, None)
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg''''')) ;
-  (* syn with data -- we ack the SYN only, sender expected to re-send data *)
-  let seg'''''' = { seg with flags = Segment.Flags.singleton `SYN ; payload = Cstruct.create 100 } in
-  Alcotest.(check test_handle __LOC__ (tcp', Some (your_ip, ans))
-              (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg''''''))
+  test_all " " Cstruct.empty @ test_all "+data " (Cstruct.create 20)
 
-(*
-let syn_rcvd () =
-  let syn = { basic_seg with flags = Segment.Flags.singleton `SYN ; seq = Sequence.of_int32 23l } in
-  let tcp', _ = Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad syn in
-  (* now, the syn lead to a new connection, and a syn-ack being transmitted *)
-  (* anything apart from an ACK segment should be dropped with reset *)
-*)
+let tcp_syn_sent =
+  let tcp', _id, _out =
+    User.connect tcp (Mtime.of_uint64_ns 0L) ~src_port:listen_port your_ip src_port
+  in
+  tcp'
 
-let tests = [
-  "no state", `Quick, no_state ;
-  "listen", `Quick, listen ;
-]
+let syn_sent_ack_iss, syn_sent_ack_bad =
+  let tcp_est =
+    let conn = State.CM.find quad tcp_syn_sent.connections in
+    let conn' = { conn with tcp_state = Established } in
+    { tcp_syn_sent with connections = State.CM.add quad conn' tcp_syn_sent.connections }
+  and ack = {
+    basic_seg with src_port = listen_port ; dst_port = src_port ;
+                   seq = Sequence.incr rng_seq ;
+                   ack = Sequence.incr initial_seq ;
+                   flags = Segment.Flags.singleton `ACK ;
+                   window = 1 lsl 16 - 1 ;
+  } in [
+    tcp_syn_sent, None ;
+    tcp_syn_sent, None ;
+    tcp_syn_sent, None ; (* this is simultaneous open, which we skip atm *)
+    tcp_syn_sent, None ;
+    tcp_syn_sent, None ;
+    tcp_est, Some ack ;
+    tcp, None ;
+    tcp_syn_sent, None ;
+  ], [
+    tcp_syn_sent, None ;
+    tcp_syn_sent, None ;
+    tcp_syn_sent, None ;
+    tcp_syn_sent, None ;
+    tcp_syn_sent, None ;
+    tcp_syn_sent, None ;
+    tcp_syn_sent, None ;
+    tcp_syn_sent, None ;
+  ]
+
+let test_syn_sent =
+  let test_all s ack p res =
+    List.map2 (fun (name, seg) (cnt, tcp, reply) ->
+        if cnt = 2 then
+          "skip simultaneous open", `Quick, fun () -> ()
+        else
+          "syn_sent" ^ s ^ string_of_int cnt, `Quick,
+          fun () ->
+            Alcotest.check test_handle ("SYN_SENT, seg " ^ name) (tcp, reply)
+              (Input.handle_segment tcp_syn_sent (Mtime.of_uint64_ns 0L) quad seg))
+      (test_segs ack p)
+      (List.mapi (fun i (s, v) ->
+           i, s, match v with None -> None | Some s -> Some (your_ip, s))
+          res)
+  in
+  test_all " " (Sequence.incr rng_seq) Cstruct.empty syn_sent_ack_iss @
+  test_all "+iss " rng_seq Cstruct.empty syn_sent_ack_bad @
+  test_all "+iss+2 " (Sequence.addi rng_seq 2) Cstruct.empty syn_sent_ack_bad @
+  test_all "+data " (Sequence.incr rng_seq) (Cstruct.create 20) syn_sent_ack_iss @
+  test_all "+data+iss " rng_seq (Cstruct.create 20) syn_sent_ack_bad @
+  test_all "+data+iss+2 " (Sequence.addi rng_seq 2) (Cstruct.create 20) syn_sent_ack_bad
+
+let tcp_syn_rcvd =
+  let syn = { basic_seg with
+              flags = Segment.Flags.singleton `SYN ;
+              seq = Sequence.addi initial_seq (-1) }
+  in
+  fst (Input.handle_segment tcp_listen (Mtime.of_uint64_ns 0L) quad syn)
+(* now, the syn lead to a new connection, and a syn-ack being transmitted *)
+(* anything apart from an ACK segment should be dropped with reset *)
+
+let syn_received =
+  let tcp' =
+    let conn = State.CM.find quad tcp_syn_rcvd.connections in
+    let conn' = { conn with tcp_state = Established } in
+    { tcp_syn_rcvd with connections = State.CM.add quad conn' tcp_syn_rcvd.connections }
+  in
+  [
+    tcp_syn_rcvd, None; (* atm - drop + AR *)
+    tcp', None; (* ~> est *)
+    tcp_listen, None; (* comefrom listen ~> listen, otherwise (sim-open) challenge-ack -- atm AR *)
+    tcp_listen, None;
+    tcp_syn_rcvd, None; (* atm drop + AR [should just drop, no ACK] *)
+    tcp_syn_rcvd, None; (* sim open (when seq--) *)
+    tcp_listen, None;
+    tcp_syn_rcvd, None; (* ~> close_wait *)
+  ]
+
+(* we already know irs ~> need to check in addition to the flag combinations
+   also for segments being in-window [left & right edge], and out of window *)
+let test_syn_rcvd =
+  let test_all s ack p =
+    List.map2 (fun (name, seg) (cnt, tcp, reply) ->
+        "syn received" ^ s ^ string_of_int cnt, `Quick,
+        if cnt = 0 || cnt = 2 then fun () -> () else
+        fun () ->
+          Alcotest.check test_handle ("SYN_RCVD, seg " ^ name) (tcp, reply)
+            (Input.handle_segment tcp_syn_rcvd (Mtime.of_uint64_ns 0L) quad seg))
+      (test_segs ack p)
+      (List.mapi (fun i (s, v) ->
+           i, s, match v with None -> None | Some s -> Some (your_ip, s))
+          syn_received)
+  in
+  test_all " " (Sequence.incr rng_seq) Cstruct.empty
+
+let tests =
+  test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd

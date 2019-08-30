@@ -126,6 +126,11 @@ Model anomalies:
   - ack : Sequence.t option ; push : bool ; control : [ `SYN | `FIN | `RST ]
   --> we then need to error with "has reset" and "has_ack" and "seq of Sequence.t" (to properly reply)
   --> or just drop such segments without notifying the other side..
+  from draft-rfc793bis:
+    CLOSED: ACK set/unset
+    LISTEN: first RST (ignore), second ACK (RST), third SYN, fourth others (ignore RST, drop)
+    SYN-SENT: first ACK, second RST, SYN
+    others: check sequence number, then RST, then SYN, then ACK, then FIN
 - provide a Sequence.Infix module with < <= > >= = + ++ (where + is weird: Sequence.t -> int -> Sequence.t)
 - error handling (temporary errors / error types to present)
 
@@ -133,7 +138,7 @@ Model anomalies:
    (maybe temporary) which are preserved in softerror, and bubble up
    [also timeouts] <- this is to-be-returned when connect/read/write/close fails
 - icmp also for path-mtu
-- when is t_maxseg set? is it modified at all?
+- when is t_maxseg set? is it modified at all? (should not be once ESTABLISHED is reached)
 
 - t_badrxtwin <- meh (don't understand its value and usage)
 
@@ -152,6 +157,7 @@ Model anomalies:
 - further avoiding allocations: sndq and rcvq should be lists of cstruct (no need for Cstruct.append!)
 
 - make the bsd_fast_path a fast path for us ;)
+- the rcv_window computations are done for bad segments (di_2a/7c/7d) on BSD as well, but we don't need that behaviour
 
 ## Testing
 
