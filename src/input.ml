@@ -86,9 +86,9 @@ let deliver_in_1 rng now id seg =
   Log.debug (fun m -> m "%a passive open %a" Connection.pp id pp_conn_state conn);
   conn, reply
 
-let deliver_in_2 now id conn seg =
+let deliver_in_2 now id conn seg ack =
   let cb = conn.control_block in
-  guard (Sequence.equal seg.Segment.ack cb.snd_nxt) (`Drop "ack = snd_nxt") >>| fun () ->
+  guard (Sequence.equal ack cb.snd_nxt) (`Drop "ack = snd_nxt") >>| fun () ->
   let tf_doing_ws, snd_scale, rcv_scale =
     match Segment.ws seg, cb.request_r_scale with
     | None, _ -> false, 0, 0
@@ -107,7 +107,7 @@ let deliver_in_2 now id conn seg =
   let t_softerror, t_rttseg, t_rttinf, tt_rexmt =
     (*: update RTT estimators from timestamp or roundtrip time :*)
     let emission_time = match cb.t_rttseg with
-      | Some (ts0, seq0) when Sequence.greater seg.Segment.ack seq0 -> Some ts0
+      | Some (ts0, seq0) when Sequence.greater ack seq0 -> Some ts0
       | _ -> None
     in
     (*: clear soft error, cancel timer, and update estimators if we successfully timed a segment round-trip :*)
@@ -119,7 +119,7 @@ let deliver_in_2 now id conn seg =
     in
     (*: mess with retransmit timer if appropriate :*)
     let tt_rexmt' =
-      if Sequence.equal seg.Segment.ack cb.snd_max then
+      if Sequence.equal ack cb.snd_max then
         (*: if acked everything, stop :*)
         None
         (*: [[needoutput = 1]] -- see below :*)
@@ -151,7 +151,7 @@ let deliver_in_2 now id conn seg =
     snd_una = Sequence.incr cb.iss ;
     (* snd_nxt / snd_max when fin / closed / cantsndmore *)
     snd_wl1 = Sequence.incr seg.seq ;
-    snd_wl2 = seg.ack ;
+    snd_wl2 = ack ;
     (* snd_wnd = win ; *)
     snd_cwnd ;
     rcv_scale ;
@@ -176,12 +176,17 @@ let deliver_in_2b _now _id _conn _seg =
   (* simultaneous open: accept anything, send syn+ack *)
   assert false
 
-let deliver_in_2a conn seg =
+let deliver_in_2a conn seg f =
   (* well well, the remote could have leftover state and send us a ack+fin... but that's fine to drop (and unlikely to happen now that we have random)
      server.exe: [DEBUG] 10.0.42.2:20 -> 10.0.42.1:1234 handle_conn TCP syn sent cb snd_una 0 snd_nxt 1 snd_wl1 0 snd_wl2 0 iss 0 rcv_wnd 65000 rcv_nxt 0 irs 0 seg AF seq 3062921918 ack 1 window 65535 opts 0 bytes data
      server.exe: [ERROR] dropping segment in syn sent failed condition RA *)
-  guard (Segment.Flags.exact [ `ACK ; `RST ] seg.Segment.flags) (`Drop "RA") >>= fun () ->
-  guard (Sequence.equal seg.Segment.ack conn.control_block.snd_nxt) (`Drop "ACK in-window")
+  match f, seg.Segment.ack with
+  | Some `Rst, Some ack ->
+    if Sequence.equal ack conn.control_block.snd_nxt then
+      Ok ()
+    else
+      Error (`Drop "ACK in-window")
+  | _ -> Error (`Drop "RA")
 
 let deliver_in_3c_3d conn seg =
   (* deliver_in_3c and syn_received parts of deliver_in_3 (now deliver_in_3d) *)
@@ -197,29 +202,33 @@ let deliver_in_3c_3d conn seg =
   (* - we sent our syn, so we expect an appropriate ack for the syn! *)
   (* - we didn't send out more data, so that ack should be exact *)
   (* if their seq is not good, drop packet -- TODO allow syn *)
-  guard (Segment.Flags.only `ACK seg.Segment.flags) (`Reset "only ACK flag") >>= fun () ->
-  (* hostLTS:15828 - well, more or less ;) *)
-  (* auxFns:2252 ack < snd_una || snd_max < ack -> break LAND DoS, prevent ACK storm *)
-  (* TODO what is an acceptable ack? snd_nxt, if <> what to do? *)
-  guard (Sequence.equal seg.Segment.ack cb.snd_nxt) (`Reset "ack = snd_nxt") >>| fun () ->
-  (* not (ack <= tcp_sock.cb.snd_una \/ ack > tcp_sock.cb.snd_max) *)
-  (* TODO rtt measurement likely, reset idle time! *)
-  (* expect (assume for now): no data in that segment !? *)
-  let control_block = {
-    cb with snd_una = seg.Segment.ack ;
-            (* snd_wnd = seg.Segment.window ; *)
-            snd_wl1 = seg.Segment.seq ; (* need to check with model, from RFC 1122 4.2.2.20 *)
-            snd_wl2 = seg.Segment.ack ;
-  } in
-  (* if not cantsendmore established else if ourfinisacked fin_wait2 else fin_wait_1 *)
-  { conn with control_block ; tcp_state = Established }
+  match seg.Segment.flag, seg.Segment.ack with
+  | Some `Rst, _ -> Error (`Reset "received valid reset")
+  | _, None -> Error (`Drop "ACK flag")
+  | Some _, _ -> Error (`Drop "S|F")
+  | _, Some ack ->
+    (* hostLTS:15828 - well, more or less ;) *)
+    (* auxFns:2252 ack < snd_una || snd_max < ack -> break LAND DoS, prevent ACK storm *)
+    (* TODO what is an acceptable ack? snd_nxt, if <> what to do? *)
+    guard (Sequence.equal ack cb.snd_nxt) (`Reset "ack = snd_nxt") >>| fun () ->
+    (* not (ack <= tcp_sock.cb.snd_una \/ ack > tcp_sock.cb.snd_max) *)
+    (* TODO rtt measurement likely, reset idle time! *)
+    (* expect (assume for now): no data in that segment !? *)
+    let control_block = {
+      cb with snd_una = ack ;
+              (* snd_wnd = seg.Segment.window ; *)
+              snd_wl1 = seg.Segment.seq ; (* need to check with model, from RFC 1122 4.2.2.20 *)
+              snd_wl2 = ack ;
+    } in
+    (* if not cantsendmore established else if ourfinisacked fin_wait2 else fin_wait_1 *)
+    { conn with control_block ; tcp_state = Established }
 
 let in_window cb seg =
   (* from table in 793bis13 3.3 *)
   let seq = seg.Segment.seq
   and max = Sequence.addi cb.rcv_nxt cb.rcv_wnd
   in
-  match Cstruct.len seg.Segment.payload, cb.rcv_wnd with
+  match Cstruct.length seg.Segment.payload, cb.rcv_wnd with
   | 0, 0 -> Sequence.equal seq cb.rcv_nxt
   | 0, _ -> Sequence.less_equal cb.rcv_nxt seq && Sequence.less seq max
   | _, 0 -> false
@@ -247,7 +256,7 @@ let ( >>>= ) ((conn, out), cont) f =
   else
     (conn, out), cont
 
-let di3_newackstuff now id conn seg ourfinisacked =
+let di3_newackstuff now id conn ourfinisacked ack =
   (*: Pull some fields out of the segment :*)
   let cb = conn.control_block in
   let conn', out =
@@ -258,7 +267,7 @@ let di3_newackstuff now id conn seg ourfinisacked =
          retract it to [[snd_ssthresh]] :*)
       let control_block = { cb with t_dupacks = 0 } in
       { conn with control_block }, []
-    else if cb.t_dupacks >= 3 && Sequence.less seg.Segment.ack cb.snd_recover then
+    else if cb.t_dupacks >= 3 && Sequence.less ack cb.snd_recover then
       (*: The host supports NewReno-style Fast Recovery, the socket has received
          at least three duplicate [[ACK]]s previously and the new [[ACK]] does
          not complete the recovery process, \ie, there are further losses or
@@ -274,7 +283,7 @@ let di3_newackstuff now id conn seg ourfinisacked =
         tt_rexmt = None;
         t_rttseg = None;
         (*: Segment to retransmit starts here :*)
-        snd_nxt = seg.ack;
+        snd_nxt = ack;
         (*: Allow one segment to be emitted :*)
         (* TODO hannes 2019-07-19 ABC? *)
         snd_cwnd = cb.t_maxseg
@@ -290,25 +299,25 @@ let di3_newackstuff now id conn seg ourfinisacked =
         (*: RFC2582 partial window deflation: deflate the congestion window by
            the amount of data freshly acknowledged and add back one maximum
            segment size :*)
-        snd_cwnd = cb'.snd_cwnd - Sequence.window seg.ack cb'.snd_una + cb'.t_maxseg;
+        snd_cwnd = cb'.snd_cwnd - Sequence.window ack cb'.snd_una + cb'.t_maxseg;
         snd_nxt = snd_nxt' (*: restore previous value :*)
       } in
       let out = match out with None -> [] | Some s -> [ s ] in
       { conn' with control_block }, out
-    else if cb.t_dupacks >= 3 && Sequence.greater_equal seg.ack cb.snd_recover then
+    else if cb.t_dupacks >= 3 && Sequence.greater_equal ack cb.snd_recover then
       (*: The host supports NewReno-style Fast Recovery, the socket has received
          at least three duplicate [[ACK]] segments and the new [[ACK]]
          acknowledges at least everything upto [[snd_recover]], completing the
          recovery process. :*)
       let snd_cwnd =
-        if Sequence.window cb.snd_max seg.ack < cb.snd_ssthresh then
+        if Sequence.window cb.snd_max ack < cb.snd_ssthresh then
           (*: If [[snd_ssthresh]] is greater than the number of bytes of data
              still unacknowledged and presumed to be in-flight, set [[snd_cwnd]]
              to be one segment larger than the total size of all the segments in
              flight. This is burst avoidance: [[tcp_output]] is only able to
              send upto one further segment until some of the in flight data is
              acknowledged. :*)
-          Sequence.window cb.snd_max seg.ack + cb.t_maxseg
+          Sequence.window cb.snd_max ack + cb.t_maxseg
         else
           (*: Otherwise, set [[snd_cwnd]] to be [[snd_ssthresh]], forbidding any
              further segment output until some in flight data is
@@ -328,7 +337,7 @@ let di3_newackstuff now id conn seg ourfinisacked =
   in
   (*: Check [[ack]] value is sensible, \ie, not greater than the highest
      sequence number transmitted so far :*)
-  if Sequence.greater seg.ack cb.snd_max then
+  if Sequence.greater ack cb.snd_max then
     (*: Drop the segment and possibly emit a [[RST]] segment :*)
     (* hannes 2019-07-19 dropafterack used to be called, which does:
        - if state = SYN_RCVD and ACK and ack < snd_una || snd_max < ack
@@ -355,7 +364,7 @@ let di3_newackstuff now id conn seg ourfinisacked =
       | Some (ts0,seq0) ->
         (*: Or if not, by the control blocks round-trip timer, if it covers the
            segment(s) being acknowledged :*)
-        if Sequence.greater seg.ack seq0 then Some ts0 else None
+        if Sequence.greater ack seq0 then Some ts0 else None
       | None ->
         (*: Otherwise, it is not possible to calculate a round-trip update :*)
         None
@@ -368,7 +377,7 @@ let di3_newackstuff now id conn seg ourfinisacked =
     in
     (*: Update the retransmit timer :*)
     let tt_rexmt' =
-      if Sequence.equal seg.ack cb.snd_max then
+      if Sequence.equal ack cb.snd_max then
         None (*: If all sent data has been acknowledged, disable the timer :*)
       else match mode_of cb.tt_rexmt with
         | None ->
@@ -390,15 +399,15 @@ let di3_newackstuff now id conn seg ourfinisacked =
         (*: If this socket has previously emitted a [[FIN]] segment and the
            [[FIN]] has now been [[ACK]]ed, decrease [[snd_wnd]] by the length of
            the send queue and clear the send queue.:*)
-        cb.snd_wnd - Cstruct.len conn.sndq, Cstruct.empty
+        cb.snd_wnd - Cstruct.length conn.sndq, Cstruct.empty
       else
         (*: Otherwise, reduce the send window by the amound of data acknowledged
            as it is now consuming space on the receiver's receive queue. Remove
            the acknowledged bytes from the send queue as they will never need to
            be retransmitted.:*)
-        let acked = Sequence.window seg.ack cb.snd_una in
+        let acked = Sequence.window ack cb.snd_una in
         cb.snd_wnd - acked,
-        Cstruct.sub conn.sndq acked (Cstruct.len conn.sndq - acked)
+        Cstruct.sub conn.sndq acked (Cstruct.length conn.sndq - acked)
     in
     (*: Update the control block :*)
     let cb' =
@@ -451,8 +460,8 @@ let di3_newackstuff now id conn seg ourfinisacked =
       t_rttseg ;
       snd_cwnd ;
       snd_wnd = snd_wnd'; (*: The updated send window :*)
-      snd_una = seg.ack; (*: Have had up to [[ack]] acknowledged :*)
-      snd_nxt = max seg.ack cb'.snd_nxt ; (*: Ensure invariant [[snd_nxt >= snd_una]] :*)
+      snd_una = ack; (*: Have had up to [[ack]] acknowledged :*)
+      snd_nxt = max ack cb'.snd_nxt ; (*: Ensure invariant [[snd_nxt >= snd_una]] :*)
       tt_2msl
     } in
     (*: The send queue update :*)
@@ -463,7 +472,7 @@ let di3_newackstuff now id conn seg ourfinisacked =
          [[LAST_ACK]] state, close the socket and stop processing this segment *)
       (* TODO: actually close, remove *)
       (conn'', out), false
-    | Time_wait when Sequence.greater seg.ack cb.snd_una -> (* hannes check which cb! *)
+    | Time_wait when Sequence.greater ack cb.snd_una -> (* hannes check which cb! *)
       (* data acked past FIN *)
       (*: If the socket is in [[TIME_WAIT]] and this segment contains a new
          acknowledgement (that acknowledges past the [[FIN]] segment, drop
@@ -475,7 +484,7 @@ let di3_newackstuff now id conn seg ourfinisacked =
          segment if need be :*)
       (conn'', out), true
 
-let di3_ackstuff now id conn seg ourfinisacked =
+let di3_ackstuff now id conn seg ourfinisacked fin ack =
   let cb = conn.control_block in
   let win = seg.Segment.window lsl cb.snd_scale in
   (*: The segment is possibly a duplicate ack if it contains no data, does not
@@ -486,19 +495,19 @@ let di3_ackstuff now id conn seg ourfinisacked =
      from the other end, these may all contain the same acknowledgement number
      and trigger the retransmit logic erroneously. :*)
   let maybe_dup_ack =
-    Cstruct.len seg.payload = 0 && win = cb.snd_wnd &&
+    Cstruct.length seg.payload = 0 && win = cb.snd_wnd &&
     match cb.tt_rexmt with Some ((Rexmt, _), _) -> true | _ -> false
   in
   (* It turns out since some time the first FIN(+ACK) doesn't account for
      dupacks this is simultaneous close, see rev261244 (and rev239672 and
      rev258821) for details *)
   if
-    Sequence.less_equal seg.Segment.ack cb.snd_una && maybe_dup_ack && Segment.Flags.mem `FIN seg.flags &&
+    Sequence.less_equal ack cb.snd_una && maybe_dup_ack && fin &&
     match conn.tcp_state with  Close_wait | Closing | Last_ack | Time_wait -> false | _ -> true
   then
     let control_block = { cb with t_dupacks = 0 } in
     ({ conn with control_block }, []), true
-  else if Sequence.less_equal seg.ack cb.snd_una && maybe_dup_ack then
+  else if Sequence.less_equal ack cb.snd_una && maybe_dup_ack then
     (*: Received a duplicate acknowledgement: it is an old acknowledgement
        (strictly less than [[snd_una]]) and it meets the duplicate
        acknowledgement conditions above.  Do Fast Retransmit/Fast Recovery
@@ -512,7 +521,7 @@ let di3_ackstuff now id conn seg ourfinisacked =
          set. :*)
       let control_block = { cb with t_dupacks = t_dupacks' } in
       ({ conn with control_block }, []), true
-    else if t_dupacks' > 3 || (t_dupacks' = 3 && Sequence.less seg.ack cb.snd_recover) then
+    else if t_dupacks' > 3 || (t_dupacks' = 3 && Sequence.less ack cb.snd_recover) then
       (*: If this is the 4th or higher duplicate [[ACK]] then Fast
          Retransmit/Fast Recovery congestion control is already in progress.
          Increase the congestion window by another maximum segment size (as the
@@ -541,7 +550,7 @@ let di3_ackstuff now id conn seg ourfinisacked =
       let conn'', seg = Segment.tcp_output_perhaps now id conn' in
       let out = match seg with None -> [] | Some s -> [ s ] in
       (conn'', out), false
-    else if t_dupacks' = 3 && not (Sequence.less seg.ack cb.snd_recover) then
+    else if t_dupacks' = 3 && not (Sequence.less ack cb.snd_recover) then
       (*: If this is the 3rd duplicate segment and if the host supports NewReno
          extensions, a NewReno-style Fast Retransmit is not already in progress,
          then do a Fast Retransmit :*)
@@ -563,7 +572,7 @@ let di3_ackstuff now id conn seg ourfinisacked =
                 t_rttseg = None;
                 (*: Sequence number to retransmit---this is equal to the [[ack]]
                    value in the duplicate [[ACK]] segment :*)
-                snd_nxt = seg.ack;
+                snd_nxt = ack;
                 (*: Ensure the congestion window is large enough to allow one
                    segment to be emitted :*)
                 snd_cwnd = cb.t_maxseg
@@ -586,7 +595,7 @@ let di3_ackstuff now id conn seg ourfinisacked =
       ({ conn'' with control_block }, out), false
     else
       invalid_arg "di3_ackstuff" (*: Believed to be impossible---here for completion and safety :*)
-  else if Sequence.less_equal seg.ack cb.snd_una && not maybe_dup_ack then
+  else if Sequence.less_equal ack cb.snd_una && not maybe_dup_ack then
     (*: Have received an old (would use the word "duplicate" if it did not have
        a special meaning) [[ACK]] and it is neither a duplicate [[ACK]] nor the
        [[ACK]] of a new sequence number thus just clear the duplicate [[ACK]]
@@ -596,9 +605,9 @@ let di3_ackstuff now id conn seg ourfinisacked =
   else (*: Must be: [[ack > cb.snd_una]] :*)
     (*: This is the [[ACK]] of a new sequence number---this case is handled by
        the auxiliary function {@link [[di3_newackstuff]]} :*)
-    di3_newackstuff now id conn seg ourfinisacked
+    di3_newackstuff now id conn ourfinisacked ack
 
-let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked =
+let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked fin =
   (* hannes 2019-07-19: there used to be let seq = seg.seq + if SYN then 1 else
      0, but we'll never execute this code with a segment that has SYN *)
   (*: Pull out the senders advertised window and apply the sender's scale factor :*)
@@ -616,7 +625,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked =
      urgent data in the segment. :*)
   let trim_amt_left =
     if Sequence.greater cb.rcv_nxt seg.seq then
-      min (Sequence.window cb.rcv_nxt seg.seq) (Cstruct.len seg.payload)
+      min (Sequence.window cb.rcv_nxt seg.seq) (Cstruct.length seg.payload)
     else
       0
   in
@@ -630,11 +639,11 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked =
      here because there is still urgent data to be received, but now in a future
      segment. :*)
   let data_trimmed_left_right =
-    Cstruct.sub data_trimmed_left 0 (min cb.rcv_wnd (Cstruct.len data_trimmed_left))
+    Cstruct.sub data_trimmed_left 0 (min cb.rcv_wnd (Cstruct.length data_trimmed_left))
   in
   let fin_trimmed =
     if data_trimmed_left_right = data_trimmed_left then
-      Segment.Flags.mem `FIN seg.flags
+      fin
     else
       false
   in
@@ -660,7 +669,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked =
      the conditions below. :*)
   let rseq_trimmed =
     Sequence.addi seq_trimmed
-      (Cstruct.len data_trimmed_left_right + (if fin_trimmed then 1 else 0))
+      (Cstruct.length data_trimmed_left_right + (if fin_trimmed then 1 else 0))
   in
   let (conn', out), cont =
     if
@@ -671,7 +680,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked =
       (*: Only need to acknowledge the segment if there is new in-window data
          (including urgent data) or a valid [[FIN]] :*)
       let have_stuff_to_ack =
-        Cstruct.len data_trimmed_left_right > 0 || fin_trimmed
+        Cstruct.length data_trimmed_left_right > 0 || fin_trimmed
       in
       (*: If the socket is connected, has data to [[ACK]] but no [[FIN]] to
          [[ACK]], the reassembly queue is empty, the socket is not currently
@@ -721,7 +730,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked =
         (*: Set if not delaying an [[ACK]] and have stuff to [[ACK]] :*)
         not delay_ack && have_stuff_to_ack
       and rcv_nxt = rseq_trimmed
-      and rcv_wnd = cb.rcv_wnd - Cstruct.len data_trimmed_left_right
+      and rcv_wnd = cb.rcv_wnd - Cstruct.length data_trimmed_left_right
       in
       let control_block = {
         cb with
@@ -741,7 +750,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked =
     else if
       Sequence.greater seq_trimmed cb.rcv_nxt &&
       Sequence.less seq_trimmed (Sequence.addi cb.rcv_nxt cb.rcv_wnd) &&
-      Cstruct.len data_trimmed_left_right + (if fin_trimmed then 1 else 0) > 0 &&
+      Cstruct.length data_trimmed_left_right + (if fin_trimmed then 1 else 0) > 0 &&
       cb.rcv_wnd > 0
     then
       (*: Hack: assertion used to share values with later conditions :*)
@@ -757,9 +766,8 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked =
          segment) is used in the guard to ensure this really was a pure [[ACK]]
          segment. :*)
       (* TODO hannes 2019-07-20 fin_trimmed vs FIN *)
-    else if Segment.Flags.mem `ACK seg.flags &&
-            Sequence.equal seq_trimmed cb.rcv_nxt &&
-            Cstruct.len seg.payload + (if fin_trimmed then 1 else 0) = 0
+    else if Sequence.equal seq_trimmed cb.rcv_nxt &&
+            Cstruct.length seg.payload + (if fin_trimmed then 1 else 0) = 0
     then
       (*: Hack: assertion used to share values with later conditions :*)
       (* assert (FIN_reass = F) (*: Have not received a FIN :*) *)
@@ -776,9 +784,9 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked =
       (* TODO hannes 2019-07-20 fin_trimmed vs FIN *)
     else if
       (Sequence.less seg.seq cb.rcv_nxt &&
-       Sequence.less_equal (Sequence.addi seg.seq (Cstruct.len seg.payload + if fin_trimmed then 1 else 0)) cb.rcv_nxt) || (* (4) *)
+       Sequence.less_equal (Sequence.addi seg.seq (Cstruct.length seg.payload + if fin_trimmed then 1 else 0)) cb.rcv_nxt) || (* (4) *)
       (Sequence.equal seq_trimmed cb.rcv_nxt && cb.rcv_wnd = 0 &&
-       Cstruct.len seg.payload + (if fin_trimmed then 1 else 0) > 0) || (* (5) *)
+       Cstruct.length seg.payload + (if fin_trimmed then 1 else 0) > 0) || (* (5) *)
       true (* uhm, really? (6) *)
     then
       (*: Hack: assertion used to share values with later conditions :*)
@@ -797,7 +805,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked =
   else
     conn', out
 
-let di3_datastuff now the_ststuff conn seg ourfinisacked =
+let di3_datastuff now the_ststuff conn seg ourfinisacked fin ack =
   let cb = conn.control_block in
   let win = seg.Segment.window lsl cb.snd_scale in
   (*: Various things do not happen if BSD processes the segment using its header
@@ -813,15 +821,14 @@ let di3_datastuff now the_ststuff conn seg ourfinisacked =
      data in the socket's receive buffer.  :*)
   let bsd_fast_path =
     (match conn.tcp_state with Established -> true | _ -> false) &&
-    not (Segment.Flags.mem `FIN seg.flags) &&
-    Segment.Flags.mem `ACK seg.flags &&
+    not fin &&
     Sequence.equal seg.seq cb.rcv_nxt &&
     cb.snd_wnd = win &&
     Sequence.equal cb.snd_max cb.snd_nxt &&
-    ((Sequence.greater seg.ack cb.snd_una && Sequence.less seg.ack cb.snd_max &&
+    ((Sequence.greater ack cb.snd_una && Sequence.less ack cb.snd_max &&
       cb.snd_cwnd >= cb.snd_wnd && cb.t_dupacks < 3)
-     || (Sequence.equal seg.ack cb.snd_una && (* cb.t_segq = [] /\ *)
-         Cstruct.len seg.payload < conn.rcvbufsize - Cstruct.len conn.rcvq))
+     || (Sequence.equal ack cb.snd_una && (* cb.t_segq = [] /\ *)
+         Cstruct.length seg.payload < conn.rcvbufsize - Cstruct.length conn.rcvq))
   in
   (*: Update the send window using the received segment if the segment will not be processed by
       BSD's fast path, has the [[ACK]] flag set, is not to the right of the window, and either:
@@ -837,14 +844,14 @@ let di3_datastuff now the_ststuff conn seg ourfinisacked =
         (d) this segment is the third segment during connection establishement (state is
             [[SYN_RECEIVED]]) and does not have the [[FIN]] flag set. :*)
   let update_send_window =
-    not bsd_fast_path && Segment.Flags.mem `ACK seg.flags &&
+    not bsd_fast_path &&
     Sequence.less_equal seg.seq (Sequence.addi cb.rcv_nxt cb.rcv_wnd) &&
     (Sequence.less cb.snd_wl1 seg.seq ||
      (Sequence.equal cb.snd_wl1 seg.seq &&
-      (Sequence.less cb.snd_wl2 seg.ack || Sequence.equal cb.snd_wl2 seg.ack && win > cb.snd_wnd)))
+      (Sequence.less cb.snd_wl2 ack || Sequence.equal cb.snd_wl2 ack && win > cb.snd_wnd)))
   in
   let seq_trimmed =
-    Sequence.max seg.seq (Sequence.min cb.rcv_nxt (Sequence.addi seg.seq (Cstruct.len seg.payload)))
+    Sequence.max seg.seq (Sequence.min cb.rcv_nxt (Sequence.addi seg.seq (Cstruct.length seg.payload)))
   in
   (*: Write back the window updates :*)
   let control_block =
@@ -852,7 +859,7 @@ let di3_datastuff now the_ststuff conn seg ourfinisacked =
       { cb with
         snd_wnd = win ;
         snd_wl1 = seq_trimmed ;
-        snd_wl2 = seg.ack ;
+        snd_wl2 = ack ;
       }
     else
       cb
@@ -866,7 +873,7 @@ let di3_datastuff now the_ststuff conn seg ourfinisacked =
   if conn'.tcp_state = Time_wait || (conn'.tcp_state = Closing && ourfinisacked) then
     the_ststuff now conn' false ourfinisacked, []
   else
-    di3_datastuff_really now the_ststuff conn' seg bsd_fast_path ourfinisacked
+    di3_datastuff_really now the_ststuff conn' seg bsd_fast_path ourfinisacked fin
 
 let di3_ststuff now conn rcvd_fin ourfinisacked =
   let conn' = if rcvd_fin then { conn with cantrcvmore = true } else conn in
@@ -898,22 +905,22 @@ let di3_ststuff now conn rcvd_fin ourfinisacked =
   | Time_wait, _ -> enter_time_wait
   | _ -> assert false
 
-let deliver_in_3 now id conn seg =
+let deliver_in_3 now id conn seg flag ack =
   (* we expect at most FIN PSH ACK - we drop with reset all other combinations *)
-  let flags = seg.Segment.flags in
-  guard Segment.Flags.(only `ACK flags || or_ack `FIN flags || or_ack `PSH flags || exact [ `FIN ; `PSH ; `ACK  ] flags)
-    (`Reset "flags ACK | or_ack FIN | or_ack PSH | FIN PSH ACK") >>| fun () ->
+  guard (flag = None || flag = Some `Fin)
+    (`Reset "flags ACK | FIN & ACK") >>| fun () ->
+  let fin = flag = Some `Fin in
   (* PAWS, timers, rcv_wnd may have opened! updates fin_wait_2 timer *)
   let cb = conn.control_block in
-  let wesentafin = Sequence.greater cb.snd_max (Sequence.addi cb.snd_una (Cstruct.len conn.sndq)) in
-  let ourfinisacked = wesentafin && Sequence.greater_equal seg.ack cb.snd_max in
+  let wesentafin = Sequence.greater cb.snd_max (Sequence.addi cb.snd_una (Cstruct.length conn.sndq)) in
+  let ourfinisacked = wesentafin && Sequence.greater_equal ack cb.snd_max in
   let control_block = di3_topstuff now conn in
   (* ACK processing *)
-  let (conn', outs), cont = di3_ackstuff now id { conn with control_block } seg ourfinisacked in
+  let (conn', outs), cont = di3_ackstuff now id { conn with control_block } seg ourfinisacked fin ack in
   (* may have some fresh data to report which needs to be acked *)
   let conn'', outs' =
     if cont then
-      di3_datastuff now di3_ststuff conn' seg ourfinisacked
+      di3_datastuff now di3_ststuff conn' seg ourfinisacked fin ack
     else
       (conn', [])
   in
@@ -939,7 +946,7 @@ let deliver_in_8 id conn _seg =
 let handle_noconn t now id seg =
   match
     (* TL;DR: if there's a listener, and it is a SYN, we do sth useful. otherwise RST *)
-    IS.mem seg.Segment.dst_port t.listeners, Segment.Flags.only `SYN seg.Segment.flags
+    IS.mem seg.Segment.dst_port t.listeners, seg.Segment.flag = Some `Syn && seg.Segment.ack = None
     (* deliver_in_1 - passive open *)
   with
   | true, true ->
@@ -951,10 +958,9 @@ let handle_noconn t now id seg =
   | true, false ->
     (* deliver_in_1b *)
     let out =
-      if Segment.Flags.mem `ACK seg.Segment.flags then
-        dropwithreset id seg
-      else
-        None
+      match seg.Segment.ack with
+      | None -> None
+      | Some _ack -> dropwithreset id seg
     in
     t, out
   | false, syn ->
@@ -974,12 +980,10 @@ let handle_conn t now id conn seg =
   in
   let r = match conn.tcp_state with
     | Syn_sent ->
-      let flags = seg.Segment.flags in
-      begin match Segment.Flags.(exact [ `SYN ; `ACK ] flags, only `SYN flags) with
-        | true, true -> assert false
-        | true, false -> deliver_in_2 now id conn seg >>| fun (c', o) -> add c', Some o
-        | false, true -> deliver_in_2b conn seg >>| fun (c', o) -> add c', Some o
-        | false, false -> deliver_in_2a conn seg >>| fun () -> drop (), None
+      begin match seg.Segment.ack, seg.Segment.flag with
+        | Some ack, Some `Syn -> deliver_in_2 now id conn seg ack >>| fun (c', o) -> add c', Some o
+        | None, Some `Syn -> deliver_in_2b now id conn seg >>| fun (c', o) -> add c', Some o
+        | _, ((None | Some `Rst | Some `Fin) as f) -> deliver_in_2a conn seg f >>| fun () -> drop (), None
       end
     | Syn_received ->
       (* expected is:
@@ -1001,12 +1005,12 @@ let handle_conn t now id conn seg =
     | _ ->
       guard (in_window conn.control_block seg) (`Drop "in_window") >>= fun () ->
       (* RFC 5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
-      match Segment.Flags.(or_ack `RST seg.flags, or_ack `SYN seg.flags) with
-      | true, true -> assert false
-      | true, false -> deliver_in_7 id conn seg >>| fun seg' -> t, Some seg'
-      | false, true -> deliver_in_8 id conn seg >>| fun seg' -> t, Some seg'
-      | false, false ->
-        deliver_in_3 now id conn seg >>= fun (conn', out) ->
+      match seg.Segment.flag, seg.Segment.ack with
+      | Some `Rst, _ -> deliver_in_7 id conn seg >>| fun seg' -> t, Some seg'
+      | Some `Syn, _ -> deliver_in_8 id conn seg >>| fun seg' -> t, Some seg'
+      | _, None -> Error (`Drop "no ACK")
+      | f, Some ack ->
+        deliver_in_3 now id conn seg f ack >>= fun (conn', out) ->
         let conn'', out' = match out with
           | None -> Segment.tcp_output_perhaps now id conn'
           | Some x -> conn', Some x

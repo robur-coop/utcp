@@ -14,7 +14,7 @@ let send_tcp ip dst out =
 
 let cb ~proto ~src ~dst payload =
   Logs.app (fun m -> m "received proto %X frame %a -> %a (%d bytes)" proto
-               Ipaddr.V4.pp src Ipaddr.V4.pp dst (Cstruct.len payload));
+               Ipaddr.V4.pp src Ipaddr.V4.pp dst (Cstruct.length payload));
   Lwt.return_unit
 
 let tcp_cb ~src ~dst payload =
@@ -24,40 +24,37 @@ let tcp_cb ~src ~dst payload =
                                 Tcp.Segment.pp s)) ;
   Lwt.return_unit
 
-let jump _ src src_port dst dst_port syn fin rst psh ack seq window data =
+let jump _ src src_port dst dst_port syn fin rst push ack seq window data =
   Printexc.record_backtrace true;
   Mirage_random_test.initialize ();
   Lwt_main.run (
-    let src = Ipaddr.V4.of_string_exn src
+    let cidr = Ipaddr.V4.Prefix.of_string_exn src
     and dst = Ipaddr.V4.of_string_exn dst
     in
     let seg =
       let open Tcp in
       let open Segment in
-      let flags =
-        let fs =
-          (if syn then [ `SYN ] else []) @
-          (if fin then [ `FIN ] else []) @
-          (if rst then [ `RST ] else []) @
-          (if psh then [ `PSH ] else []) @
-          (match ack with None -> [] | Some _ -> [ `ACK ])
-        in
-        Flags.of_list fs
-      and ack = match ack with None -> Sequence.zero | Some x -> Sequence.of_int32 (Int32.of_int x)
+      let flag =
+        match syn, fin, rst with
+        | true, false, false -> Some `Syn
+        | false, true, false -> Some `Fin
+        | false, false, true -> Some `Rst
+        | false, false, false -> None
+        | _ -> invalid_arg "invalid flag combination"
+      and ack = match ack with None -> None | Some x -> Some (Sequence.of_int32 (Int32.of_int x))
       and payload = match data with None -> Cstruct.empty | Some x -> Cstruct.of_string x
       in
       let s = {
         src_port ; dst_port ;
         seq = Sequence.of_int32 (Int32.of_int seq) ;
-        ack ; flags ; window ; options = [] ; payload
+        ack ; flag ; push ; window ; options = [] ; payload
       } in
-      encode_and_checksum ~src ~dst s
+      encode_and_checksum ~src:(Ipaddr.V4.Prefix.address cidr) ~dst s
     in
     Netif.connect "tap3" >>= fun tap ->
     Ethernet.connect tap >>= fun eth ->
     ARP.connect eth >>= fun arp ->
-    let network = Ipaddr.V4.Prefix.of_string_exn "10.0.42.2/24" in
-    IPv4.connect ~ip:src ~network () eth arp >>= fun ip ->
+    IPv4.connect ~cidr eth arp >>= fun ip ->
     let eth_input =
       Ethernet.input eth
         ~arpv4:(ARP.input arp)
@@ -100,11 +97,13 @@ let window =
 
 let src_port =
   Arg.(value & opt int 12345 & info [ "src-port" ] ~doc:"Source port")
+
 let dst_port =
   Arg.(value & opt int 80 & info [ "dst-port" ] ~doc:"Destination port")
 
 let src =
-  Arg.(value & opt string "10.0.42.2" & info [ "src" ] ~doc:"Source IP")
+  Arg.(value & opt string "10.0.42.2/24" & info [ "src" ] ~doc:"Source IP and netmask")
+
 let dst =
   Arg.(value & opt string "10.0.42.1" & info [ "dst" ] ~doc:"Destination IP")
 

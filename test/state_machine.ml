@@ -149,7 +149,7 @@ let tcp_listen = State.start_listen tcp listen_port
 
 let basic_seg = {
   Segment.src_port ; dst_port = listen_port ; seq = Tcp.Sequence.zero ;
-  ack = Sequence.zero ; flags = Segment.Flags.empty ; window = 0 ;
+  ack = None ; flag = None ; push = false ; window = 0 ;
   options = [] ; payload = Cstruct.empty
 }
 
@@ -160,36 +160,37 @@ and rng_seq = Sequence.of_int32 0xA5A5A5A5l
 (* 8 different input segments for testing our state machine *)
 let test_segs ack payload =
   let seg = { basic_seg with seq = initial_seq }
-  and with_ack f = Segment.Flags.(add `ACK (singleton f))
   and str =
-    let l = Cstruct.len payload in
+    let l = Cstruct.length payload in
     if l = 0 then "" else "+" ^ string_of_int l ^ " bytes data"
   in [
     "NONE" ^ str, { seg with payload } ;
-    "ACK" ^ str, { seg with flags = Segment.Flags.singleton `ACK ; ack ; payload } ;
-    "SYN" ^ str, { seg with flags = Segment.Flags.singleton `SYN ; payload } ;
-    "RST" ^ str, { seg with flags = Segment.Flags.singleton `RST ; payload } ;
-    "FIN" ^ str, { seg with flags = Segment.Flags.singleton `FIN ; payload } ;
-    "SYN+ACK" ^ str, { seg with flags = with_ack `SYN ; ack ; payload } ;
-    "RST+ACK" ^ str, { seg with flags = with_ack `RST ; ack ; payload } ;
-    "FIN+ACK" ^ str, { seg with flags = with_ack `FIN ; ack ; payload } ;
+    "ACK" ^ str, { seg with ack = Some ack ; payload } ;
+    "SYN" ^ str, { seg with flag = Some `Syn ; payload } ;
+    "RST" ^ str, { seg with flag = Some `Rst ; payload } ;
+    "FIN" ^ str, { seg with flag = Some `Fin ; payload } ;
+    "SYN+ACK" ^ str, { seg with flag = Some `Syn ; ack = Some ack ; payload } ;
+    "RST+ACK" ^ str, { seg with flag = Some `Rst ; ack = Some ack ; payload } ;
+    "FIN+ACK" ^ str, { seg with flag = Some `Fin ; ack = Some ack ; payload } ;
   ]
 
 (* we encode the answers to each of these 16 segments for each state *)
 let no_state dl =
   let rst = {
     basic_seg with src_port = listen_port ; dst_port = src_port ;
-    flags = Segment.Flags.singleton `RST ; seq = initial_ack
+    flag = Some `Rst ; seq = initial_ack
   } in
-  let rst_ack = {
-    rst with flags = Segment.Flags.of_list [ `RST ; `ACK ] ; ack = initial_seq ;
-             seq = Sequence.zero
-  } in [
-    Some { rst_ack with ack = Sequence.addi rst_ack.ack dl };
+  let rst_ack = { rst with ack = Some initial_seq ; seq = Sequence.zero } in
+  let with_ack f s =
+    let ack = match s.Segment.ack with None -> assert false | Some a -> Some (f a) in
+    { s with ack }
+  in
+  [
+    Some (with_ack (fun a -> Sequence.addi a dl) rst_ack) ;
     Some rst ;
-    Some { rst_ack with ack = Sequence.(incr (addi rst_ack.ack dl)) } ;
+    Some (with_ack (fun a -> Sequence.(incr (addi a dl))) rst_ack) ;
     None ;
-    Some { rst_ack with ack = Sequence.(incr (addi rst_ack.ack dl)) } ;
+    Some (with_ack (fun a -> Sequence.(incr (addi a dl))) rst_ack) ;
     Some rst ;
     None ;
     Some rst ;
@@ -205,19 +206,19 @@ let test_closed =
       (test_segs initial_ack p)
       (List.mapi (fun i v ->
            i, match v with None -> None | Some s -> Some (your_ip, s))
-          (no_state (Cstruct.len p)))
+          (no_state (Cstruct.length p)))
   in
   test_all " " Cstruct.empty @ test_all "+data " (Cstruct.create 20)
 
 let listen =
   let rst = {
     basic_seg with src_port = listen_port ; dst_port = src_port ;
-                   seq = initial_ack ; ack = Sequence.zero ;
-                   flags = Segment.Flags.singleton `RST ;
+                   seq = initial_ack ; ack = None ;
+                   flag = Some `Rst ;
   } in
   let synack = {
-    rst with seq = rng_seq ; ack = Sequence.incr initial_seq ;
-             flags = Segment.Flags.of_list [ `SYN ; `ACK ] ;
+    rst with seq = rng_seq ; ack = Some (Sequence.incr initial_seq) ;
+             flag = Some `Syn ;
              window = 1 lsl 16 - 1 ;
              options = [ Segment.MaximumSegmentSize 1460 ] }
   in
@@ -264,8 +265,8 @@ let syn_sent_ack_iss, syn_sent_ack_bad =
   and ack = {
     basic_seg with src_port = listen_port ; dst_port = src_port ;
                    seq = Sequence.incr rng_seq ;
-                   ack = Sequence.incr initial_seq ;
-                   flags = Segment.Flags.singleton `ACK ;
+                   ack = Some (Sequence.incr initial_seq) ;
+                   flag = None ;
                    window = 1 lsl 16 - 1 ;
   } in [
     tcp_syn_sent, None ;
@@ -311,7 +312,7 @@ let test_syn_sent =
 
 let tcp_syn_rcvd =
   let syn = { basic_seg with
-              flags = Segment.Flags.singleton `SYN ;
+              flag = Some `Syn ;
               seq = Sequence.addi initial_seq (-1) }
   in
   fst (Input.handle_segment tcp_listen (Mtime.of_uint64_ns 0L) quad syn)

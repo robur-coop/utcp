@@ -199,7 +199,7 @@ let pp_control ppf c =
     c.snd_wnd c.snd_cwnd c.snd_ssthresh c.rcv_wnd c.tf_rxwin0sent
     Sequence.pp c.rcv_nxt Sequence.pp c.irs Sequence.pp c.rcv_adv
     Sequence.pp c.snd_recover c.t_maxseg c.t_advmss
-    c.snd_scale c.rcv_scale Fmt.(option ~none:(unit "no") int) c.request_r_scale c.tf_doing_ws
+    c.snd_scale c.rcv_scale Fmt.(option ~none:(any "no") int) c.request_r_scale c.tf_doing_ws
 (*
     tt_rexmt = None;
     (* tt_keep = None; *)
@@ -275,8 +275,8 @@ type t = {
 
 let pp ppf t =
   Fmt.pf ppf "IP %a, listener %a, connections: %a"
-    Ipaddr.V4.pp t.ip Fmt.(list ~sep:(unit ", ") int) (IS.elements t.listeners)
-    Fmt.(list ~sep:(unit "@.") (pair ~sep:(unit ": ") Connection.pp pp_conn_state))
+    Ipaddr.V4.pp t.ip Fmt.(list ~sep:(any ", ") int) (IS.elements t.listeners)
+    Fmt.(list ~sep:(any "@.") (pair ~sep:(any ": ") Connection.pp pp_conn_state))
     (CM.bindings t.connections)
 
 let quad t (a, ap, b, bp) =

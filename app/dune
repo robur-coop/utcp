@@ -2,7 +2,7 @@
   (name server)
   (public_name server)
   (modules server)
-  (libraries tcp mirage-net-unix cstruct lwt logs ethernet arp-mirage tcpip.ipv4
+  (libraries tcp mirage-net-unix cstruct lwt logs ethernet arp.mirage tcpip.ipv4
              mirage-random-test mirage-unix mirage-clock-unix
              lwt.unix cmdliner logs.fmt fmt.cli logs.cli fmt.tty mtime.clock.os))
 
@@ -10,6 +10,14 @@
   (name single)
   (public_name single)
   (modules single)
-  (libraries tcp mirage-net-unix cstruct lwt logs ethernet arp-mirage tcpip.ipv4
+  (libraries tcp mirage-net-unix cstruct lwt logs ethernet arp.mirage tcpip.ipv4
+             mirage-random-test mirage-unix mirage-clock-unix
+             lwt.unix cmdliner logs.fmt fmt.cli logs.cli fmt.tty mtime.clock.os))
+
+(executable
+  (name client)
+  (public_name client)
+  (modules client)
+  (libraries tcp mirage-net-unix cstruct lwt logs ethernet arp.mirage tcpip.ipv4
              mirage-random-test mirage-unix mirage-clock-unix
              lwt.unix cmdliner logs.fmt fmt.cli logs.cli fmt.tty mtime.clock.os))

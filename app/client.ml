@@ -81,8 +81,10 @@ let setup_log =
         $ Fmt_cli.style_renderer ()
         $ Logs_cli.level ())
 
+
+
 let cmd =
   Term.(term_result (const jump $ setup_log)),
-  Term.info "server" ~version:"%%VERSION_NUM%%"
+  Term.info "client" ~version:"%%VERSION_NUM%%"
 
 let () = match Term.eval cmd with `Ok () -> exit 0 | _ -> exit 1
