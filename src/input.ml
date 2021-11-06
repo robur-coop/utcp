@@ -5,9 +5,9 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 open State
 
-open Rresult.R.Infix
-
 let guard p e = if p then Ok () else Error e
+
+let ( let* ) = Result.bind
 
 (* input rules from netsem
 deliver_in_1 - passive open (listener, receive SYN) - handle_noconnn
@@ -88,7 +88,7 @@ let deliver_in_1 rng now id seg =
 
 let deliver_in_2 now id conn seg ack =
   let cb = conn.control_block in
-  guard (Sequence.equal ack cb.snd_nxt) (`Drop "ack = snd_nxt") >>| fun () ->
+  let* () = guard (Sequence.equal ack cb.snd_nxt) (`Drop "ack = snd_nxt") in
   let tf_doing_ws, snd_scale, rcv_scale =
     match Segment.ws seg, cb.request_r_scale with
     | None, _ -> false, 0, 0
@@ -169,8 +169,8 @@ let deliver_in_2 now id conn seg ack =
     t_rttinf ;
   }
   in
-  { conn with control_block ; tcp_state = Established ; rcvbufsize ; sndbufsize },
-  Segment.make_ack control_block false id
+  Ok ({ conn with control_block; tcp_state = Established; rcvbufsize; sndbufsize },
+      Segment.make_ack control_block false id)
 
 let deliver_in_2b _now _id _conn _seg =
   (* simultaneous open: accept anything, send syn+ack *)
@@ -198,7 +198,9 @@ let deliver_in_3c_3d conn seg =
   (* - we acked the initial syn, their seq should be rcv_nxt (or?) *)
   (* - furthermore, it should be >= irs -- that's redundant with above *)
   (* if their seq is good (but their ack isn't or it is no ack), reset *)
-  guard (Sequence.equal seg.Segment.seq cb.rcv_nxt) (`Drop "seq = rcv_nxt") >>= fun () ->
+  let* () =
+    guard (Sequence.equal seg.Segment.seq cb.rcv_nxt) (`Drop "seq = rcv_nxt")
+  in
   (* - we sent our syn, so we expect an appropriate ack for the syn! *)
   (* - we didn't send out more data, so that ack should be exact *)
   (* if their seq is not good, drop packet -- TODO allow syn *)
@@ -210,7 +212,7 @@ let deliver_in_3c_3d conn seg =
     (* hostLTS:15828 - well, more or less ;) *)
     (* auxFns:2252 ack < snd_una || snd_max < ack -> break LAND DoS, prevent ACK storm *)
     (* TODO what is an acceptable ack? snd_nxt, if <> what to do? *)
-    guard (Sequence.equal ack cb.snd_nxt) (`Reset "ack = snd_nxt") >>| fun () ->
+    let* () = guard (Sequence.equal ack cb.snd_nxt) (`Reset "ack = snd_nxt") in
     (* not (ack <= tcp_sock.cb.snd_una \/ ack > tcp_sock.cb.snd_max) *)
     (* TODO rtt measurement likely, reset idle time! *)
     (* expect (assume for now): no data in that segment !? *)
@@ -221,7 +223,7 @@ let deliver_in_3c_3d conn seg =
               snd_wl2 = ack ;
     } in
     (* if not cantsendmore established else if ourfinisacked fin_wait2 else fin_wait_1 *)
-    { conn with control_block ; tcp_state = Established }
+    Ok { conn with control_block ; tcp_state = Established }
 
 let in_window cb seg =
   (* from table in 793bis13 3.3 *)
@@ -907,8 +909,9 @@ let di3_ststuff now conn rcvd_fin ourfinisacked =
 
 let deliver_in_3 now id conn seg flag ack =
   (* we expect at most FIN PSH ACK - we drop with reset all other combinations *)
-  guard (flag = None || flag = Some `Fin)
-    (`Reset "flags ACK | FIN & ACK") >>| fun () ->
+  let* () =
+    guard (flag = None || flag = Some `Fin) (`Reset "flags ACK | FIN & ACK")
+  in
   let fin = flag = Some `Fin in
   (* PAWS, timers, rcv_wnd may have opened! updates fin_wait_2 timer *)
   let cb = conn.control_block in
@@ -916,7 +919,9 @@ let deliver_in_3 now id conn seg flag ack =
   let ourfinisacked = wesentafin && Sequence.greater_equal ack cb.snd_max in
   let control_block = di3_topstuff now conn in
   (* ACK processing *)
-  let (conn', outs), cont = di3_ackstuff now id { conn with control_block } seg ourfinisacked fin ack in
+  let (conn', outs), cont =
+    di3_ackstuff now id { conn with control_block } seg ourfinisacked fin ack
+  in
   (* may have some fresh data to report which needs to be acked *)
   let conn'', outs' =
     if cont then
@@ -930,7 +935,7 @@ let deliver_in_3 now id conn seg flag ack =
     | [], [] -> None
     | _ -> assert false
   in
-  conn'', out
+  Ok (conn'', out)
 
 let deliver_in_7 id conn seg =
   let cb = conn.control_block in
@@ -981,9 +986,15 @@ let handle_conn t now id conn seg =
   let r = match conn.tcp_state with
     | Syn_sent ->
       begin match seg.Segment.ack, seg.Segment.flag with
-        | Some ack, Some `Syn -> deliver_in_2 now id conn seg ack >>| fun (c', o) -> add c', Some o
-        | None, Some `Syn -> deliver_in_2b now id conn seg >>| fun (c', o) -> add c', Some o
-        | _, ((None | Some `Rst | Some `Fin) as f) -> deliver_in_2a conn seg f >>| fun () -> drop (), None
+        | Some ack, Some `Syn ->
+          let* c', o = deliver_in_2 now id conn seg ack in
+          Ok (add c', Some o)
+        | None, Some `Syn ->
+          let* c', o = deliver_in_2b now id conn seg in
+          Ok (add c', Some o)
+        | _, ((None | Some `Rst | Some `Fin) as f) ->
+          let* () = deliver_in_2a conn seg f in
+          Ok (drop (), None)
       end
     | Syn_received ->
       (* expected is:
@@ -1001,16 +1012,21 @@ let handle_conn t now id conn seg =
          even may emit syn+ack (with seq = iss) to move forward [but then, as
          well just an ack is possible with seq = iss + 1]
       *)
-      deliver_in_3c_3d conn seg >>| fun conn' -> add conn', None
+      let* conn' = deliver_in_3c_3d conn seg in
+      Ok (add conn', None)
     | _ ->
-      guard (in_window conn.control_block seg) (`Drop "in_window") >>= fun () ->
+      let* () = guard (in_window conn.control_block seg) (`Drop "in_window") in
       (* RFC 5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
       match seg.Segment.flag, seg.Segment.ack with
-      | Some `Rst, _ -> deliver_in_7 id conn seg >>| fun seg' -> t, Some seg'
-      | Some `Syn, _ -> deliver_in_8 id conn seg >>| fun seg' -> t, Some seg'
+      | Some `Rst, _ ->
+        let* seg' = deliver_in_7 id conn seg in
+        Ok (t, Some seg')
+      | Some `Syn, _ ->
+        let* seg' = deliver_in_8 id conn seg in
+        Ok (t, Some seg')
       | _, None -> Error (`Drop "no ACK")
       | f, Some ack ->
-        deliver_in_3 now id conn seg f ack >>= fun (conn', out) ->
+        let* conn', out = deliver_in_3 now id conn seg f ack in
         let conn'', out' = match out with
           | None -> Segment.tcp_output_perhaps now id conn'
           | Some x -> conn', Some x

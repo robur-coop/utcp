@@ -66,7 +66,7 @@ let jump () =
         Logs.info (fun m -> m "closing!!");
         clo ()); *)
     Netif.listen tap ~header_size:14 eth_input >|=
-    Rresult.R.error_to_msg ~pp_error:Netif.pp_error
+    Result.map_error (fun e -> `Msg (Fmt.to_to_string Netif.pp_error e))
   )
 
 let setup_log style_renderer level =

@@ -1,9 +1,9 @@
 (* (c) 2019 Hannes Mehnert, all rights reserved *)
 open State
 
-open Rresult.R.Infix
-
 let guard p e = if p then Ok () else Error e
+
+let ( let* ) = Result.bind
 
 let src = Logs.Src.create "tcp.user" ~doc:"TCP user"
 module Log = (val Logs.src_log src : Logs.LOG)
@@ -54,27 +54,38 @@ let close t id =
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->
-    guard (behind_established conn.tcp_state) (`Msg "not yet established") >>| fun () ->
+    let* () =
+      guard (behind_established conn.tcp_state) (`Msg "not yet established")
+    in
     let control_block = { conn.control_block with tf_shouldacknow = true } in
-    let conn' = { conn with control_block ; cantsndmore = true ; cantrcvmore = true ; rcvq = Cstruct.empty } in
-    { t with connections = CM.add id conn' t.connections }
+    let conn' =
+      let cantsndmore = true and cantrcvmore = true and rcvq = Cstruct.empty in
+      { conn with control_block; cantsndmore; cantrcvmore; rcvq }
+    in
+    Ok { t with connections = CM.add id conn' t.connections }
 
 let send t id buf =
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->
-    guard (behind_established conn.tcp_state) (`Msg "not yet established") >>= fun () ->
-    guard (not conn.cantsndmore) (`Msg "cant write") >>| fun () ->
+    let* () =
+      guard (behind_established conn.tcp_state) (`Msg "not yet established")
+    in
+    let* () =
+      guard (not conn.cantsndmore) (`Msg "cant write")
+    in
     let sndq = Cstruct.append conn.sndq buf in
     let conn' = { conn with sndq } in
-    { t with connections = CM.add id conn' t.connections }
+    Ok { t with connections = CM.add id conn' t.connections }
 
 let recv t id =
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->
-    guard (behind_established conn.tcp_state) (`Msg "not yet connected") >>= fun () ->
-    guard (not conn.cantrcvmore) (`Msg "cant recv, EOF") >>| fun () ->
+    let* () =
+      guard (behind_established conn.tcp_state) (`Msg "not yet connected")
+    in
+    let* () = guard (not conn.cantrcvmore) (`Msg "cant recv, EOF") in
     let rcvq = conn.rcvq in
     let conn' = { conn with rcvq = Cstruct.empty } in
-    { t with connections = CM.add id conn' t.connections }, rcvq
+    Ok ({ t with connections = CM.add id conn' t.connections }, rcvq)

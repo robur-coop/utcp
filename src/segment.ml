@@ -3,6 +3,8 @@ let header_size = 20
 
 let guard f e = if f then Ok () else Error e
 
+let ( let* ) = Result.bind
+
 (* looks like a good use case for gmap ;) *)
 type tcp_option =
   | MaximumSegmentSize of int
@@ -48,67 +50,88 @@ let encode_options opts =
     opts
 
 let decode_option data =
-  let open Rresult.R.Infix in
   match Cstruct.get_uint8 data 0 with
   | 0 -> (* End of option, all remaining bytes must be 0 *)
     Ok (None, Cstruct.length data)
   | 1 -> (* No operation *) Ok (None, 1)
   | 3 ->
-    guard (Cstruct.length data >= 3) (`Msg "window scale shorter than 3 bytes") >>= fun () ->
-    guard (Cstruct.get_uint8 data 1 = 3) (`Msg "window scale length not 3") >>| fun () ->
-    Some (WindowScale (Cstruct.get_uint8 data 2)), 3
+    let* () =
+      guard (Cstruct.length data >= 3) (`Msg "window scale shorter than 3 bytes")
+    in
+    let* () =
+      guard (Cstruct.get_uint8 data 1 = 3) (`Msg "window scale length not 3")
+    in
+    Ok (Some (WindowScale (Cstruct.get_uint8 data 2)), 3)
   | x ->
-    guard (Cstruct.length data >= 2) (`Msg "option shorter than 2 bytes") >>= fun () ->
+    let* () =
+      guard (Cstruct.length data >= 2) (`Msg "option shorter than 2 bytes")
+    in
     let l = Cstruct.get_uint8 data 1 in
-    guard (Cstruct.length data >= l) (`Msg "option too short") >>= fun () ->
+    let* () = guard (Cstruct.length data >= l) (`Msg "option too short") in
     match x with
     | 2 ->
-      guard (l = 4) (`Msg "length must be 4 in maximum segment size") >>= fun () ->
+      let* () =
+        guard (l = 4) (`Msg "maximum segment size must be at least 4 bytes")
+      in
       let mss = Cstruct.BE.get_uint16 data 2 in
       Ok (Some (MaximumSegmentSize mss), 4)
     | _ ->
       Ok (Some (Unknown (x, Cstruct.sub data 2 (l - 2))), l)
 
 let decode_options data =
-  let open Rresult.R.Infix in
   let l = Cstruct.length data in
   let rec go idx acc =
     if l = idx then
       Ok acc
     else
-      decode_option (Cstruct.shift data idx) >>= fun (data, consumed) ->
+      let* data, consumed = decode_option (Cstruct.shift data idx) in
       let acc' = match data with None -> acc | Some x -> x :: acc in
       go (idx + consumed) acc'
   in
   go 0 []
 
 module Flag = struct
-  let bit = function
-    | `FIN -> 8
-    | `SYN -> 7
-    | `RST -> 6
-    | `PSH -> 5
-    | `ACK -> 4
+  type flags =
+    | FIN
+    | SYN
+    | RST
+    | PSH
+    | ACK
 
-  let number f = 1 lsl (8 - bit f)
+  let bit = function
+    | FIN -> 0
+    | SYN -> 1
+    | RST -> 2
+    | PSH -> 3
+    | ACK -> 4
+
+  let number f = 1 lsl bit f
 
   let decode byte =
-    let open Rresult.R.Infix in
-    let ack = number `ACK land byte > 0
-    and psh = number `PSH land byte > 0
+    let ack = number ACK land byte > 0
+    and psh = number PSH land byte > 0
+    and fin = number FIN land byte > 0
+    and syn = number SYN land byte > 0
+    and rst = number RST land byte > 0
     in
-    (match number `FIN land byte > 0, number `SYN land byte > 0, number `RST land byte > 0 with
-     | true, false, false -> Ok (Some `Fin)
-     | false, true, false -> Ok (Some `Syn)
-     | false, false, true -> Ok (Some `Rst)
-     | false, false, false -> Ok None
-     | _ -> Error (`Msg "invalid flag combination")) >>| fun flag ->
-    (ack, flag, psh)
+    let* flag =
+      match fin, syn, rst with
+      | true, false, false -> Ok (Some `Fin)
+      | false, true, false -> Ok (Some `Syn)
+      | false, false, true -> Ok (Some `Rst)
+      | false, false, false -> Ok None
+      | _ -> Error (`Msg (Fmt.str "invalid flag combination: %02X" byte))
+    in
+    Ok (ack, flag, psh)
 
   let encode (ack, flag, psh) =
-    let acc = if ack then number `ACK else 0 in
-    let acc = acc + (if psh then number `PSH else 0) in
-    acc + (match flag with None -> 0 | Some `Fin -> number `FIN | Some `Syn -> number `SYN | Some `Rst -> number `RST)
+    (if ack then number ACK else 0) +
+    (if psh then number PSH else 0) +
+    (match flag with
+     | None -> 0
+     | Some `Fin -> number FIN
+     | Some `Syn -> number SYN
+     | Some `Rst -> number RST)
 
   let eq a b = match a, b with
     | None, None -> true
@@ -525,41 +548,51 @@ let encode_and_checksum ~src ~dst t =
   data
 
 let decode data =
-  let open Rresult.R.Infix in
-  guard (Cstruct.length data >= header_size) (`Msg "too small") >>= fun () ->
+  let* () = guard (Cstruct.length data >= header_size) (`Msg "too small") in
   let src_port = Cstruct.BE.get_uint16 data 0
   and dst_port = Cstruct.BE.get_uint16 data 2
   and seq = Sequence.of_int32 (Cstruct.BE.get_uint32 data 4)
   and ack = Sequence.of_int32 (Cstruct.BE.get_uint32 data 8)
   and data_off = (Cstruct.get_uint8 data 12 lsr 4) * 4 (* lower 4 are reserved [can't assume they're 0] *)
   in
-  Flag.decode (Cstruct.get_uint8 data 13) >>= fun (ackf, flag, push) ->
+  let* ackf, flag, push = Flag.decode (Cstruct.get_uint8 data 13) in
   let window = Cstruct.BE.get_uint16 data 14
   and checksum = Cstruct.BE.get_uint16 data 16
   and _up = Cstruct.BE.get_uint16 data 18
   in
-  guard (Cstruct.length data >= data_off) (`Msg "data_offset too big") >>= fun () ->
+  let* () =
+    guard (Cstruct.length data >= data_off) (`Msg "data_offset too big")
+  in
   let options_buf = Cstruct.sub data header_size (data_off - header_size) in
-  decode_options options_buf >>| fun options ->
+  let* options = decode_options options_buf in
   let payload = Cstruct.shift data data_off in
   let ack = if ackf then Some ack else None in
-  { src_port ; dst_port ; seq ; ack ; flag ; push ; window ; options ; payload },
-  checksum
+  Ok ({ src_port; dst_port; seq; ack; flag; push; window; options; payload },
+      checksum)
 
 let decode_and_validate ~src ~dst data =
-  let open Rresult.R.Infix in
-  decode data >>= fun (t, pkt_csum) ->
+  let* t, pkt_csum = decode data in
   let computed = checksum ~src ~dst data in
   (* these are already checks done in deliver_in_4, etc. *)
-  guard (computed = pkt_csum) (`Msg "invalid checksum") >>= fun () ->
-  guard Ipaddr.V4.(compare src broadcast <> 0)
-    (`Msg "segment from broadcast") >>= fun () ->
-  guard Ipaddr.V4.(compare dst broadcast <> 0)
-    (`Msg "segment to broadcast") >>= fun () ->
-  guard (not (Ipaddr.V4.is_multicast src))
-    (`Msg "segment from multicast address") >>= fun () ->
-  guard (not (Ipaddr.V4.is_multicast dst))
-    (`Msg "segment to multicast address") >>= fun () ->
-  guard (not ((Ipaddr.V4.compare src dst = 0 && t.src_port = t.dst_port)))
-    (`Msg "segment source and destination ip and port are equal") >>| fun () ->
-  t, to_id ~src ~dst t
+  let* () = guard (computed = pkt_csum) (`Msg "invalid checksum") in
+  let* () =
+    guard Ipaddr.V4.(compare src broadcast <> 0)
+      (`Msg "segment from broadcast")
+  in
+  let* () =
+    guard Ipaddr.V4.(compare dst broadcast <> 0)
+      (`Msg "segment to broadcast")
+  in
+  let* () =
+    guard (not (Ipaddr.V4.is_multicast src))
+      (`Msg "segment from multicast address")
+  in
+  let* () =
+    guard (not (Ipaddr.V4.is_multicast dst))
+      (`Msg "segment to multicast address")
+  in
+  let* () =
+    guard (not ((Ipaddr.V4.compare src dst = 0 && t.src_port = t.dst_port)))
+      (`Msg "segment source and destination ip and port are equal")
+  in
+  Ok (t, to_id ~src ~dst t)
