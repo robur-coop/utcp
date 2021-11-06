@@ -98,14 +98,19 @@ module Flag = struct
     | PSH
     | ACK
 
-  let bit = function
-    | FIN -> 0
-    | SYN -> 1
-    | RST -> 2
-    | PSH -> 3
-    | ACK -> 4
-
-  let number f = 1 lsl bit f
+  let number =
+    let fin = 1 lsl 0
+    and syn = 1 lsl 1
+    and rst = 1 lsl 2
+    and psh = 1 lsl 3
+    and ack = 1 lsl 4
+    in
+    function
+    | FIN -> fin
+    | SYN -> syn
+    | RST -> rst
+    | PSH -> psh
+    | ACK -> ack
 
   let decode byte =
     let ack = number ACK land byte > 0

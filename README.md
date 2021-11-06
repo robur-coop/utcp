@@ -28,8 +28,8 @@ thereof).
 In contrast to above specifications, the state transition diagram is different
 in this implementation. The reason is that not the full Unix sockets API is
 implemented, especially listening sockets are treat specially instead of being
-fused into the state machine (each (passive) connection starts in the
-SYN_RECEIVED state, there is no LISTEN state). There is also no CLOSED state -
+fused into the state machine: each (passive) connection starts in the
+SYN_RECEIVED state, there is no LISTEN state. There is also no CLOSED state -
 a connection which would end up in this state is directly dropped.
 
 TODO: Features included in this implementation that have been specified in later RFCs:
@@ -69,7 +69,7 @@ We'll likely need to define a new ARCH for this implementation in the model and
 then hope it's good enough ;) (or only run tests which behave similat to
 FreeBSD).
 
-- Appropriate Byte Counting (this is what i intend to implement)
+- Appropriate Byte Counting (this is what I intend to implement)
 - Initial window size (that may already be in my FreeBSD12 changeset)
 - Incoming urgent flag (not handled in the implementation)
 - More restrictive with flag combinations (only one of SYN FIN RST)
@@ -87,7 +87,7 @@ Model anomalies:
 - di3_ackstuff: hostLTS:452 "ack <= snd_una", but text "strictly less than snd_una"
 - di3_newackstuff: hostLTS:251 uses "cb'.snd_nxt" which is the same (and a no-op)
 
-## Things to preserve and ensure
+## Things to ensure and verify
 
 - each incoming segment with reasonable window is handled properly
 - there's always a path (e.g. via timers) to drop the connection (with/out RST)
@@ -124,7 +124,7 @@ Model anomalies:
 
 - FLAGS rework
   - ack : Sequence.t option ; push : bool ; control : [ `SYN | `FIN | `RST ]
-  --> we then need to error with "has reset" and "has_ack" and "seq of Sequence.t" (to properly reply)
+  --> we then need to error with "has reset" and "has ack" and "seq of Sequence.t" (to properly reply)
   --> or just drop such segments without notifying the other side..
   from draft-rfc793bis:
     CLOSED: ACK set/unset
