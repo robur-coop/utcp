@@ -513,16 +513,30 @@ let checksum ~src ~dst buf =
   (* potentially pad *)
   let pad = plen mod 2 in
   (* construct pseudoheader *)
-  let mybuf = Cstruct.create (12 + plen + pad) in
-  Cstruct.BE.set_uint32 mybuf 0 (Ipaddr.V4.to_int32 src);
-  Cstruct.BE.set_uint32 mybuf 4 (Ipaddr.V4.to_int32 dst);
-  (* protocol is 0x0006 *)
-  Cstruct.BE.set_uint16 mybuf 8 0x0006;
-  Cstruct.BE.set_uint16 mybuf 10 plen;
+  let mybuf, off =
+    match src, dst with
+    | Ipaddr.V4 src, Ipaddr.V4 dst ->
+      let mybuf = Cstruct.create (12 + plen + pad) in
+      Ipaddr_cstruct.V4.write_cstruct_exn src mybuf;
+      Ipaddr_cstruct.V4.write_cstruct_exn dst (Cstruct.shift mybuf 4);
+      (* protocol is 0x0006 *)
+      Cstruct.BE.set_uint16 mybuf 8 0x0006;
+      Cstruct.BE.set_uint16 mybuf 10 plen;
+      mybuf, 12
+    | Ipaddr.V6 src, Ipaddr.V6 dst ->
+      let mybuf = Cstruct.create (40 + plen + pad) in
+      Ipaddr_cstruct.V6.write_cstruct_exn src mybuf;
+      Ipaddr_cstruct.V6.write_cstruct_exn dst (Cstruct.shift mybuf 16);
+      (* protocol is 0x0006 *)
+      Cstruct.BE.set_uint32 mybuf 32 (Int32.of_int plen);
+      Cstruct.set_uint8 mybuf 39 0x06;
+      mybuf, 40
+    | _ -> invalid_arg "mixing IPv4 and IPv6 addresses not supported"
+  in
   (* blit tcp packet *)
-  Cstruct.blit buf 0 mybuf 12 plen;
+  Cstruct.blit buf 0 mybuf off plen;
   (* ensure checksum to be 0 *)
-  Cstruct.BE.set_uint16 mybuf (12 + 16) 0;
+  Cstruct.BE.set_uint16 mybuf (off + 16) 0;
   (* compute 2s complement 16 bit checksum *)
   let sum = ref 0 in
   (* compute checksum *)
@@ -581,23 +595,26 @@ let decode_and_validate ~src ~dst data =
   (* these are already checks done in deliver_in_4, etc. *)
   let* () = guard (computed = pkt_csum) (`Msg "invalid checksum") in
   let* () =
-    guard Ipaddr.V4.(compare src broadcast <> 0)
-      (`Msg "segment from broadcast")
+    match src, dst with
+    | Ipaddr.V4 src, Ipaddr.V4 dst ->
+      let* () =
+        guard Ipaddr.V4.(compare src broadcast <> 0)
+          (`Msg "segment from broadcast")
+      in
+      guard Ipaddr.V4.(compare dst broadcast <> 0)
+        (`Msg "segment to broadcast")
+    | _ -> Ok ()
   in
   let* () =
-    guard Ipaddr.V4.(compare dst broadcast <> 0)
-      (`Msg "segment to broadcast")
-  in
-  let* () =
-    guard (not (Ipaddr.V4.is_multicast src))
+    guard (not (Ipaddr.is_multicast src))
       (`Msg "segment from multicast address")
   in
   let* () =
-    guard (not (Ipaddr.V4.is_multicast dst))
+    guard (not (Ipaddr.is_multicast dst))
       (`Msg "segment to multicast address")
   in
   let* () =
-    guard (not ((Ipaddr.V4.compare src dst = 0 && t.src_port = t.dst_port)))
+    guard (not ((Ipaddr.compare src dst = 0 && t.src_port = t.dst_port)))
       (`Msg "segment source and destination ip and port are equal")
   in
   Ok (t, to_id ~src ~dst t)

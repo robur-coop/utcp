@@ -10,9 +10,11 @@ let log_err ~pp_error = function
 
 let handle_events ip =
   Lwt_list.iter_s (function
-      | `Data (dst, out) ->
+      | `Data (Ipaddr.V4 dst, out) ->
         IPv4.write ip dst `TCP (fun _ -> 0) [ out ] >|=
-        log_err ~pp_error:IPv4.pp_error)
+        log_err ~pp_error:IPv4.pp_error
+      | `Data (Ipaddr.V6 _, _) ->
+        Lwt.return (Logs.err (fun m -> m "IPv6 not supported at the moment")))
 
 let cb ~proto ~src ~dst payload =
   Logs.app (fun m -> m "received proto %X frame %a -> %a (%d bytes)" proto
@@ -31,7 +33,10 @@ let jump () =
     let tcp (*, clo, out *) =
       (* let dst = Ipaddr.V4.of_string_exn "10.0.42.1" in *)
       let init (*, conn, out *) =
-        let s = Tcp.State.empty Mirage_random_test.generate (Ipaddr.V4.Prefix.address cidr) in
+        let s =
+          Tcp.State.empty Mirage_random_test.generate
+            Ipaddr.(V4 (V4.Prefix.address cidr))
+        in
         let s' = Tcp.State.start_listen s 23 in
         (* Tcp.User.connect s' (Mtime_clock.now ()) dst 1234 *)
         s'
@@ -43,7 +48,10 @@ let jump () =
           Lwt.async (fun () -> handle_events ip (List.map (fun (dst, pkt) -> `Data (dst, pkt)) outs)))
       in
       (fun ~src ~dst payload ->
-         let s', events = Tcp.Input.handle_buf !s (Mtime_clock.now ()) ~src ~dst payload in
+         let src = Ipaddr.V4 src and dst = Ipaddr.V4 dst in
+         let s', events =
+           Tcp.Input.handle_buf !s (Mtime_clock.now ()) ~src ~dst payload
+         in
          s := s' ;
          handle_events ip events) (*,
       (fun () ->

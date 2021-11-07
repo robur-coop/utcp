@@ -13,6 +13,7 @@ depends: [
   "duration"
   "fmt" {>= "0.8.7"}
   "ipaddr" {>= "5.2.0"}
+  "ipaddr-cstruct" {>= "5.2.0"}
   "logs"
   "randomconv"
   "mtime"

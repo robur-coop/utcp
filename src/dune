@@ -1,4 +1,4 @@
 (library
  (name tcp)
  (public_name tcp)
- (libraries cstruct fmt ipaddr logs randomconv duration mtime))
+ (libraries cstruct fmt ipaddr ipaddr-cstruct logs randomconv duration mtime))

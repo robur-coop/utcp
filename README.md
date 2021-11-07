@@ -106,8 +106,6 @@ Model anomalies:
 
 ## TODO
 
-- IPv6 support for the TCP stack (Ipaddr.t instead of Ipaddr.V4.t)
-
 - suspicious that someone/somehow deliver_out_1 needs to be triggered... but at
   which points in time? at the end of "got a segment from network and didn't
   provoke a reply"? "got some data from user"?

@@ -115,12 +115,12 @@ let equal_conn_state a b =
   Cstruct.equal a.rcvq b.rcvq
 
 let equal_tcp_full a b =
-  Ipaddr.V4.compare a.State.ip b.State.ip = 0 &&
+  Ipaddr.compare a.State.ip b.State.ip = 0 &&
   State.IS.equal a.listeners b.listeners &&
   State.CM.equal equal_conn_state_full a.connections b.connections
 
 let equal_tcp a b =
-  Ipaddr.V4.compare a.State.ip b.State.ip = 0 &&
+  Ipaddr.compare a.State.ip b.State.ip = 0 &&
   State.IS.equal a.listeners b.listeners &&
   State.CM.equal equal_conn_state a.connections b.connections
 
@@ -128,7 +128,7 @@ let test_full_state = Alcotest.testable State.pp equal_tcp_full
 and test_state = Alcotest.testable State.pp equal_tcp
 and test_seg = Alcotest.testable Segment.pp Segment.equal
 and test_ip =
-  Alcotest.testable Ipaddr.V4.pp (fun a b -> Ipaddr.V4.compare a b = 0)
+  Alcotest.testable Ipaddr.pp (fun a b -> Ipaddr.compare a b = 0)
 
 let test_full_handle =
   Alcotest.(pair test_full_state (option (pair test_ip test_seg)))
@@ -136,8 +136,8 @@ and test_handle =
   Alcotest.(pair test_state (option (pair test_ip test_seg)))
 
 (* some setup for testing, they should not be relevant (famous last words) *)
-let my_ip = Ipaddr.V4.of_string_exn "1.2.3.4"
-and your_ip = Ipaddr.V4.of_string_exn "1.2.3.5"
+let my_ip = Ipaddr.(V4 (V4.of_string_exn "1.2.3.4"))
+and your_ip = Ipaddr.(V4 (V4.of_string_exn "1.2.3.5"))
 and listen_port = 1234
 and src_port = 4321
 

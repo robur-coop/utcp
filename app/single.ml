@@ -9,8 +9,12 @@ let log_err ~pp_error = function
   | Error e -> Logs.err (fun m -> m "error %a" pp_error e)
 
 let send_tcp ip dst out =
-  IPv4.write ip dst `TCP (fun _ -> 0) [ out ] >|=
-  log_err ~pp_error:IPv4.pp_error
+  match dst with
+  | Ipaddr.V4 dst ->
+    IPv4.write ip dst `TCP (fun _ -> 0) [ out ] >|=
+    log_err ~pp_error:IPv4.pp_error
+  | Ipaddr.V6 _ ->
+    Lwt.return (Logs.err (fun m -> m "IPv6 not supported at the moment"))
 
 let cb ~proto ~src ~dst payload =
   Logs.app (fun m -> m "received proto %X frame %a -> %a (%d bytes)" proto
@@ -18,6 +22,7 @@ let cb ~proto ~src ~dst payload =
   Lwt.return_unit
 
 let tcp_cb ~src ~dst payload =
+  let src = Ipaddr.V4 src and dst = Ipaddr.V4 dst in
   (match Tcp.Segment.decode_and_validate ~src ~dst payload with
    | Error (`Msg msg) -> Logs.app (fun m -> m "TCP received, error %s" msg)
    | Ok (s, id) -> Logs.app (fun m -> m "%a TCP %a" Tcp.State.Connection.pp id
@@ -29,7 +34,7 @@ let jump _ src src_port dst dst_port syn fin rst push ack seq window data =
   Mirage_random_test.initialize ();
   Lwt_main.run (
     let cidr = Ipaddr.V4.Prefix.of_string_exn src
-    and dst = Ipaddr.V4.of_string_exn dst
+    and dst = Ipaddr.(V4 (V4.of_string_exn dst))
     in
     let seg =
       let open Tcp in
@@ -49,7 +54,7 @@ let jump _ src src_port dst dst_port syn fin rst push ack seq window data =
         seq = Sequence.of_int32 (Int32.of_int seq) ;
         ack ; flag ; push ; window ; options = [] ; payload
       } in
-      encode_and_checksum ~src:(Ipaddr.V4.Prefix.address cidr) ~dst s
+      encode_and_checksum ~src:Ipaddr.(V4 (V4.Prefix.address cidr)) ~dst s
     in
     Netif.connect "tap3" >>= fun tap ->
     Ethernet.connect tap >>= fun eth ->

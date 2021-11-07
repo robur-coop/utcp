@@ -221,17 +221,17 @@ let pp_control ppf c =
 let compare_int (a : int) (b : int) = compare a b
 
 module Connection = struct
-  type t = Ipaddr.V4.t * int * Ipaddr.V4.t * int
+  type t = Ipaddr.t * int * Ipaddr.t * int
 
   let pp ppf (src, srcp, dst, dstp) =
-    Fmt.pf ppf "%a:%d -> %a:%d" Ipaddr.V4.pp src srcp Ipaddr.V4.pp dst dstp
+    Fmt.pf ppf "%a:%d -> %a:%d" Ipaddr.pp src srcp Ipaddr.pp dst dstp
 
   let andThen a b = if a = 0 then b else a
   let compare ((src, srcp, dst, dstp) : t) ((src', srcp', dst', dstp') : t) =
     andThen (compare_int srcp srcp')
       (andThen (compare_int dstp dstp')
-         (andThen (Ipaddr.V4.compare src src')
-            (Ipaddr.V4.compare dst dst')))
+         (andThen (Ipaddr.compare src src')
+            (Ipaddr.compare dst dst')))
 end
 
 (* in this we store Connection.t -> state *)
@@ -268,19 +268,19 @@ module IS = Set.Make(struct type t = int let compare = compare_int end)
 (* path mtu (its global to a stack) *)
 type t = {
   rng : int -> Cstruct.t ;
-  ip : Ipaddr.V4.t ;
+  ip : Ipaddr.t ;
   listeners : IS.t ;
   connections : conn_state CM.t
 }
 
 let pp ppf t =
   Fmt.pf ppf "IP %a, listener %a, connections: %a"
-    Ipaddr.V4.pp t.ip Fmt.(list ~sep:(any ", ") int) (IS.elements t.listeners)
+    Ipaddr.pp t.ip Fmt.(list ~sep:(any ", ") int) (IS.elements t.listeners)
     Fmt.(list ~sep:(any "@.") (pair ~sep:(any ": ") Connection.pp pp_conn_state))
     (CM.bindings t.connections)
 
 let quad t (a, ap, b, bp) =
-  if Ipaddr.V4.compare a t.ip = 0 then a, ap, b, bp else b, bp, a, ap
+  if Ipaddr.compare a t.ip = 0 then a, ap, b, bp else b, bp, a, ap
 
 let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
