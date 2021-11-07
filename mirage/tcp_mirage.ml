@@ -20,12 +20,12 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
   type ipinput = src:ipaddr -> dst:ipaddr -> Cstruct.t -> unit Lwt.t
 
   type t = {
-    mutable tcp : Tcp.State.t ;
+    mutable tcp : Tcp.state ;
     ip : Ip.t ;
-    mutable waiting : (unit, [ `Msg of string ]) result Lwt_condition.t Tcp.State.CM.t ;
+    mutable waiting : (unit, [ `Msg of string ]) result Lwt_condition.t Tcp.FM.t ;
   }
 
-  type flow = t * Tcp.State.Connection.t
+  type flow = t * Tcp.flow
 
   type listener = {
     process : flow -> unit Lwt.t;
@@ -33,7 +33,8 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
   }
 
   (* the quad src and dst depends on client and server connections *)
-  let dst (t, (src, src_port, dst, dst_port)) =
+  let dst (t, flow) =
+    let (src, src_port), (dst, dst_port) = Tcp.peers flow in
     let src = match src with Ipaddr.V4 ip -> ip | _ -> assert false
     and dst = match dst with Ipaddr.V4 ip -> ip | _ -> assert false
     in
@@ -43,14 +44,14 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       src, src_port
 
   let rec read (t, flow) =
-    match Tcp.User.recv t.tcp flow with
+    match Tcp.recv t.tcp flow with
     | Ok (tcp, data) ->
       t.tcp <- tcp ;
       if Cstruct.length data = 0 then
         let cond = Lwt_condition.create () in
-        t.waiting <- Tcp.State.CM.add flow cond t.waiting;
+        t.waiting <- Tcp.FM.add flow cond t.waiting;
         Lwt_condition.wait cond >>= fun _ ->
-        t.waiting <- Tcp.State.CM.remove flow t.waiting;
+        t.waiting <- Tcp.FM.remove flow t.waiting;
         read (t, flow)
       else
         Lwt.return (Ok (`Data data))
@@ -60,7 +61,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       Lwt.return (Error `Refused)
 
   let write (t, flow) buf =
-    match Tcp.User.send t.tcp flow buf with
+    match Tcp.send t.tcp flow buf with
     | Ok tcp -> t.tcp <- tcp ; Lwt.return (Ok ())
     | Error `Msg msg ->
       Log.err (fun m -> m "error while write %s" msg);
@@ -70,7 +71,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
   let writev flow bufs = write flow (Cstruct.concat bufs)
 
   let close (t, flow) =
-    match Tcp.User.close t.tcp flow with
+    match Tcp.close t.tcp flow with
     | Ok tcp -> t.tcp <- tcp ; Lwt.return_unit
     | Error `Msg msg ->
       Log.err (fun m -> m "error while close %s" msg);
@@ -88,7 +89,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
 
   let create_connection ?keepalive:_ t (dst, dst_port) =
     let src = Ipaddr.V4 (Ip.src t.ip ~dst) and dst = Ipaddr.V4 dst in
-    let tcp, id, seg = Tcp.User.connect ~src ~dst ~dst_port t.tcp (now ()) in
+    let tcp, id, seg = Tcp.connect ~src ~dst ~dst_port t.tcp (now ()) in
     t.tcp <- tcp;
     output_ip t seg >>= function
     | Error e ->
@@ -96,9 +97,9 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       Lwt.return (Error `Refused)
     | Ok () ->
       let cond = Lwt_condition.create () in
-      t.waiting <- Tcp.State.CM.add id cond t.waiting;
+      t.waiting <- Tcp.FM.add id cond t.waiting;
       Lwt_condition.wait cond >|= fun r ->
-      t.waiting <- Tcp.State.CM.remove id t.waiting;
+      t.waiting <- Tcp.FM.remove id t.waiting;
       match r with
       | Ok () -> Ok (t, id)
       | Error `Msg msg ->
@@ -109,13 +110,13 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
   (* TODO something with listeners! *)
   let input t ~listeners:_ ~src ~dst data =
     let src = Ipaddr.V4 src and dst = Ipaddr.V4 dst in
-    let tcp, ev, data = Tcp.Input.handle_buf t.tcp (now ()) ~src ~dst data in
+    let tcp, ev, data = Tcp.handle_buf t.tcp (now ()) ~src ~dst data in
     t.tcp <- tcp;
     let find ctx id r =
-      match Tcp.State.CM.find_opt id t.waiting with
+      match Tcp.FM.find_opt id t.waiting with
       | None ->
         Log.warn (fun m -> m "%a not found in waiting (%s)"
-                     Tcp.State.Connection.pp id ctx)
+                     Tcp.pp_flow id ctx)
       | Some c -> Lwt_condition.broadcast c r
     in
     Option.fold ~none:()
@@ -129,16 +130,16 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
     Lwt_list.iter_p (out_ign t) (Option.to_list data)
 
   let connect ip =
-    let tcp = Tcp.State.empty R.generate in
-    let t = { tcp ; ip ; waiting = Tcp.State.CM.empty } in
+    let tcp = Tcp.empty R.generate in
+    let t = { tcp ; ip ; waiting = Tcp.FM.empty } in
     Lwt.async (fun () ->
         let timer () =
-          let tcp, drops, outs = Tcp.Tcptimer.timer t.tcp (now ()) in
+          let tcp, drops, outs = Tcp.timer t.tcp (now ()) in
           t.tcp <- tcp;
           List.iter (fun id ->
-              match Tcp.State.CM.find_opt id t.waiting with
+              match Tcp.FM.find_opt id t.waiting with
               | None -> Log.warn (fun m -> m "%a not found in waiting"
-                                     Tcp.State.Connection.pp id)
+                                     Tcp.pp_flow id)
               | Some c ->
                 Lwt_condition.broadcast c (Error (`Msg "timer timed out")))
             drops ;

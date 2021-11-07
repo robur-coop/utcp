@@ -34,21 +34,21 @@ let jump () =
     let tcp (*, clo, out *) =
       (* let dst = Ipaddr.(V4 (V4.of_string_exn "10.0.42.1")) in *)
       let init (*, conn, out *) =
-        let s = Tcp.State.empty Mirage_random_test.generate in
-        let s' = Tcp.State.start_listen s 23 in
-        (* Tcp.User.connect ~src:Ipaddr.(V4 (V4.Prefix.address cidr)) ~dst ~dst_port:1234 s' (Mtime_clock.now ()) *)
+        let s = Tcp.empty Mirage_random_test.generate in
+        let s' = Tcp.start_listen s 23 in
+        (* Tcp.connect ~src:Ipaddr.(V4 (V4.Prefix.address cidr)) ~dst ~dst_port:1234 s' (Mtime_clock.now ()) *)
         s'
       in
       let s = ref init in
       let _ = Lwt_engine.on_timer 0.1 true (fun _ ->
-          let s', _drops, outs = Tcp.Tcptimer.timer !s (Mtime_clock.now ()) in
+          let s', _drops, outs = Tcp.timer !s (Mtime_clock.now ()) in
           s := s' ;
           Lwt.async (fun () -> handle_data ip outs))
       in
       (fun ~src ~dst payload ->
          let src = Ipaddr.V4 src and dst = Ipaddr.V4 dst in
          let s', ev, data =
-           Tcp.Input.handle_buf !s (Mtime_clock.now ()) ~src ~dst payload
+           Tcp.handle_buf !s (Mtime_clock.now ()) ~src ~dst payload
          in
          (match ev with
           | Some `Established _id -> Logs.app (fun m -> m "connection established")
@@ -58,7 +58,7 @@ let jump () =
          s := s' ;
          handle_data ip (Option.to_list data)) (*,
       (fun () ->
-         match Tcp.User.close !s conn with
+         match Tcp.close !s conn with
          | Error (`Msg msg) -> Logs.err (fun m -> m "close failed %s" msg)
          | Ok s' -> s := s'b),
          (dst, out) *)

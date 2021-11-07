@@ -25,8 +25,7 @@ let tcp_cb ~src ~dst payload =
   let src = Ipaddr.V4 src and dst = Ipaddr.V4 dst in
   (match Tcp.Segment.decode_and_validate ~src ~dst payload with
    | Error (`Msg msg) -> Logs.app (fun m -> m "TCP received, error %s" msg)
-   | Ok (s, id) -> Logs.app (fun m -> m "%a TCP %a" Tcp.State.Connection.pp id
-                                Tcp.Segment.pp s)) ;
+   | Ok (s, id) -> Logs.app (fun m -> m "%a TCP %a" Tcp.pp_flow id Tcp.Segment.pp s)) ;
   Lwt.return_unit
 
 let jump _ src src_port dst dst_port syn fin rst push ack seq window data =
