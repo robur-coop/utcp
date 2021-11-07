@@ -8,13 +8,14 @@ let log_err ~pp_error = function
   | Ok _ -> ()
   | Error e -> Logs.err (fun m -> m "error %a" pp_error e)
 
-let handle_events ip =
+let handle_data ip =
   Lwt_list.iter_s (function
-      | `Data (Ipaddr.V4 dst, out) ->
+      | Ipaddr.V4 _src, Ipaddr.V4 dst, out ->
         IPv4.write ip dst `TCP (fun _ -> 0) [ out ] >|=
         log_err ~pp_error:IPv4.pp_error
-      | `Data (Ipaddr.V6 _, _) ->
-        Lwt.return (Logs.err (fun m -> m "IPv6 not supported at the moment")))
+      | Ipaddr.V6 _, Ipaddr.V6 _, _ ->
+        Lwt.return (Logs.err (fun m -> m "IPv6 not supported at the moment"))
+      | _ -> invalid_arg "bad sportsmanship")
 
 let cb ~proto ~src ~dst payload =
   Logs.app (fun m -> m "received proto %X frame %a -> %a (%d bytes)" proto
@@ -31,29 +32,31 @@ let jump () =
     let cidr = Ipaddr.V4.Prefix.of_string_exn "10.0.42.2/24" in
     IPv4.connect ~cidr eth arp >>= fun ip ->
     let tcp (*, clo, out *) =
-      (* let dst = Ipaddr.V4.of_string_exn "10.0.42.1" in *)
+      (* let dst = Ipaddr.(V4 (V4.of_string_exn "10.0.42.1")) in *)
       let init (*, conn, out *) =
-        let s =
-          Tcp.State.empty Mirage_random_test.generate
-            Ipaddr.(V4 (V4.Prefix.address cidr))
-        in
+        let s = Tcp.State.empty Mirage_random_test.generate in
         let s' = Tcp.State.start_listen s 23 in
-        (* Tcp.User.connect s' (Mtime_clock.now ()) dst 1234 *)
+        (* Tcp.User.connect ~src:Ipaddr.(V4 (V4.Prefix.address cidr)) ~dst ~dst_port:1234 s' (Mtime_clock.now ()) *)
         s'
       in
       let s = ref init in
       let _ = Lwt_engine.on_timer 0.1 true (fun _ ->
-          let s', outs = Tcp.Tcptimer.timer !s (Mtime_clock.now ()) in
+          let s', _drops, outs = Tcp.Tcptimer.timer !s (Mtime_clock.now ()) in
           s := s' ;
-          Lwt.async (fun () -> handle_events ip (List.map (fun (dst, pkt) -> `Data (dst, pkt)) outs)))
+          Lwt.async (fun () -> handle_data ip outs))
       in
       (fun ~src ~dst payload ->
          let src = Ipaddr.V4 src and dst = Ipaddr.V4 dst in
-         let s', events =
+         let s', ev, data =
            Tcp.Input.handle_buf !s (Mtime_clock.now ()) ~src ~dst payload
          in
+         (match ev with
+          | Some `Established _id -> Logs.app (fun m -> m "connection established")
+          | Some `Drop _id -> Logs.app (fun m -> m "connection drop")
+          | Some `Received _id -> Logs.app (fun m -> m "data received")
+          | None -> ());
          s := s' ;
-         handle_events ip events) (*,
+         handle_data ip (Option.to_list data)) (*,
       (fun () ->
          match Tcp.User.close !s conn with
          | Error (`Msg msg) -> Logs.err (fun m -> m "close failed %s" msg)

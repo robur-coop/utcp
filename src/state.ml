@@ -268,21 +268,17 @@ module IS = Set.Make(struct type t = int let compare = compare_int end)
 (* path mtu (its global to a stack) *)
 type t = {
   rng : int -> Cstruct.t ;
-  ip : Ipaddr.t ;
   listeners : IS.t ;
   connections : conn_state CM.t
 }
 
 let pp ppf t =
-  Fmt.pf ppf "IP %a, listener %a, connections: %a"
-    Ipaddr.pp t.ip Fmt.(list ~sep:(any ", ") int) (IS.elements t.listeners)
+  Fmt.pf ppf ":istener %a, connections: %a"
+    Fmt.(list ~sep:(any ", ") int) (IS.elements t.listeners)
     Fmt.(list ~sep:(any "@.") (pair ~sep:(any ": ") Connection.pp pp_conn_state))
     (CM.bindings t.connections)
-
-let quad t (a, ap, b, bp) =
-  if Ipaddr.compare a t.ip = 0 then a, ap, b, bp else b, bp, a, ap
 
 let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 
-let empty rng ip = { rng ; ip ; listeners = IS.empty ; connections = CM.empty }
+let empty rng = { rng ; listeners = IS.empty ; connections = CM.empty }

@@ -115,13 +115,11 @@ let equal_conn_state a b =
   Cstruct.equal a.rcvq b.rcvq
 
 let equal_tcp_full a b =
-  Ipaddr.compare a.State.ip b.State.ip = 0 &&
-  State.IS.equal a.listeners b.listeners &&
+  State.IS.equal a.State.listeners b.State.listeners &&
   State.CM.equal equal_conn_state_full a.connections b.connections
 
 let equal_tcp a b =
-  Ipaddr.compare a.State.ip b.State.ip = 0 &&
-  State.IS.equal a.listeners b.listeners &&
+  State.IS.equal a.State.listeners b.State.listeners &&
   State.CM.equal equal_conn_state a.connections b.connections
 
 let test_full_state = Alcotest.testable State.pp equal_tcp_full
@@ -131,9 +129,9 @@ and test_ip =
   Alcotest.testable Ipaddr.pp (fun a b -> Ipaddr.compare a b = 0)
 
 let test_full_handle =
-  Alcotest.(pair test_full_state (option (pair test_ip test_seg)))
+  Alcotest.(pair test_full_state (option (triple test_ip test_ip test_seg)))
 and test_handle =
-  Alcotest.(pair test_state (option (pair test_ip test_seg)))
+  Alcotest.(pair test_state (option (triple test_ip test_ip test_seg)))
 
 (* some setup for testing, they should not be relevant (famous last words) *)
 let my_ip = Ipaddr.(V4 (V4.of_string_exn "1.2.3.4"))
@@ -144,7 +142,7 @@ and src_port = 4321
 let quad = my_ip, listen_port, your_ip, src_port
 
 (* a TCP stack listening on port 1234 *)
-let tcp = State.empty static_rng my_ip
+let tcp = State.empty static_rng
 let tcp_listen = State.start_listen tcp listen_port
 
 let basic_seg = {
@@ -205,7 +203,7 @@ let test_closed =
             (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg))
       (test_segs initial_ack p)
       (List.mapi (fun i v ->
-           i, match v with None -> None | Some s -> Some (your_ip, s))
+           i, match v with None -> None | Some s -> Some (my_ip, your_ip, s))
           (no_state (Cstruct.length p)))
   in
   test_all " " Cstruct.empty @ test_all "+data " (Cstruct.create 20)
@@ -246,14 +244,14 @@ let test_listen =
             (Input.handle_segment tcp_listen (Mtime.of_uint64_ns 0L) quad seg))
       (test_segs initial_ack p)
       (List.mapi (fun i (s, v) ->
-           i, s, match v with None -> None | Some s -> Some (your_ip, s))
+           i, s, match v with None -> None | Some s -> Some (my_ip, your_ip, s))
           listen)
   in
   test_all " " Cstruct.empty @ test_all "+data " (Cstruct.create 20)
 
 let tcp_syn_sent =
   let tcp', _id, _out =
-    User.connect tcp (Mtime.of_uint64_ns 0L) ~src_port:listen_port your_ip src_port
+    User.connect ~src:my_ip ~src_port:listen_port ~dst:your_ip ~dst_port:src_port tcp (Mtime.of_uint64_ns 0L)
   in
   tcp'
 
@@ -300,7 +298,7 @@ let test_syn_sent =
               (Input.handle_segment tcp_syn_sent (Mtime.of_uint64_ns 0L) quad seg))
       (test_segs ack p)
       (List.mapi (fun i (s, v) ->
-           i, s, match v with None -> None | Some s -> Some (your_ip, s))
+           i, s, match v with None -> None | Some s -> Some (my_ip, your_ip, s))
           res)
   in
   test_all " " (Sequence.incr rng_seq) Cstruct.empty syn_sent_ack_iss @
@@ -348,7 +346,7 @@ let test_syn_rcvd =
             (Input.handle_segment tcp_syn_rcvd (Mtime.of_uint64_ns 0L) quad seg))
       (test_segs ack p)
       (List.mapi (fun i (s, v) ->
-           i, s, match v with None -> None | Some s -> Some (your_ip, s))
+           i, s, match v with None -> None | Some s -> Some (my_ip, your_ip, s))
           syn_received)
   in
   test_all " " (Sequence.incr rng_seq) Cstruct.empty

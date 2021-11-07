@@ -33,10 +33,10 @@ deliver_in_8 - recv SYN in yy - handle_conn
 deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - not handled
 ??deliver_in_10 - stupid flag combinations are dropped (without reset)
 *)
-let dropwithreset (_, _, dst, _) seg =
+let dropwithreset (src, _, dst, _) seg =
   match Segment.dropwithreset seg with
   | None -> None
-  | Some x -> Some (dst, x)
+  | Some x -> Some (src, dst, x)
 
 let deliver_in_1 rng now id seg =
   let conn =
@@ -1054,15 +1054,41 @@ let handle_buf t now ~src ~dst data =
   match Segment.decode_and_validate ~src ~dst data with
   | Error (`Msg msg) ->
     Log.err (fun m -> m "dropping invalid segment %s" msg);
-    (t, [])
+    t, None, None
   | Ok (seg, id) ->
     (* deliver_in_3a deliver_in_4 are done now! *)
+    let was_established =
+      match CM.find_opt id t.connections with
+      | None -> false
+      | Some s -> s.tcp_state = Established
+    in
     let t', out = handle_segment t now id seg in
-    t', match out with
-    | None -> Log.info (fun m -> m "no answer"); []
-    | Some (dst', d) ->
+    let is_established, received =
+      match CM.find_opt id t'.connections with
+      | None -> false, false
+      | Some s ->
+        s.tcp_state = Established,
+        Cstruct.length s.rcvq > 0
+    in
+    let ev =
+      match was_established, is_established, received with
+      | false, true, _ -> Some (`Established id)
+      | true, false, _ -> Some (`Drop id)
+      | _, _, true -> Some (`Received id)
+      | _ -> None
+    in
+    match out with
+    | None ->
+      Log.info (fun m -> m "no answer");
+      t', ev, None
+    | Some (src', dst', d) ->
       Log.info (fun m -> m "answer %a" Segment.pp d);
       let src, _, dst, _ = id in
       if Ipaddr.compare dst' src <> 0 then
-        Log.err (fun m -> m "bad IP %a vs %a" Ipaddr.pp dst' Ipaddr.pp src);
-      [ `Data (src, Segment.encode_and_checksum ~src:dst ~dst:src d) ]
+        Log.err (fun m -> m "bad IP reply dst' %a vs src %a"
+                    Ipaddr.pp dst' Ipaddr.pp src);
+      if Ipaddr.compare src' dst <> 0 then
+        Log.err (fun m -> m "bad IP reply src' %a vs dst %a"
+                    Ipaddr.pp src' Ipaddr.pp dst);
+      t', ev,
+      Some (src', dst', Segment.encode_and_checksum ~src:dst ~dst:src d)

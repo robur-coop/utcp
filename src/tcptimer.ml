@@ -114,11 +114,11 @@ let fast_timer t now =
             CM.add id c' acc, out :: outs)
       t.connections (CM.empty, [])
   in
-  { t with connections }, out
+  { t with connections }, [], out
 
 let slow_timer t now =
-  let connections, outs =
-    CM.fold (fun id conn (acc, outs) ->
+  let connections, drops, outs =
+    CM.fold (fun id conn (acc, drops, outs) ->
         let maybe_out = function
           | None -> outs
           | Some out -> out :: outs
@@ -157,20 +157,27 @@ let slow_timer t now =
             None, None
           | None, None, None, None -> Some conn, None
         in
-        (match r with None -> acc | Some c -> CM.add id c acc),
-        maybe_out out_opt)
-      t.connections (CM.empty, [])
+        let out = maybe_out out_opt in
+        match r with
+        | None -> acc, id :: drops, out
+        | Some c -> CM.add id c acc, drops, out)
+      t.connections (CM.empty, [], [])
   in
-  { t with connections }, outs
+  { t with connections }, drops, outs
 
 let ctr = ref 0
 
 (* expected to be called every 100msec - we have slow timers (500ms) and fast timers (200ms) used by delayed ack *)
 let timer t now =
   incr ctr ;
-  let t, outs =
+  let t, drops, outs =
     if !ctr mod 2 = 0 then fast_timer t now
     else if !ctr mod 5 = 0 then slow_timer t now
-    else t, []
+    else t, [], []
   in
-  t, List.map (fun (dst, seg) -> dst, Segment.encode_and_checksum ~src:t.ip ~dst seg) outs
+  let segs =
+    List.map (fun (src, dst, seg) ->
+        src, dst, Segment.encode_and_checksum ~src ~dst seg)
+      outs
+  in
+  t, drops, segs

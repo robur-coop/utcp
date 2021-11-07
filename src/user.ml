@@ -8,12 +8,12 @@ let ( let* ) = Result.bind
 let src = Logs.Src.create "tcp.user" ~doc:"TCP user"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-let connect t now ?src_port dst dst_port =
+let connect ~src ?src_port ~dst ~dst_port t now =
   let src_port = match src_port with
     | None -> Randomconv.int16 t.rng
     | Some p -> p
   in
-  let id = t.ip, src_port, dst, dst_port in
+  let id = src, src_port, dst, dst_port in
   let conn =
     let iss = Sequence.of_int32 (Randomconv.int32 t.rng) in
     let rcv_wnd = Params.so_rcvbuf in
@@ -36,13 +36,13 @@ let connect t now ?src_port dst dst_port =
     } in
     conn_state ~rcvbufsize:rcv_wnd ~sndbufsize:Params.so_sndbuf Syn_sent control_block
   in
-  let _, seg = Segment.make_syn conn.control_block id in
-  let data = Segment.encode_and_checksum ~src:t.ip ~dst seg in
+  let _, _, seg = Segment.make_syn conn.control_block id in
+  let data = Segment.encode_and_checksum ~src ~dst seg in
   let connections =
     Log.debug (fun m -> m "%a active open %a" Connection.pp id pp_conn_state conn);
     CM.add id conn t.connections
   in
-  { t with connections }, id, data
+  { t with connections }, id, (src, dst, data)
 
 (* it occurs that all these functions below are not well suited for sending out
    segments, a tcp_output(_really) will for sure help *)

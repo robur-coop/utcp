@@ -207,10 +207,11 @@ let count_flags = function
   | _ -> 0
 
 (* auxFns:1520 *)
-let make_rst_from_cb cb (_, src_port, dst, dst_port) =
-  dst, { src_port ; dst_port ; seq = cb.State.snd_nxt ; ack = Some cb.rcv_nxt ;
-         flag = Some `Rst ; push = false ; window = 0 ; options = [] ;
-         payload = Cstruct.empty }
+let make_rst_from_cb cb (src, src_port, dst, dst_port) =
+  src, dst,
+  { src_port ; dst_port ; seq = cb.State.snd_nxt ; ack = Some cb.rcv_nxt ;
+    flag = Some `Rst ; push = false ; window = 0 ; options = [] ;
+    payload = Cstruct.empty }
 
 (* auxFns:2219 *)
 let dropwithreset seg =
@@ -330,7 +331,7 @@ let tcp_output_required now conn =
   do_output, persist_fun
 
 (* auxFns:1774 no ts and arch, though *)
-let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
+let tcp_output_really now (src, src_port, dst, dst_port) window_probe conn =
   let cb = conn.State.control_block in
   let snd_cwnd =
     let rxtcur = Subr.computed_rxtcur cb.State.t_rttinf in
@@ -459,7 +460,7 @@ let tcp_output_really now (_, src_port, dst, dst_port) window_probe conn =
     last_ack_sent = cb.State.rcv_nxt ;
     rcv_adv = Sequence.addi cb.State.rcv_nxt rcv_wnd'
   } in
-  { conn with tcp_state ; control_block }, (dst, seg)
+  { conn with tcp_state ; control_block }, (src, dst, seg)
 
 (* auxFns:2000 *)
 let tcp_output_perhaps now id conn =
@@ -477,36 +478,39 @@ let tcp_output_perhaps now id conn =
     conn', None
 
 (* auxFns:1384 *)
-let make_syn_ack cb (_, src_port, dst, dst_port) =
+let make_syn_ack cb (src, src_port, dst, dst_port) =
   let window = min cb.State.rcv_wnd max_win in
   let options =
     MaximumSegmentSize cb.t_advmss ::
     (match cb.request_r_scale with None -> [] | Some sc -> [ WindowScale sc ])
   in
-  dst, { src_port ; dst_port ; seq = cb.iss ; ack = Some cb.rcv_nxt ;
-         flag = Some `Syn ; push = false ; window ; options ;
-         payload = Cstruct.empty }
+  src, dst,
+  { src_port ; dst_port ; seq = cb.iss ; ack = Some cb.rcv_nxt ;
+    flag = Some `Syn ; push = false ; window ; options ;
+    payload = Cstruct.empty }
 
 (* auxFns:1333 *)
-let make_syn cb (_, src_port, dst, dst_port) =
+let make_syn cb (src, src_port, dst, dst_port) =
   let window = min cb.State.rcv_wnd max_win in
   let options =
     MaximumSegmentSize cb.State.t_advmss ::
     (match cb.request_r_scale with None -> [] | Some sc -> [ WindowScale sc ])
   in
-  dst, { src_port ; dst_port ; seq = cb.State.iss ; ack = None ;
-         flag = Some `Syn ; push = false ;
-         window ; options ; payload = Cstruct.empty }
+  src, dst,
+  { src_port ; dst_port ; seq = cb.State.iss ; ack = None ;
+    flag = Some `Syn ; push = false ;
+    window ; options ; payload = Cstruct.empty }
 
 (* auxFns:1437 *)
-let make_ack cb fin (_, src_port, dst, dst_port) =
+let make_ack cb fin (src, src_port, dst, dst_port) =
   let window = min (cb.State.rcv_wnd lsr cb.rcv_scale) max_win in
   (* sack *)
-  dst, { src_port ; dst_port ;
-         seq = if fin then cb.snd_una else cb.snd_nxt ;
-         ack = Some cb.rcv_nxt ;
-         flag = if fin then Some `Fin else None ;
-         push = false ; window ; options = [] ; payload = Cstruct.empty }
+  src, dst,
+  { src_port ; dst_port ;
+    seq = if fin then cb.snd_una else cb.snd_nxt ;
+    ack = Some cb.rcv_nxt ;
+    flag = if fin then Some `Fin else None ;
+    push = false ; window ; options = [] ; payload = Cstruct.empty }
 
 let checksum ~src ~dst buf =
   let plen = Cstruct.length buf in

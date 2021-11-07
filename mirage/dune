@@ -1,0 +1,4 @@
+(library
+ (name tcp_mirage)
+ (public_name tcp.mirage)
+ (libraries tcp lwt mirage-protocols mirage-random mirage-time mirage-clock))
