@@ -1,10 +1,14 @@
 ## TCP - Transmission control protocol
 
+ALPHA: This is still under development and not yet ready for being used.
+
 This repository contains a TCP stack with a pure functional core. Its design is
 close to the [HOL4 specification](https://www.cl.cam.ac.uk/~pes20/Netsem/alldoc.pdf)
 developed in the [Netsem](https://www.cl.cam.ac.uk/~pes20/Netsem/) project -
 have a look at the
 [overview paper](http://www.cl.cam.ac.uk/~pes20/Netsem/paper3.pdf) if interested.
+The [GitHub repository](https://github.com/rems-project/netsem) is the current
+development head - and the code in here uses the FreeBSD-CURRENT branch.
 If you find function names that are confusing, its worth to look into the NetSem
 specification, there may exist a rule with the same name with same behaviour.
 

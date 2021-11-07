@@ -1,0 +1,51 @@
+opam-version: "2.0"
+maintainer: "Robur <team@robur.coop>"
+authors: ["Robur <team@robur.coop>"]
+homepage: "https://github.com/roburio/tcp"
+dev-repo: "git+https://github.com/roburio/tcp.git"
+bug-reports: "https://github.com/roburio/tcp/issues"
+license: "ISC"
+
+depends: [
+  "ocaml" {>= "4.08.0"}
+  "dune" {>= "2.0.0"}
+  "cstruct" {>= "6.0.0"}
+  "duration"
+  "fmt" {>= "0.8.7"}
+  "ipaddr" {>= "5.2.0"}
+  "logs"
+  "randomconv"
+  "mtime"
+  "cmdliner" {dev}
+  "mirage-net-unix" {dev}
+  "lwt" {dev}
+  "ethernet" {dev}
+  "arp" {>= "2.3.0" & dev}
+  "tcpip" {>= "6.3.0" & dev}
+  "mirage-random-test" {dev}
+  "mirage-unix" {dev}
+  "mirage-clock-unix" {dev}
+  "alcotest" {with-test}
+]
+build: [
+  ["dune" "subst"] {dev}
+  ["dune" "build" "-p" name "-j" jobs]
+  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
+]
+
+synopsis: "An implementation of TCP (Transmission Control Protocol) in OCaml"
+description: """
+This opam package contains an implementation of the Transmission Control
+Protocol (RFC 793) in OCaml. TCP is widely used on the Internet today.
+
+This implementation is based on the research project Network Semantics
+(https://www.cl.cam.ac.uk/~pes20/Netsem/) which developed a rigorous test
+oracle specification and validation for TCP/IP and the Sockets API (also see
+the JACM paper http://www.cl.cam.ac.uk/~pes20/Netsem/paper3.pdf) in HOL4. The
+implementation does not adhere to the specification, since some features of TCP
+that are rarely used are not implemented (such as the urgent flag and urgent
+pointers).
+
+The target of this opam package is the MirageOS (https://mirageos.org) unikernel
+operating system.
+"""
