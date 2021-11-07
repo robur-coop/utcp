@@ -38,6 +38,11 @@ build: [
   ["dune" "build" "-p" name "-j" jobs]
   ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]
+pin-depends: [
+  [ "mirage-protocols.5.99" "git+https://github.com/hannesm/mirage-protocols.git#19941698209f227cf2967a9fe199c109af5a08f9" ]
+  [ "tcpip.6.99" "git+https://github.com/hannesm/mirage-tcpip.git#2af9c9acf89165ffcaabb3f08cc1da21ff274fd9" ]
+]
+
 
 synopsis: "An implementation of TCP (Transmission Control Protocol) in OCaml"
 description: """

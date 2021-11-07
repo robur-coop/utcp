@@ -17,31 +17,23 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
 
   type ipaddr = Ip.ipaddr
 
-  type ipinput = src:ipaddr -> dst:ipaddr -> Cstruct.t -> unit Lwt.t
+  module Port_map = Map.Make (struct
+      type t = int
+      let compare (a : int) (b : int) = compare a b
+    end)
 
   type t = {
     mutable tcp : Tcp.state ;
     ip : Ip.t ;
     mutable waiting : (unit, [ `Msg of string ]) result Lwt_condition.t Tcp.FM.t ;
+    mutable listeners : (flow -> unit Lwt.t) Port_map.t ;
   }
+  and flow = t * Tcp.flow
 
-  type flow = t * Tcp.flow
-
-  type listener = {
-    process : flow -> unit Lwt.t;
-    keepalive : Mirage_protocols.Keepalive.t option;
-  }
-
-  (* the quad src and dst depends on client and server connections *)
-  let dst (t, flow) =
-    let (src, src_port), (dst, dst_port) = Tcp.peers flow in
-    let src = match src with Ipaddr.V4 ip -> ip | _ -> assert false
-    and dst = match dst with Ipaddr.V4 ip -> ip | _ -> assert false
-    in
-    if List.mem src (Ip.get_ip t.ip) then
-      dst, dst_port
-    else
-      src, src_port
+  let dst (_t, flow) =
+    let _, (dst, dst_port) = Tcp.peers flow in
+    let dst = match dst with Ipaddr.V4 ip -> ip | _ -> assert false in
+    dst, dst_port
 
   let rec read (t, flow) =
     match Tcp.recv t.tcp flow with
@@ -107,21 +99,32 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
         (* TODO better error *)
         Error `Timeout
 
-  (* TODO something with listeners! *)
-  let input t ~listeners:_ ~src ~dst data =
+  let input t ~src ~dst data =
     let src = Ipaddr.V4 src and dst = Ipaddr.V4 dst in
     let tcp, ev, data = Tcp.handle_buf t.tcp (now ()) ~src ~dst data in
     t.tcp <- tcp;
-    let find ctx id r =
+    let find ?f ctx id r =
       match Tcp.FM.find_opt id t.waiting with
-      | None ->
-        Log.warn (fun m -> m "%a not found in waiting (%s)"
-                     Tcp.pp_flow id ctx)
       | Some c -> Lwt_condition.broadcast c r
+      | None -> match f with
+        | Some f -> f ()
+        | None -> Log.warn (fun m -> m "%a not found in waiting (%s)" Tcp.pp_flow id ctx)
     in
     Option.fold ~none:()
       ~some:(function
-          | `Established id -> find "established" id (Ok ())
+          | `Established id ->
+            let ctx = "established" in
+            let f () =
+              let (_, port), _ = Tcp.peers id in
+              match Port_map.find_opt port t.listeners with
+              | None ->
+                Log.warn (fun m -> m "%a not found in waiting or listeners (%s)"
+                             Tcp.pp_flow id ctx)
+              | Some cb ->
+                (* NOTE we start an asynchronous task with the callback *)
+                Lwt.async (fun () -> cb (t, id))
+            in
+            find ~f ctx id (Ok ())
           | `Drop id -> find "drop" id (Error (`Msg "dropped"))
           | `Received id -> find "received" id (Ok ()))
       ev;
@@ -131,7 +134,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
 
   let connect ip =
     let tcp = Tcp.empty R.generate in
-    let t = { tcp ; ip ; waiting = Tcp.FM.empty } in
+    let t = { tcp ; ip ; waiting = Tcp.FM.empty ; listeners = Port_map.empty } in
     Lwt.async (fun () ->
         let timer () =
           let tcp, drops, outs = Tcp.timer t.tcp (now ()) in
@@ -155,6 +158,16 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
         in
         go ());
     t
+
+  let listen t ~port ?keepalive:_ callback =
+    let tcp = Tcp.start_listen t.tcp port in
+    t.tcp <- tcp;
+    t.listeners <- Port_map.add port callback t.listeners
+
+  let unlisten t ~port =
+    let tcp = Tcp.stop_listen t.tcp port in
+    t.tcp <- tcp;
+    t.listeners <- Port_map.remove port t.listeners
 
   let disconnect _t =
     Lwt.return_unit
