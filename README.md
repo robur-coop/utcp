@@ -80,10 +80,8 @@ FreeBSD).
 - CLOSED state can't be observed
 - going from TIME_WAIT anywhere (i.e. when someone connects with a socket, and instead close on EOF does another connect - this may actually happen; if you're talking to this library, your second connect will fail.... hope you handle the case properly) - deliver_in_9 will never happen for us
 - TCP_NEWRENO is true (we skip the conditionals)
-- We have infinite resources (well, of course not, but: on the send edge the buffer is provided by the caller (and then owned by us); on the receive side the buffer is provided by the caller as well)
-  -> we don't really allocate data (apart from some records/..), but we nevertheless limit rcvbufsize to 2^16 (should be user-configurable)
-- There is no bandwidth limitation, output always succeeds (this simplifies a lot)!
-  -> no rollback / enqueue_or_fail
+- We have infinite resources (well, of course not, but: on the send edge the buffer is provided by the caller (and then owned by us); on the receive side the buffer is provided by the caller as well) -> we don't really allocate data (apart from some records/..), but we nevertheless limit rcvbufsize to 2^16 (should be user-configurable)
+- There is no bandwidth limitation, output always succeeds (this simplifies a lot)! -> no rollback / enqueue_or_fail
 
 Model anomalies:
 - is tcp option size computation good in timer_tt_rexmtsyn_1? (missing MSS)
@@ -94,45 +92,45 @@ Model anomalies:
 ## Things to ensure and verify
 
 - each incoming segment with reasonable window is handled properly
-- there's always a path (e.g. via timers) to drop the connection (with/out RST)
-  - that'll be hard
+- there's always a path (e.g. via timers) to drop the connection (with/out RST) - that'll be hard
 - timers: is one sufficient (with either rexmtsyn, persist, idle, rexmt)?
-  - no, at least time_wait and fin_wait_2 are special afaict
-  - see also comment in hostTypes:301
+- no, at least time_wait and fin_wait_2 are special afaict
+- see also comment in hostTypes:301
 - esp in the connection setup states (syn_sent/syn_received) and connection
   teardown states (close_wait/fin_wait_1/..) ensure that the pcb will eventually
   be discarded
 - what about outgoing segments? should Input.handle be able to return
-  (a) an optional Segment.t (as in deliver_in_* [apart from 3])
-  (b) a list of Segment.t
-  --> b sounds more plausible - and ACK may open snd_wnd so that multiple data
-      segments are transmitted!
+   - (a) an optional Segment.t (as in deliver_in_* [apart from 3])
+   - (b) a list of Segment.t
+   - b sounds more plausible - and ACK may open snd_wnd so that multiple data segments are transmitted!
 
 ## TODO
 
-- suspicious that someone/somehow deliver_out_1 needs to be triggered... but at
-  which points in time? at the end of <got a segment from network and didn't
-  provoke a reply>? <got some data from user>?
-  i think delack timer is properly initialised when needed (but getting a FIN
-  leads to no reply (though tf_shouldacknow is true now))
-  -- maybe i'm just missing a tcp_output(_perhaps?) call
+- IPv6 support for the TCP stack (Ipaddr.t instead of Ipaddr.V4.t)
 
-- just copied over various functions which need to be properly tested:
- - RTT measurement
- - maximum segment size computation
- - all duration and timer computations...
-- should data = [] be more explicitly assert in early handshake?
-  - from what I understand
-    - SYN may not carry data (apart from TFO where server may send data in SYN+ACK)
-    - RST may carry data (that's the "error message"), FreeBSD may (used to?) send random sndq data
+- suspicious that someone/somehow deliver_out_1 needs to be triggered... but at
+  which points in time? at the end of "got a segment from network and didn't
+  provoke a reply"? "got some data from user"?
+  i think delack timer is properly initialised when needed (but getting a FIN
+  leads to no reply (though tf_shouldacknow is true now)) -> maybe i'm just missing a tcp_output(_perhaps?) call
+
+- I copied over various functions which need to be properly tested:
+   - RTT measurement
+   - maximum segment size computation
+   - all duration and timer computations...
+   - should data = [] be more explicitly assert in early handshake?
+     from what I understand: SYN may not carry data (apart from TFO where server may send data in SYN+ACK); RST may carry data (that's the "error message"), FreeBSD may (used to?) send random sndq data
 
 - provide a Sequence.Infix module with < <= > >= = + ++ (where + is weird: Sequence.t -> int -> Sequence.t)
+
 - error handling (temporary errors / error types to present)
 
 - error propagation: cb can get some errors (from ip / icmp)
    (maybe temporary) which are preserved in softerror, and bubble up
    [also timeouts] <- this is to-be-returned when connect/read/write/close fails
+
 - icmp also for path-mtu
+
 - when is t_maxseg set? is it modified at all? (should not be once ESTABLISHED is reached)
 
 - t_badrxtwin <- meh (don't understand its value and usage)
@@ -143,8 +141,11 @@ Model anomalies:
   (we could embed peer IP into control-block / socket)
 
 - segment reassembly
+
 - put cc in a separate module, follow FreeBSD design ack_received / after_idle / conf_signal / post_recovery
+
 - tcp_output_really and tcp_do_output have quite some code shared...
+
 - keepalive is in the model, could easily be copied over
 
 - recheck with draft793bis whether (all of) our transitions are legitimate and none is really missing
@@ -152,6 +153,7 @@ Model anomalies:
 - further avoiding allocations: sndq and rcvq should be lists of cstruct (no need for Cstruct.append!)
 
 - make the bsd_fast_path a fast path for us ;)
+
 - the rcv_window computations are done for bad segments (di_2a/7c/7d) on BSD as well, but we don't need that behaviour
 
 ## Testing
@@ -176,6 +178,7 @@ Model anomalies:
 
 a matrix from testing LISTEN and CLOSED ports, tested with FreeBSD and Linux:
 
+```
                  LISTEN               CLOSED
             FreeBSD   Linux      FreeBSD     Linux
 NONE           -        -          RST+ACK(2) RST+ACK(2)
@@ -187,19 +190,17 @@ SYN          SYN+ACK    SYN+ACK    RST+ACK(2) RST+ACK(2)
 SYN+ACK         RST     RST        RST        RST
 SYN+FIN(+data)SYN+ACK(1)  -        RST+ACK(2) RST+ACK(2)
 SYN+data     SYN+ACK(1) SYN+ACK(1) RST+ACK(2) RST+ACK(2)
+```
 
 1: only the SYN is acked, not FIN or data!
 2: ACK includes data and fin
 
 ## Further notes
 
-- from rationale.txt:208 cantrcvmore: this is equivalent to ``st IN {CLOSE_WAIT,
-  LAST_ACK, CLOSING; TIME_WAIT; CLOSED}``.  And FIN_WAIT_1???
-  invariants.txt:101
-  If cantrcvmore is set, then rcvq never grows.
+- from rationale.txt:208 cantrcvmore: this is equivalent to ``st IN {CLOSE_WAIT, LAST_ACK, CLOSING; TIME_WAIT; CLOSED}``.  And FIN_WAIT_1???
+  invariants.txt:101 says "If cantrcvmore is set, then rcvq never grows."
   Hypothesis:
-  cantrcvmore <== st IN { CLOSE_WAIT; LAST_ACK; FIN_WAIT_1;
-                          FIN_WAIT_2; CLOSING; TIME_WAIT }
+  cantrcvmore <== st IN { CLOSE_WAIT; LAST_ACK; FIN_WAIT_1; FIN_WAIT_2; CLOSING; TIME_WAIT }
   ~cantrcvmore <== st IN { ESTABLISHED; SYN_SENT; SYN_RCVD }
   think we don't care in LISTEN or CLOSED.
   ==> if we believe this, we should remove cantrcvmore.
@@ -211,15 +212,15 @@ SYN+data     SYN+ACK(1) SYN+ACK(1) RST+ACK(2) RST+ACK(2)
   processing segments AFAICT), imagine we set window size to 0 (so the remote
   won't ever bother sending us more data) <- will reduce required bandwidth
   on the flip side: the remote stack will start a timer to figure out when the
-  window opens again, since it can't know that window==0 will stay forever
-  ~> need to research the actual behaviour once the write part is finished as
+  window opens again, since it can't know that window == 0 will stay forever
+   - need to research the actual behaviour once the write part is finished as
      well and we send a fin (the other side may still try to send us their sndq,
      until some timeout)
-  ~~> for app-level protocols (i.e. TLS) for proper teardown they want to send
-      some data (alert close_notify), which will be avoided
-  ~> may negatively impact the other tcp state (and keep us in fin_wait_2 for
+   - for app-level protocols (i.e. TLS) for proper teardown they want to send
+     some data (alert close_notify), which will be avoided
+   - may negatively impact the other tcp state (and keep us in fin_wait_2 for
      a long time (with the timer being reset by window probes))
-  ~> likely depends on the LINGER option set on the other side, whether to wait
+   - likely depends on the LINGER option set on the other side, whether to wait
      in close() until delivered
 
 - RCVTIMEO and SNDTIMEO <- what exactly do they time? until accepted in
