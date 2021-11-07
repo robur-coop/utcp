@@ -126,15 +126,6 @@ Model anomalies:
     - SYN may not carry data (apart from TFO where server may send data in SYN+ACK)
     - RST may carry data (that's the "error message"), FreeBSD may (used to?) send random sndq data
 
-- FLAGS rework
-  - ack : Sequence.t option ; push : bool ; control : [ `SYN | `FIN | `RST ]
-  --> we then need to error with "has reset" and "has ack" and "seq of Sequence.t" (to properly reply)
-  --> or just drop such segments without notifying the other side..
-  from draft-rfc793bis:
-    CLOSED: ACK set/unset
-    LISTEN: first RST (ignore), second ACK (RST), third SYN, fourth others (ignore RST, drop)
-    SYN-SENT: first ACK, second RST, SYN
-    others: check sequence number, then RST, then SYN, then ACK, then FIN
 - provide a Sequence.Infix module with < <= > >= = + ++ (where + is weird: Sequence.t -> int -> Sequence.t)
 - error handling (temporary errors / error types to present)
 
