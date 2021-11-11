@@ -19,7 +19,7 @@ depends: [
   "mtime" {>= "1.3.0"}
   #for mirage sublibrary
   "lwt" {>= "5.4.2"}
-  "mirage-protocols" {>= "5.0.0"}
+  "mirage-protocols" {>= "6.0.0"}
   "mirage-random" {>= "2.0.0"}
   "mirage-time" {>= "2.0.1"}
   "mirage-clock" {>= "3.1.0"}
@@ -27,7 +27,7 @@ depends: [
   "mirage-net-unix" {>= "2.8.0" & dev}
   "ethernet" {>= "2.2.1" & dev}
   "arp" {>= "2.3.0" & dev}
-  "tcpip" {>= "6.3.0" & dev}
+  "tcpip" {>= "6.4.0" & dev}
   "mirage-random-test" {dev}
   "mirage-unix" {>= "4.0.1" & dev}
   "mirage-clock-unix" {>= "3.1.0" & dev}
@@ -38,11 +38,6 @@ build: [
   ["dune" "build" "-p" name "-j" jobs]
   ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]
-pin-depends: [
-  [ "mirage-protocols.5.99" "git+https://github.com/hannesm/mirage-protocols.git#19941698209f227cf2967a9fe199c109af5a08f9" ]
-  [ "tcpip.6.99" "git+https://github.com/hannesm/mirage-tcpip.git#2af9c9acf89165ffcaabb3f08cc1da21ff274fd9" ]
-]
-
 
 synopsis: "An implementation of TCP (Transmission Control Protocol) in OCaml"
 description: """
