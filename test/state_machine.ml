@@ -1,6 +1,6 @@
 (* (c) 2019 Hannes Mehnert, all rights reserved *)
 
-open Tcp
+open Utcp
 
 (* generates the bit pattern 0b10100101 *)
 let static_rng y =
@@ -146,7 +146,7 @@ let tcp = State.empty static_rng
 let tcp_listen = State.start_listen tcp listen_port
 
 let basic_seg = {
-  Segment.src_port ; dst_port = listen_port ; seq = Tcp.Sequence.zero ;
+  Segment.src_port ; dst_port = listen_port ; seq = Sequence.zero ;
   ack = None ; flag = None ; push = false ; window = 0 ;
   options = [] ; payload = Cstruct.empty
 }

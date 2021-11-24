@@ -34,21 +34,21 @@ let jump () =
     let tcp (*, clo, out *) =
       (* let dst = Ipaddr.(V4 (V4.of_string_exn "10.0.42.1")) in *)
       let init (*, conn, out *) =
-        let s = Tcp.empty Mirage_random_test.generate in
-        let s' = Tcp.start_listen s 23 in
+        let s = Utcp.empty Mirage_random_test.generate in
+        let s' = Utcp.start_listen s 23 in
         (* Tcp.connect ~src:Ipaddr.(V4 (V4.Prefix.address cidr)) ~dst ~dst_port:1234 s' (Mtime_clock.now ()) *)
         s'
       in
       let s = ref init in
       let _ = Lwt_engine.on_timer 0.1 true (fun _ ->
-          let s', _drops, outs = Tcp.timer !s (Mtime_clock.now ()) in
+          let s', _drops, outs = Utcp.timer !s (Mtime_clock.now ()) in
           s := s' ;
           Lwt.async (fun () -> handle_data ip outs))
       in
       (fun ~src ~dst payload ->
          let src = Ipaddr.V4 src and dst = Ipaddr.V4 dst in
          let s', ev, data =
-           Tcp.handle_buf !s (Mtime_clock.now ()) ~src ~dst payload
+           Utcp.handle_buf !s (Mtime_clock.now ()) ~src ~dst payload
          in
          s := s' ;
          (match ev with

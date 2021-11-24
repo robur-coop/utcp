@@ -1,4 +1,4 @@
-## TCP - Transmission control protocol
+## µTCP - Transmission control protocol
 
 ALPHA: This is still under development and not yet ready for being used.
 

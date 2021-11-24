@@ -1,9 +1,9 @@
 opam-version: "2.0"
 maintainer: "Robur <team@robur.coop>"
 authors: ["Robur <team@robur.coop>"]
-homepage: "https://github.com/roburio/tcp"
-dev-repo: "git+https://github.com/roburio/tcp.git"
-bug-reports: "https://github.com/roburio/tcp/issues"
+homepage: "https://github.com/roburio/utcp"
+dev-repo: "git+https://github.com/roburio/utcp.git"
+bug-reports: "https://github.com/roburio/utcp/issues"
 license: "ISC"
 
 depends: [
@@ -41,7 +41,7 @@ build: [
 
 synopsis: "An implementation of TCP (Transmission Control Protocol) in OCaml"
 description: """
-This opam package contains an implementation of the Transmission Control
+µTCP is an implementation of the Transmission Control
 Protocol (RFC 793) in OCaml. TCP is widely used on the Internet today.
 
 This implementation is based on the research project Network Semantics
