@@ -1084,11 +1084,11 @@ let handle_buf t now ~src ~dst data =
     | Some (src', dst', d) ->
       Log.info (fun m -> m "answer %a" Segment.pp d);
       let src, _, dst, _ = id in
-      if Ipaddr.compare dst' src <> 0 then
-        Log.err (fun m -> m "bad IP reply dst' %a vs src %a"
-                    Ipaddr.pp dst' Ipaddr.pp src);
-      if Ipaddr.compare src' dst <> 0 then
-        Log.err (fun m -> m "bad IP reply src' %a vs dst %a"
-                    Ipaddr.pp src' Ipaddr.pp dst);
+      if Ipaddr.compare src' src <> 0 then
+        Log.err (fun m -> m "bad IP reply src' %a vs src %a"
+                    Ipaddr.pp src' Ipaddr.pp src);
+      if Ipaddr.compare dst' dst <> 0 then
+        Log.err (fun m -> m "bad IP reply dst' %a vs dst %a"
+                    Ipaddr.pp dst' Ipaddr.pp dst);
       t', ev,
       Some (src', dst', Segment.encode_and_checksum ~src:dst ~dst:src d)
