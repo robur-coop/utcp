@@ -3,7 +3,13 @@ open Lwt.Infix
 let src = Logs.Src.create "tcp.mirage" ~doc:"TCP mirage"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (Ip : Mirage_protocols.IPV4) = struct
+module type Ip_wrap = sig
+  include Mirage_protocols.IP
+  val to_ipaddr : Ipaddr.t -> ipaddr
+  val of_ipaddr : ipaddr -> Ipaddr.t
+end
+
+module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (W : Ip_wrap) = struct
 
   let now () = Mtime.of_uint64_ns (Mclock.elapsed_ns ())
 
@@ -15,7 +21,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
 
   let pp_write_error = Mirage_protocols.Tcp.pp_write_error
 
-  type ipaddr = Ip.ipaddr
+  type ipaddr = W.ipaddr
 
   module Port_map = Map.Make (struct
       type t = int
@@ -24,7 +30,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
 
   type t = {
     mutable tcp : Utcp.state ;
-    ip : Ip.t ;
+    ip : W.t ;
     mutable waiting : (unit, [ `Msg of string ]) result Lwt_condition.t Utcp.FM.t ;
     mutable listeners : (flow -> unit Lwt.t) Port_map.t ;
   }
@@ -32,7 +38,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
 
   let dst (_t, flow) =
     let _, (dst, dst_port) = Utcp.peers flow in
-    let dst = match dst with Ipaddr.V4 ip -> ip | _ -> assert false in
+    let dst = W.to_ipaddr dst in
     dst, dst_port
 
   let rec read (t, flow) =
@@ -74,18 +80,16 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
   let writev_nodelay flow bufs = write flow (Cstruct.concat bufs)
 
   let output_ip t (src, dst, seg) =
-    match src, dst with
-    | Ipaddr.V4 src, Ipaddr.V4 dst ->
-      Ip.write t.ip ~src dst `TCP (fun _ -> 0) [seg]
-    | _ -> invalid_arg "bad IP version from timer"
+    W.write t.ip ~src:(W.to_ipaddr src) (W.to_ipaddr dst)
+      `TCP (fun _ -> 0) [seg]
 
   let create_connection ?keepalive:_ t (dst, dst_port) =
-    let src = Ipaddr.V4 (Ip.src t.ip ~dst) and dst = Ipaddr.V4 dst in
+    let src = W.of_ipaddr (W.src t.ip ~dst) and dst = W.of_ipaddr dst in
     let tcp, id, seg = Utcp.connect ~src ~dst ~dst_port t.tcp (now ()) in
     t.tcp <- tcp;
     output_ip t seg >>= function
     | Error e ->
-      Log.err (fun m -> m "error sending syn: %a" Ip.pp_error e);
+      Log.err (fun m -> m "error sending syn: %a" W.pp_error e);
       Lwt.return (Error `Refused)
     | Ok () ->
       let cond = Lwt_condition.create () in
@@ -100,7 +104,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
         Error `Timeout
 
   let input t ~src ~dst data =
-    let src = Ipaddr.V4 src and dst = Ipaddr.V4 dst in
+    let src = W.of_ipaddr src and dst = W.of_ipaddr dst in
     let tcp, ev, data = Utcp.handle_buf t.tcp (now ()) ~src ~dst data in
     t.tcp <- tcp;
     let find ?f ctx id r =
@@ -171,4 +175,33 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
 
   let disconnect _t =
     Lwt.return_unit
+end
+
+module Make_v4 (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (Ip : Mirage_protocols.IPV4) = struct
+  module W = struct
+    include Ip
+    let to_ipaddr = function Ipaddr.V4 ip -> ip | _ -> assert false
+    let of_ipaddr ip = Ipaddr.V4 ip
+  end
+  include Make (R) (Mclock) (Time) (W)
+end
+
+module Make_v6 (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (Ip : Mirage_protocols.IPV6) = struct
+  module W = struct
+    include Ip
+    let to_ipaddr = function Ipaddr.V6 ip -> ip | _ -> assert false
+    let of_ipaddr ip = Ipaddr.V6 ip
+  end
+  include Make (R) (Mclock) (Time) (W)
+end
+
+module type IPV4V6 = Mirage_protocols.IP with type ipaddr = Ipaddr.t
+
+module Make_v4v6 (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (Ip : IPV4V6) = struct
+  module W = struct
+    include Ip
+    let to_ipaddr = Fun.id
+    let of_ipaddr = Fun.id
+  end
+  include Make (R) (Mclock) (Time) (W)
 end
