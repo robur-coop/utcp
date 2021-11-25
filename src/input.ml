@@ -505,7 +505,7 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
      rev258821) for details *)
   if
     Sequence.less_equal ack cb.snd_una && maybe_dup_ack && fin &&
-    match conn.tcp_state with  Close_wait | Closing | Last_ack | Time_wait -> false | _ -> true
+    match conn.tcp_state with Close_wait | Closing | Last_ack | Time_wait -> false | _ -> true
   then
     let control_block = { cb with t_dupacks = 0 } in
     ({ conn with control_block }, []), true

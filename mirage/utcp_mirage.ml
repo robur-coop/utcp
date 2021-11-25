@@ -41,6 +41,11 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
     let dst = W.to_ipaddr dst in
     dst, dst_port
 
+  let close t flow =
+    match Utcp.close t.tcp flow with
+    | Ok tcp -> t.tcp <- tcp
+    | Error `Msg msg -> Log.err (fun m -> m "error in close: %s" msg)
+
   let rec read (t, flow) =
     match Utcp.recv t.tcp flow with
     | Ok (tcp, data) ->
@@ -54,6 +59,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       else
         Lwt.return (Ok (`Data data))
     | Error `Msg msg ->
+      close t flow;
       Log.err (fun m -> m "error while read %s" msg);
       (* TODO better error *)
       Lwt.return (Error `Refused)
@@ -62,18 +68,14 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
     match Utcp.send t.tcp flow buf with
     | Ok tcp -> t.tcp <- tcp ; Lwt.return (Ok ())
     | Error `Msg msg ->
+      close t flow;
       Log.err (fun m -> m "error while write %s" msg);
       (* TODO better error *)
       Lwt.return (Error `Refused)
 
   let writev flow bufs = write flow (Cstruct.concat bufs)
 
-  let close (t, flow) =
-    match Utcp.close t.tcp flow with
-    | Ok tcp -> t.tcp <- tcp ; Lwt.return_unit
-    | Error `Msg msg ->
-      Log.err (fun m -> m "error while close %s" msg);
-      Lwt.return_unit
+  let close (t, flow) = close t flow ; Lwt.return_unit
 
   let write_nodelay flow buf = write flow buf
 
