@@ -135,9 +135,6 @@ Model anomalies:
 
 - really need to ensure that we're not talking to ourselves in Segment.decode_and_verify...
 
-- what about multiple local ip addresses? (boils down to how to select IP in connect_1 [and avoid all t.ip...] well, and dropwithreset that crafts a RST of a segment)
-  (we could embed peer IP into control-block / socket)
-
 - segment reassembly
 
 - put cc in a separate module, follow FreeBSD design ack_received / after_idle / conf_signal / post_recovery
