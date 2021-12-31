@@ -4,7 +4,7 @@ let src = Logs.Src.create "tcp.mirage" ~doc:"TCP mirage"
 module Log = (val Logs.src_log src : Logs.LOG)
 
 module type Ip_wrap = sig
-  include Mirage_protocols.IP
+  include Tcpip.Ip.S
   val to_ipaddr : Ipaddr.t -> ipaddr
   val of_ipaddr : ipaddr -> Ipaddr.t
 end
@@ -13,13 +13,13 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
 
   let now () = Mtime.of_uint64_ns (Mclock.elapsed_ns ())
 
-  type error = Mirage_protocols.Tcp.error
+  type error = Tcpip.Tcp.error
 
-  let pp_error = Mirage_protocols.Tcp.pp_error
+  let pp_error = Tcpip.Tcp.pp_error
 
-  type write_error = Mirage_protocols.Tcp.write_error
+  type write_error = Tcpip.Tcp.write_error
 
-  let pp_write_error = Mirage_protocols.Tcp.pp_write_error
+  let pp_write_error = Tcpip.Tcp.pp_write_error
 
   type ipaddr = W.ipaddr
 
@@ -179,7 +179,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
     Lwt.return_unit
 end
 
-module Make_v4 (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (Ip : Mirage_protocols.IPV4) = struct
+module Make_v4 (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.V4.t) = struct
   module W = struct
     include Ip
     let to_ipaddr = function Ipaddr.V4 ip -> ip | _ -> assert false
@@ -188,7 +188,7 @@ module Make_v4 (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mira
   include Make (R) (Mclock) (Time) (W)
 end
 
-module Make_v6 (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (Ip : Mirage_protocols.IPV6) = struct
+module Make_v6 (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.V6.t) = struct
   module W = struct
     include Ip
     let to_ipaddr = function Ipaddr.V6 ip -> ip | _ -> assert false
@@ -197,9 +197,7 @@ module Make_v6 (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mira
   include Make (R) (Mclock) (Time) (W)
 end
 
-module type IPV4V6 = Mirage_protocols.IP with type ipaddr = Ipaddr.t
-
-module Make_v4v6 (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (Ip : IPV4V6) = struct
+module Make_v4v6 (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
   module W = struct
     include Ip
     let to_ipaddr = Fun.id

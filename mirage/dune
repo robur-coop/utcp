@@ -1,4 +1,4 @@
 (library
  (name utcp_mirage)
  (public_name utcp.mirage)
- (libraries utcp lwt mirage-protocols mirage-random mirage-time mirage-clock))
+ (libraries utcp lwt tcpip mirage-random mirage-time mirage-clock))
