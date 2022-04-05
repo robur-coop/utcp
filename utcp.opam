@@ -4,7 +4,6 @@ authors: ["Robur <team@robur.coop>"]
 homepage: "https://github.com/roburio/utcp"
 dev-repo: "git+https://github.com/roburio/utcp.git"
 bug-reports: "https://github.com/roburio/utcp/issues"
-license: "ISC"
 
 depends: [
   "ocaml" {>= "4.08.0"}
