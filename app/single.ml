@@ -115,7 +115,10 @@ let data =
   Arg.(value & opt (some string) None & info [ "data" ] ~doc:"Data to transmit")
 
 let cmd =
-  Term.(term_result (const jump $ setup_log $ src $ src_port $ dst $ dst_port $ syn $ fin $ rst $ psh $ ack $ seq $ window $ data)),
-  Term.info "single" ~version:"%%VERSION_NUM%%"
+  let term =
+    Term.(term_result (const jump $ setup_log $ src $ src_port $ dst $ dst_port $ syn $ fin $ rst $ psh $ ack $ seq $ window $ data))
+  and info = Cmd.info "single" ~version:"%%VERSION_NUM%%"
+  in
+  Cmd.v info term
 
-let () = match Term.eval cmd with `Ok () -> exit 0 | _ -> exit 1
+let () = exit (Cmd.eval cmd)

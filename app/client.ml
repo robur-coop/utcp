@@ -95,7 +95,9 @@ let setup_log =
 
 
 let cmd =
-  Term.(term_result (const jump $ setup_log)),
-  Term.info "client" ~version:"%%VERSION_NUM%%"
+  let term = Term.(term_result (const jump $ setup_log))
+  and info = Cmd.info "client" ~version:"%%VERSION_NUM%%"
+  in
+  Cmd.v info term
 
-let () = match Term.eval cmd with `Ok () -> exit 0 | _ -> exit 1
+let () = exit (Cmd.eval cmd)
