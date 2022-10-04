@@ -1,7 +1,7 @@
 open Lwt.Infix
 
 module Ethernet = Ethernet.Make(Netif)
-module ARP = Arp.Make(Ethernet)(OS.Time)
+module ARP = Arp.Make(Ethernet)(Unix_os.Time)
 module IPv4 = Static_ipv4.Make(Mirage_random_test)(Mclock)(Ethernet)(ARP)
 
 let log_err ~pp_error = function
