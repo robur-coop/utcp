@@ -1,6 +1,9 @@
 (* (c) 2019 Hannes Mehnert, all rights reserved *)
 open State
 
+let src = Logs.Src.create "tcp.subr" ~doc:"TCP subr"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 (* tcp_input.c:3736 *)
 let tcp_mssopt _conn =
   let mss = Params.mssdflt
@@ -129,7 +132,7 @@ let start_tt_rexmt_gen mode backoffs now shift wantmin ri =
       (min Params.tcptv_rexmtmax (* better not be infinite! *)
          (computed_rto backoffs shift ri))
   in
-  Logs.debug (fun m -> m "starting rexmt timer %a (backoff is %a)"
+  Log.debug (fun m -> m "starting rexmt timer %a (backoff is %a)"
                 Duration.pp rxtcur Duration.pp backoffs.(shift));
   Some (Timers.timer now (mode, shift) rxtcur)
 
@@ -142,6 +145,6 @@ let start_tt_persist now shift ri =
       (min Params.tcptv_persmax (* better not be infinite! *)
          (computed_rto Params.tcp_backoff shift ri))
   in
-  Logs.debug (fun m -> m "starting persist timer %a (backoff is %a)"
+  Log.debug (fun m -> m "starting persist timer %a (backoff is %a)"
                 Duration.pp cur Duration.pp Params.tcp_backoff.(shift));
   Some (Timers.timer now (Persist, shift) cur)

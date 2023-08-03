@@ -1,4 +1,7 @@
 
+let src = Logs.Src.create "tcp.segment" ~doc:"TCP segment"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 let header_size = 20
 
 let guard f e = if f then Ok () else Error e
