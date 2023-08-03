@@ -148,11 +148,12 @@ let deliver_in_2 now id conn seg ack =
     t_idletime = now ;
     tt_conn_est = None ;
     tt_delack = None ;
-    snd_una = Sequence.incr cb.iss ;
-    (* snd_nxt / snd_max when fin / closed / cantsndmore *)
+    snd_una = Sequence.incr cb.iss ; (*: ack ; = cb.iss + 1, or +2 if full ack of SYN,FIN :*)
+    snd_nxt = if conn.cantsndmore then ack else cb.snd_nxt ;
+    snd_max = if conn.cantsndmore && ack > cb.snd_max then ack else cb.snd_max ;
     snd_wl1 = Sequence.incr seg.seq ;
     snd_wl2 = ack ;
-    (* snd_wnd = win ; *)
+    snd_wnd = seg.window ; (* this is a SYN segment, so window scaling is ignored *)
     snd_cwnd ;
     rcv_scale ;
     snd_scale ;
