@@ -273,7 +273,7 @@ type t = {
 }
 
 let pp ppf t =
-  Fmt.pf ppf ":istener %a, connections: %a"
+  Fmt.pf ppf "listener %a, connections: %a"
     Fmt.(list ~sep:(any ", ") int) (IS.elements t.listeners)
     Fmt.(list ~sep:(any "@.") (pair ~sep:(any ": ") Connection.pp pp_conn_state))
     (CM.bindings t.connections)
