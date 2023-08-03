@@ -170,7 +170,7 @@ let deliver_in_2 now id conn seg ack =
   }
   in
   Ok ({ conn with control_block; tcp_state = Established; rcvbufsize; sndbufsize },
-      Segment.make_ack control_block false id)
+      Segment.make_ack control_block ~fin:false id)
 
 let deliver_in_2b _now _id _conn _seg =
   (* simultaneous open: accept anything, send syn+ack *)
@@ -943,10 +943,10 @@ let deliver_in_7 id conn seg =
     (* we rely that dropwithreset does not RST if a RST was received *)
     Error (`Reset "received valid reset")
   else
-    Ok (Segment.make_ack cb false id)
+    Ok (Segment.make_ack cb ~fin:false id)
 
 let deliver_in_8 id conn _seg =
-  Ok (Segment.make_ack conn.control_block false id)
+  Ok (Segment.make_ack conn.control_block ~fin:false id)
 
 let handle_noconn t now id seg =
   match

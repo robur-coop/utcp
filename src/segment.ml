@@ -505,7 +505,7 @@ let make_syn cb (src, src_port, dst, dst_port) =
     window ; options ; payload = Cstruct.empty }
 
 (* auxFns:1437 *)
-let make_ack cb fin (src, src_port, dst, dst_port) =
+let make_ack cb ~fin (src, src_port, dst, dst_port) =
   let window = min (cb.State.rcv_wnd lsr cb.rcv_scale) max_win in
   (* sack *)
   src, dst,
