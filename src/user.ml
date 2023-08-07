@@ -44,16 +44,37 @@ let connect ~src ?src_port ~dst ~dst_port t now =
   in
   { t with connections }, id, (src, dst, data)
 
-(* it occurs that all these functions below are not well suited for sending out
-   segments, a tcp_output(_really) will for sure help *)
-
-(* or should only a timer be responsible for outputting data? sounds a bit weird *)
-
-(* in real, this is shutdown `readwrite (close_2) - and we do this in any state *)
-let close t id =
+(* shutdown_1 and shutdown_3 *)
+let shutdown t now id v =
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->
+    if conn.tcp_state = Established then
+      let write = match v with `write | `read_write -> true | `read -> false
+      and read = match v with `read | `read_write -> true | `write -> false
+      in
+      let cantsndmore = write || conn.cantsndmore
+      and cantrcvmore = read || conn.cantrcvmore
+      in
+      let tf_shouldacknow = write in
+      let rcvq = if read then Cstruct.empty else conn.rcvq in
+      let control_block = { conn.control_block with tf_shouldacknow } in
+      let conn' =
+        { conn with control_block; cantsndmore; cantrcvmore; rcvq }
+      in
+      let conn', out = Segment.tcp_output_perhaps now id conn' in
+      let out = Option.map (fun (src, dst, seg) -> src, dst, Segment.encode_and_checksum ~src ~dst seg) out in
+      Ok ({ t with connections = CM.add id conn' t.connections }, out)
+    else
+      Error (`Msg "not connected")
+
+(* in real, this is shutdown `readwrite (close_2) - and we do this in any state *)
+(* there's as well close_3 (the abortive close, i.e. send a RST) -- done when SO_LINGER = 0 *)
+let close t now id =
+  match CM.find_opt id t.connections with
+  | None -> Error (`Msg "no connection")
+  | Some conn ->
+    (* see above, should deal with all states of conn *)
     let* () =
       guard (behind_established conn.tcp_state) (`Msg "not yet established")
     in
@@ -62,9 +83,11 @@ let close t id =
       let cantsndmore = true and cantrcvmore = true and rcvq = Cstruct.empty in
       { conn with control_block; cantsndmore; cantrcvmore; rcvq }
     in
-    Ok { t with connections = CM.add id conn' t.connections }
+    let conn', out = Segment.tcp_output_perhaps now id conn' in
+    let out = Option.map (fun (src, dst, seg) -> src, dst, Segment.encode_and_checksum ~src ~dst seg) out in
+    Ok ({ t with connections = CM.add id conn' t.connections }, out)
 
-let send t id buf =
+let send t now id buf =
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->
@@ -74,9 +97,12 @@ let send t id buf =
     let* () =
       guard (not conn.cantsndmore) (`Msg "cant write")
     in
+    (* TODO sndq should have a size limit (and if exceeded, return an error) *)
     let sndq = Cstruct.append conn.sndq buf in
     let conn' = { conn with sndq } in
-    Ok { t with connections = CM.add id conn' t.connections }
+    let conn', out = Segment.tcp_output_perhaps now id conn' in
+    let out = Option.map (fun (src, dst, seg) -> src, dst, Segment.encode_and_checksum ~src ~dst seg) out in
+    Ok ({ t with connections = CM.add id conn' t.connections }, out)
 
 let recv t id =
   match CM.find_opt id t.connections with

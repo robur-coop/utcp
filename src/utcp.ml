@@ -25,6 +25,8 @@ let connect = User.connect
 
 let close = User.close
 
+let shutdown = User.shutdown
+
 let recv = User.recv
 
 let send = User.send

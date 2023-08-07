@@ -34,11 +34,30 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
     let _, (dst, dst_port) = Utcp.peers flow in
     dst, dst_port
 
-  let close t flow =
-    match Utcp.close t.tcp flow with
-    | Ok tcp -> t.tcp <- tcp
-    | Error `Msg msg -> Log.err (fun m -> m "error in close: %s" msg)
+  let output_ip t (src, dst, seg) =
+    Ip.write t.ip ~src dst `TCP (fun _ -> 0) [seg]
 
+  let maybe_output_ign t seg =
+    Option.fold
+      ~none:Lwt.return_unit
+      ~some:(fun seg ->
+          output_ip t seg >|= function
+          | Error e ->
+            Log.err (fun m -> m "error sending data: %a" Ip.pp_error e)
+          | Ok () -> ())
+      seg
+
+  let close t flow =
+    match Utcp.close t.tcp (now ()) flow with
+    | Ok (tcp, seg) ->
+      t.tcp <- tcp ;
+      maybe_output_ign t seg
+    | Error `Msg msg ->
+      Log.err (fun m -> m "error in close: %s" msg);
+      Lwt.return_unit
+
+  (* there's an issue with draining on close... so recv returns eof, but
+     there was stuff in rcvq that has been dropped *)
   let rec read (t, flow) =
     match Utcp.recv t.tcp flow with
     | Ok (tcp, data) ->
@@ -52,30 +71,32 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       else
         Lwt.return (Ok (`Data data))
     | Error `Msg msg ->
-      close t flow;
+      close t flow >>= fun () ->
       Log.err (fun m -> m "error while read %s" msg);
       (* TODO better error *)
       Lwt.return (Error `Refused)
 
   let write (t, flow) buf =
-    match Utcp.send t.tcp flow buf with
-    | Ok tcp -> t.tcp <- tcp ; Lwt.return (Ok ())
+    match Utcp.send t.tcp (now ()) flow buf with
+    | Ok (tcp, seg) ->
+      t.tcp <- tcp ;
+      maybe_output_ign t seg >|= fun () ->
+      Ok ()
     | Error `Msg msg ->
-      close t flow;
+      close t flow >>= fun () ->
       Log.err (fun m -> m "error while write %s" msg);
       (* TODO better error *)
       Lwt.return (Error `Refused)
 
   let writev flow bufs = write flow (Cstruct.concat bufs)
 
-  let close (t, flow) = close t flow ; Lwt.return_unit
+  let close (t, flow) =
+    (* TODO at some point, in FM the condition must be signalled *)
+    close t flow
 
   let write_nodelay flow buf = write flow buf
 
   let writev_nodelay flow bufs = write flow (Cstruct.concat bufs)
-
-  let output_ip t (src, dst, seg) =
-    Ip.write t.ip ~src dst `TCP (fun _ -> 0) [seg]
 
   let create_connection ?keepalive:_ t (dst, dst_port) =
     let src = Ip.src t.ip ~dst in

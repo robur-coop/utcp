@@ -25,11 +25,16 @@ val handle_buf : state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
 val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
   state -> Mtime.t -> (state * flow * output)
 
-val close : state -> flow -> (state, [ `Msg of string ]) result
+val close : state -> Mtime.t -> flow ->
+  (state * output option, [ `Msg of string ]) result
+
+val shutdown : state -> Mtime.t -> flow -> [ `read | `write | `read_write ] ->
+  (state * output option, [ `Msg of string ]) result
 
 val recv : state -> flow -> (state * Cstruct.t, [ `Msg of string ]) result
 
-val send : state -> flow -> Cstruct.t -> (state, [ `Msg of string ]) result
+val send : state -> Mtime.t -> flow -> Cstruct.t ->
+  (state * output option, [ `Msg of string ]) result
 
 module Sequence : sig
   type t
