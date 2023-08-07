@@ -92,8 +92,6 @@ let setup_log =
         $ Fmt_cli.style_renderer ()
         $ Logs_cli.level ())
 
-
-
 let cmd =
   let term = Term.(term_result (const jump $ setup_log))
   and info = Cmd.info "client" ~version:"%%VERSION_NUM%%"

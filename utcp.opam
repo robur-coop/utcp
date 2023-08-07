@@ -22,6 +22,7 @@ depends: [
   "mirage-time" {>= "2.0.1"}
   "mirage-clock" {>= "3.1.0"}
   "tcpip" {>= "7.0.0"}
+  #for apps
   "cmdliner" {>= "1.1.0" & dev}
   "mirage-net-unix" {>= "2.8.0" & dev}
   "ethernet" {>= "2.2.1" & dev}
