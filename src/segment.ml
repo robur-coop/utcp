@@ -358,9 +358,15 @@ let tcp_output_really now (src, src_port, dst, dst_port) window_probe conn =
   in
   let last_sndq_data_seq = Sequence.addi cb.State.snd_una (Cstruct.length conn.sndq) in
   (*: The data to send in this segment (if any) :*)
-  let data' = Cstruct.shift conn.State.sndq (Sequence.window cb.State.snd_nxt cb.State.snd_una) in
+  let data' =
+    Cstruct.shift conn.State.sndq
+      (min (Cstruct.length conn.State.sndq)
+         (Sequence.window cb.State.snd_nxt cb.State.snd_una))
+      (* taking the minimum to avoid exceeding the sndq *)
+  in
   let data_to_send =
-    Cstruct.sub data' 0 (min (Cstruct.length data') (min (max 0 snd_wnd_unused) cb.State.t_maxseg))
+    Cstruct.sub data' 0
+      (min (Cstruct.length data') (min (max 0 snd_wnd_unused) cb.State.t_maxseg))
   in
   let dlen = Cstruct.length data_to_send in
   (*: Should [[FIN]] be set in this segment? :*)
