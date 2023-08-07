@@ -36,7 +36,7 @@ fused into the state machine: each (passive) connection starts in the
 SYN_RECEIVED state, there is no LISTEN state. There is also no CLOSED state -
 a connection which would end up in this state is directly dropped.
 
-TODO: Features included in this implementation that have been specified in later RFCs:
+Features included in this implementation that have been specified in later RFCs:
 - [RFC 1337](https://tools.ietf.org/html/rfc1337) - TIME-WAIT Assassination hazards
 - [RFC 4987](https://tools.ietf.org/html/rfc4987) - SYN-flood attacks
 - [RFC 5927](https://tools.ietf.org/html/rfc5927) - ICMP Attacks
@@ -99,18 +99,8 @@ Model anomalies:
 - esp in the connection setup states (syn_sent/syn_received) and connection
   teardown states (close_wait/fin_wait_1/..) ensure that the pcb will eventually
   be discarded
-- what about outgoing segments? should Input.handle be able to return
-   - (a) an optional Segment.t (as in deliver_in_* [apart from 3])
-   - (b) a list of Segment.t
-   - b sounds more plausible - and ACK may open snd_wnd so that multiple data segments are transmitted!
 
 ## TODO
-
-- suspicious that someone/somehow deliver_out_1 needs to be triggered... but at
-  which points in time? at the end of "got a segment from network and didn't
-  provoke a reply"? "got some data from user"?
-  i think delack timer is properly initialised when needed (but getting a FIN
-  leads to no reply (though tf_shouldacknow is true now)) -> maybe i'm just missing a tcp_output(_perhaps?) call
 
 - I copied over various functions which need to be properly tested:
    - RTT measurement
@@ -118,38 +108,24 @@ Model anomalies:
    - all duration and timer computations...
    - should data = [] be more explicitly assert in early handshake?
      from what I understand: SYN may not carry data (apart from TFO where server may send data in SYN+ACK); RST may carry data (that's the "error message"), FreeBSD may (used to?) send random sndq data
-
-- provide a Sequence.Infix module with < <= > >= = + ++ (where + is weird: Sequence.t -> int -> Sequence.t)
-
 - error handling (temporary errors / error types to present)
-
 - error propagation: cb can get some errors (from ip / icmp)
    (maybe temporary) which are preserved in softerror, and bubble up
    [also timeouts] <- this is to-be-returned when connect/read/write/close fails
-
 - icmp also for path-mtu
-
 - when is t_maxseg set? is it modified at all? (should not be once ESTABLISHED is reached)
-
 - t_badrxtwin <- meh (don't understand its value and usage)
-
 - really need to ensure that we're not talking to ourselves in Segment.decode_and_verify...
-
 - segment reassembly
-
 - put cc in a separate module, follow FreeBSD design ack_received / after_idle / conf_signal / post_recovery
-
 - tcp_output_really and tcp_do_output have quite some code shared...
-
 - keepalive is in the model, could easily be copied over
-
 - recheck with draft793bis whether (all of) our transitions are legitimate and none is really missing
-
 - further avoiding allocations: sndq and rcvq should be lists of cstruct (no need for Cstruct.append!)
-
 - make the bsd_fast_path a fast path for us ;)
-
 - the rcv_window computations are done for bad segments (di_2a/7c/7d) on BSD as well, but we don't need that behaviour
+- the rcvq is emptied on close, which leads to data being lost (plus the utcp_mirage semantics that read is repeated)
+- verify with RFC 9293 at hand
 
 ## Testing
 
@@ -202,21 +178,5 @@ SYN+data     SYN+ACK(1) SYN+ACK(1) RST+ACK(2) RST+ACK(2)
   (note that cantsndmore is different; it merely records that we intend
   to send a FIN (and change state) at some point in the future (not
   necessarily now).)
-
-- a "read shutdown" leads in FreeBSD to drop any incoming data (but still
-  processing segments AFAICT), imagine we set window size to 0 (so the remote
-  won't ever bother sending us more data) <- will reduce required bandwidth
-  on the flip side: the remote stack will start a timer to figure out when the
-  window opens again, since it can't know that window == 0 will stay forever
-   - need to research the actual behaviour once the write part is finished as
-     well and we send a fin (the other side may still try to send us their sndq,
-     until some timeout)
-   - for app-level protocols (i.e. TLS) for proper teardown they want to send
-     some data (alert close_notify), which will be avoided
-   - may negatively impact the other tcp state (and keep us in fin_wait_2 for
-     a long time (with the timer being reset by window probes))
-   - likely depends on the LINGER option set on the other side, whether to wait
-     in close() until delivered
-
 - RCVTIMEO and SNDTIMEO <- what exactly do they time? until accepted in
   sndq/rcvq?
