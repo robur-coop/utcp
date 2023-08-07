@@ -102,7 +102,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
     t.tcp <- tcp;
     let find ?f ctx id r =
       match Utcp.FM.find_opt id t.waiting with
-      | Some c -> Lwt_condition.broadcast c r
+      | Some c -> Lwt_condition.signal c r
       | None -> match f with
         | Some f -> f ()
         | None -> Log.warn (fun m -> m "%a not found in waiting (%s)" Utcp.pp_flow id ctx)
@@ -141,7 +141,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
               | None -> Log.warn (fun m -> m "%a not found in waiting"
                                      Utcp.pp_flow id)
               | Some c ->
-                Lwt_condition.broadcast c (Error (`Msg "timer timed out")))
+                Lwt_condition.signal c (Error (`Msg "timer timed out")))
             drops ;
           (* TODO do not ignore IP write error *)
           let out_ign t s = output_ip t s >|= ignore in
