@@ -970,8 +970,7 @@ let handle_noconn t now id seg =
     in
     t, out
   | false, syn ->
-    if not syn then
-      Log.warn (fun m -> m "dropping segment (not only SYN) %a" Segment.pp seg);
+    Log.warn (fun m -> m "dropping segment with reset (SYN %B) %a" syn Segment.pp seg);
     (* deliver_in_5 / deliver_in_6 *)
     t, dropwithreset id seg
 
