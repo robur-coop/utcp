@@ -111,7 +111,7 @@ let recv t id =
     let* () =
       guard (behind_established conn.tcp_state) (`Msg "not yet connected")
     in
-    let* () = guard (not conn.cantrcvmore) (`Msg "cant recv, EOF") in
     let rcvq = conn.rcvq in
+    let* () = guard (not (Cstruct.length rcvq = 0 && conn.cantrcvmore)) `Eof in
     let conn' = { conn with rcvq = Cstruct.empty } in
     Ok ({ t with connections = CM.add id conn' t.connections }, rcvq)

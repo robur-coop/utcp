@@ -56,20 +56,36 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       Log.err (fun m -> m "error in close: %s" msg);
       Lwt.return_unit
 
-  (* there's an issue with draining on close... so recv returns eof, but
-     there was stuff in rcvq that has been dropped *)
-  let rec read (t, flow) =
+  let read (t, flow) =
     match Utcp.recv t.tcp flow with
     | Ok (tcp, data) ->
       t.tcp <- tcp ;
-      if Cstruct.length data = 0 then
+      if Cstruct.length data = 0 then (
         let cond = Lwt_condition.create () in
         t.waiting <- Utcp.FM.add flow cond t.waiting;
         Lwt_condition.wait cond >>= fun _ ->
         t.waiting <- Utcp.FM.remove flow t.waiting;
-        read (t, flow)
-      else
-        Lwt.return (Ok (`Data data))
+        match Utcp.recv t.tcp flow with
+        | Ok (tcp, data) ->
+          t.tcp <- tcp ;
+          if Cstruct.length data = 0 then
+            Lwt.return (Ok `Eof) (* can this happen? *)
+          else
+            Lwt.return (Ok (`Data data))
+        | Error `Eof ->
+          close t flow >>= fun () ->
+          Lwt.return (Ok `Eof)
+        | Error `Msg msg ->
+          (* TODO what is the desired behaviour? should we be responsible to close th flow? *)
+          close t flow >>= fun () ->
+          Log.err (fun m -> m "error while read %s" msg);
+          (* TODO better error *)
+          Lwt.return (Error `Refused)
+      ) else (
+        Lwt.return (Ok (`Data data)))
+    | Error `Eof ->
+      close t flow >>= fun () ->
+      Lwt.return (Ok `Eof)
     | Error `Msg msg ->
       close t flow >>= fun () ->
       Log.err (fun m -> m "error while read %s" msg);

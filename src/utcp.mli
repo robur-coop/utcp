@@ -31,7 +31,7 @@ val close : state -> Mtime.t -> flow ->
 val shutdown : state -> Mtime.t -> flow -> [ `read | `write | `read_write ] ->
   (state * output option, [ `Msg of string ]) result
 
-val recv : state -> flow -> (state * Cstruct.t, [ `Msg of string ]) result
+val recv : state -> flow -> (state * Cstruct.t, [ `Msg of string | `Eof ]) result
 
 val send : state -> Mtime.t -> flow -> Cstruct.t ->
   (state * output option, [ `Msg of string ]) result
