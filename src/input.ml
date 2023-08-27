@@ -350,7 +350,7 @@ let di3_newackstuff now id conn ourfinisacked ack =
        - else: tcp_output_really arch F ticks ifds sock (sock1,[msg])
          so, this is very similar to a challenge ack, no? *)
     let conn'', out' = Segment.tcp_output_really now id false conn' in
-    (conn'', out @ [ out' ]), false
+    (Some conn'', out @ [ out' ]), false
   else (*: continue processing :*)
     (*: If the retransmit timer is set and the socket has done only one
        retransmit and it is still within the bad retransmit timer window, then
@@ -473,19 +473,18 @@ let di3_newackstuff now id conn ourfinisacked ack =
     | Last_ack when ourfinisacked ->
       (* If the socket's [[FIN]] has been acknowledged and the socket is in the
          [[LAST_ACK]] state, close the socket and stop processing this segment *)
-      (* TODO: actually close, remove *)
-      (conn'', out), false
+      (None, []), false
     | Time_wait when Sequence.greater ack cb.snd_una -> (* hannes check which cb! *)
       (* data acked past FIN *)
       (*: If the socket is in [[TIME_WAIT]] and this segment contains a new
          acknowledgement (that acknowledges past the [[FIN]] segment, drop
          it---it's invalid. Stop processing. :*)
       let conn''', out' = Segment.tcp_output_really now id false conn'' in
-      (conn''', out @ [ out' ]), false
+      (Some conn''', out @ [ out' ]), false
     | _ ->
       (*: Otherwise, flag that [[deliver_in_3]] can continue processing the
          segment if need be :*)
-      (conn'', out), true
+      (Some conn'', out), true
 
 let di3_ackstuff now id conn seg ourfinisacked fin ack =
   let cb = conn.control_block in
@@ -509,7 +508,7 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
     match conn.tcp_state with Close_wait | Closing | Last_ack | Time_wait -> false | _ -> true
   then
     let control_block = { cb with t_dupacks = 0 } in
-    ({ conn with control_block }, []), true
+    (Some { conn with control_block }, []), true
   else if Sequence.less_equal ack cb.snd_una && maybe_dup_ack then
     (*: Received a duplicate acknowledgement: it is an old acknowledgement
        (strictly less than [[snd_una]]) and it meets the duplicate
@@ -523,7 +522,7 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
          duplicate ack counter.  We must continue processing, in case [[FIN]] is
          set. :*)
       let control_block = { cb with t_dupacks = t_dupacks' } in
-      ({ conn with control_block }, []), true
+      (Some { conn with control_block }, []), true
     else if t_dupacks' > 3 || (t_dupacks' = 3 && Sequence.less ack cb.snd_recover) then
       (*: If this is the 4th or higher duplicate [[ACK]] then Fast
          Retransmit/Fast Recovery congestion control is already in progress.
@@ -552,7 +551,7 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
       let conn' = { conn with control_block } in
       let conn'', seg = Segment.tcp_output_perhaps now id conn' in
       let out = match seg with None -> [] | Some s -> [ s ] in
-      (conn'', out), false
+      (Some conn'', out), false
     else if t_dupacks' = 3 && not (Sequence.less ack cb.snd_recover) then
       (*: If this is the 3rd duplicate segment and if the host supports NewReno
          extensions, a NewReno-style Fast Retransmit is not already in progress,
@@ -595,7 +594,7 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
         snd_nxt = Sequence.max cb.snd_nxt control_block.snd_nxt
       } in
       let out = match seg with None -> [] | Some s -> [ s ] in
-      ({ conn'' with control_block }, out), false
+      (Some { conn'' with control_block }, out), false
     else
       invalid_arg "di3_ackstuff" (*: Believed to be impossible---here for completion and safety :*)
   else if Sequence.less_equal ack cb.snd_una && not maybe_dup_ack then
@@ -604,7 +603,7 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
        [[ACK]] of a new sequence number thus just clear the duplicate [[ACK]]
        counter. :*)
     let control_block = { cb with t_dupacks = 0 } in
-    ({ conn with control_block }, []), true
+    (Some { conn with control_block }, []), true
   else (*: Must be: [[ack > cb.snd_una]] :*)
     (*: This is the [[ACK]] of a new sequence number---this case is handled by
        the auxiliary function {@link [[di3_newackstuff]]} :*)
@@ -924,19 +923,23 @@ let deliver_in_3 now id conn seg flag ack =
     di3_ackstuff now id { conn with control_block } seg ourfinisacked fin ack
   in
   (* may have some fresh data to report which needs to be acked *)
-  let conn'', outs' =
-    if cont then
-      di3_datastuff now di3_ststuff conn' seg ourfinisacked fin ack
-    else
-      (conn', [])
-  in
-  let out = match outs, outs' with
-    | [], [x] -> Some x
-    | [x], [] -> Some x
-    | [], [] -> None
-    | _ -> assert false
-  in
-  Ok (conn'', out)
+  Option.fold
+    ~none:(Ok (None, None))
+    ~some:(fun conn' ->
+        let conn'', outs' =
+          if cont then
+            di3_datastuff now di3_ststuff conn' seg ourfinisacked fin ack
+          else
+            (conn', [])
+        in
+        let out = match outs, outs' with
+          | [], [x] -> Some x
+          | [x], [] -> Some x
+          | [], [] -> None
+          | _ -> assert false
+        in
+        Ok (Some conn'', out))
+    conn'
 
 let deliver_in_7 id conn seg =
   let cb = conn.control_block in
@@ -1027,11 +1030,14 @@ let handle_conn t now id conn seg =
       | _, None -> Error (`Drop "no ACK")
       | f, Some ack ->
         let* conn', out = deliver_in_3 now id conn seg f ack in
-        let conn'', out' = match out with
-          | None -> Segment.tcp_output_perhaps now id conn'
-          | Some x -> conn', Some x
-        in
-        Ok (add conn'', out')
+        match conn' with
+        | None -> Ok (drop (), None)
+        | Some conn' ->
+          let conn'', out' = match out with
+            | None -> Segment.tcp_output_perhaps now id conn'
+            | Some x -> conn', Some x
+          in
+          Ok (add conn'', out')
   in
   match r with
   | Ok (t, a) -> t, a
