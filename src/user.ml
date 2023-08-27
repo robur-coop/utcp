@@ -61,7 +61,13 @@ let shutdown t now id v =
       let conn' =
         { conn with control_block; cantsndmore; cantrcvmore; rcvq }
       in
-      let conn', out = Segment.tcp_output_perhaps now id conn' in
+      let conn', out =
+        (* if only shutdown read side, or we already closed something *)
+        if conn.cantsndmore || v = `read then
+          conn', None
+        else
+          Segment.tcp_output_perhaps now id conn'
+      in
       Ok ({ t with connections = CM.add id conn' t.connections }, out)
     else
       Error (`Msg "not connected")
@@ -81,7 +87,13 @@ let close t now id =
       let cantsndmore = true and cantrcvmore = true and rcvq = Cstruct.empty in
       { conn with control_block; cantsndmore; cantrcvmore; rcvq }
     in
-    let conn', out = Segment.tcp_output_perhaps now id conn' in
+    (* if we've already been close()d, don't need to output anything *)
+    let conn', out =
+      if conn.cantsndmore then
+        conn', None
+      else
+        Segment.tcp_output_perhaps now id conn'
+    in
     Ok ({ t with connections = CM.add id conn' t.connections }, out)
 
 let send t now id buf =
