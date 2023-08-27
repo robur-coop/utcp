@@ -48,15 +48,6 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
           | Ok () -> ())
       seg
 
-  let close t flow =
-    match Utcp.close t.tcp (now ()) flow with
-    | Ok (tcp, seg) ->
-      t.tcp <- tcp ;
-      maybe_output_ign t seg
-    | Error `Msg msg ->
-      Log.err (fun m -> m "error in close: %s" msg);
-      Lwt.return_unit
-
   let read (t, flow) =
     match Utcp.recv t.tcp flow with
     | Ok (tcp, data) ->
@@ -103,7 +94,13 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
 
   let close (t, flow) =
     (* TODO at some point, in FM the condition must be signalled *)
-    close t flow
+    match Utcp.close t.tcp (now ()) flow with
+    | Ok (tcp, seg) ->
+      t.tcp <- tcp ;
+      maybe_output_ign t seg
+    | Error `Msg msg ->
+      Log.err (fun m -> m "error in close: %s" msg);
+      Lwt.return_unit
 
   let write_nodelay flow buf = write flow buf
 
