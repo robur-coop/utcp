@@ -1090,5 +1090,4 @@ let handle_buf t now ~src ~dst data =
       if Ipaddr.compare dst' dst <> 0 then
         Log.err (fun m -> m "bad IP reply dst' %a vs dst %a"
                     Ipaddr.pp dst' Ipaddr.pp dst);
-      t', ev,
-      Some (src', dst', Segment.encode_and_checksum ~src:dst ~dst:src d)
+      t', ev, Some (src, dst, d)

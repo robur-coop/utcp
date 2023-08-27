@@ -35,7 +35,8 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
     dst, dst_port
 
   let output_ip t (src, dst, seg) =
-    Ip.write t.ip ~src dst `TCP (fun _ -> 0) [seg]
+    let data = Utcp.Segment.encode_and_checksum ~src ~dst seg in
+    Ip.write t.ip ~src dst `TCP (fun _ -> 0) [data]
 
   let maybe_output_ign t seg =
     Option.fold
@@ -157,8 +158,9 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
           | `Received id -> find "received" id (Ok ()))
       ev;
     (* TODO do not ignore IP write error *)
-    let out_ign t s = output_ip t s >|= ignore in
-    Lwt_list.iter_p (out_ign t) (Option.to_list data)
+    Option.fold ~none:Lwt.return_unit
+      ~some:(fun data -> output_ip t data >|= ignore)
+      data
 
   let connect ip =
     let tcp = Utcp.empty R.generate in
@@ -175,8 +177,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
                 Lwt_condition.signal c (Error (`Msg "timer timed out")))
             drops ;
           (* TODO do not ignore IP write error *)
-          let out_ign t s = output_ip t s >|= ignore in
-          Lwt_list.iter_p (out_ign t) outs
+          Lwt_list.iter_p (fun data -> output_ip t data >|= ignore) outs
         and timeout () =
           Time.sleep_ns (Duration.of_ms 100)
         in

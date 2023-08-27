@@ -14,28 +14,6 @@ val pp_flow : flow Fmt.t
 
 val peers : flow -> (Ipaddr.t * int) * (Ipaddr.t * int)
 
-type output = Ipaddr.t * Ipaddr.t * Cstruct.t
-
-val timer : state -> Mtime.t -> (state * flow list * output list)
-
-val handle_buf : state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
-  Cstruct.t ->
-  (state * [ `Established of flow | `Drop of flow | `Received of flow ] option * output option)
-
-val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
-  state -> Mtime.t -> (state * flow * output)
-
-val close : state -> Mtime.t -> flow ->
-  (state * output option, [ `Msg of string ]) result
-
-val shutdown : state -> Mtime.t -> flow -> [ `read | `write | `read_write ] ->
-  (state * output option, [ `Msg of string ]) result
-
-val recv : state -> flow -> (state * Cstruct.t, [ `Msg of string | `Eof ]) result
-
-val send : state -> Mtime.t -> flow -> Cstruct.t ->
-  (state * output option, [ `Msg of string ]) result
-
 module Sequence : sig
   type t
 
@@ -90,6 +68,28 @@ module Segment : sig
 
   val encode_and_checksum : src:Ipaddr.t -> dst:Ipaddr.t -> t -> Cstruct.t
 end
+
+type output = Ipaddr.t * Ipaddr.t * Segment.t
+
+val timer : state -> Mtime.t -> (state * flow list * output list)
+
+val handle_buf : state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
+  Cstruct.t ->
+  (state * [ `Established of flow | `Drop of flow | `Received of flow ] option * output option)
+
+val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
+  state -> Mtime.t -> (state * flow * output)
+
+val close : state -> Mtime.t -> flow ->
+  (state * output option, [ `Msg of string ]) result
+
+val shutdown : state -> Mtime.t -> flow -> [ `read | `write | `read_write ] ->
+  (state * output option, [ `Msg of string ]) result
+
+val recv : state -> flow -> (state * Cstruct.t, [ `Msg of string | `Eof ]) result
+
+val send : state -> Mtime.t -> flow -> Cstruct.t ->
+  (state * output option, [ `Msg of string ]) result
 
 (**/**)
 (* only to be used for testing! *)

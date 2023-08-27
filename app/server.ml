@@ -9,11 +9,13 @@ let log_err ~pp_error = function
   | Error e -> Logs.err (fun m -> m "error %a" pp_error e)
 
 let handle_data ip =
-  Lwt_list.iter_s (function
-      | Ipaddr.V4 _src, Ipaddr.V4 dst, out ->
-        IPv4.write ip dst `TCP (fun _ -> 0) [ out ] >|=
+  Lwt_list.iter_s (fun (src, dst, seg) ->
+      let data = Utcp.Segment.encode_and_checksum ~src ~dst seg in
+      match src, dst with
+      | Ipaddr.V4 _, Ipaddr.V4 dst ->
+        IPv4.write ip dst `TCP (fun _ -> 0) [ data ] >|=
         log_err ~pp_error:IPv4.pp_error
-      | Ipaddr.V6 _, Ipaddr.V6 _, _ ->
+      | Ipaddr.V6 _, Ipaddr.V6 _ ->
         Lwt.return (Logs.err (fun m -> m "IPv6 not supported at the moment"))
       | _ -> invalid_arg "bad sportsmanship")
 

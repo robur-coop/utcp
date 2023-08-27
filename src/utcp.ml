@@ -15,7 +15,7 @@ let pp_flow = State.Connection.pp
 let peers (src, src_port, dst, dst_port) =
   (src, src_port), (dst, dst_port)
 
-type output = Ipaddr.t * Ipaddr.t * Cstruct.t
+type output = Ipaddr.t * Ipaddr.t * Segment.t
 
 let timer = Tcptimer.timer
 

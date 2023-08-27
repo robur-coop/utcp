@@ -37,12 +37,11 @@ let connect ~src ?src_port ~dst ~dst_port t now =
     conn_state ~rcvbufsize:rcv_wnd ~sndbufsize:Params.so_sndbuf Syn_sent control_block
   in
   let _, _, seg = Segment.make_syn conn.control_block id in
-  let data = Segment.encode_and_checksum ~src ~dst seg in
   let connections =
     Log.debug (fun m -> m "%a active open %a" Connection.pp id pp_conn_state conn);
     CM.add id conn t.connections
   in
-  { t with connections }, id, (src, dst, data)
+  { t with connections }, id, (src, dst, seg)
 
 (* shutdown_1 and shutdown_3 *)
 let shutdown t now id v =
@@ -63,7 +62,6 @@ let shutdown t now id v =
         { conn with control_block; cantsndmore; cantrcvmore; rcvq }
       in
       let conn', out = Segment.tcp_output_perhaps now id conn' in
-      let out = Option.map (fun (src, dst, seg) -> src, dst, Segment.encode_and_checksum ~src ~dst seg) out in
       Ok ({ t with connections = CM.add id conn' t.connections }, out)
     else
       Error (`Msg "not connected")
@@ -84,7 +82,6 @@ let close t now id =
       { conn with control_block; cantsndmore; cantrcvmore; rcvq }
     in
     let conn', out = Segment.tcp_output_perhaps now id conn' in
-    let out = Option.map (fun (src, dst, seg) -> src, dst, Segment.encode_and_checksum ~src ~dst seg) out in
     Ok ({ t with connections = CM.add id conn' t.connections }, out)
 
 let send t now id buf =
@@ -101,7 +98,6 @@ let send t now id buf =
     let sndq = Cstruct.append conn.sndq buf in
     let conn' = { conn with sndq } in
     let conn', out = Segment.tcp_output_perhaps now id conn' in
-    let out = Option.map (fun (src, dst, seg) -> src, dst, Segment.encode_and_checksum ~src ~dst seg) out in
     Ok ({ t with connections = CM.add id conn' t.connections }, out)
 
 let recv t id =
