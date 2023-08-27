@@ -73,21 +73,16 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
           else
             Lwt.return (Ok (`Data data))
         | Error `Eof ->
-          close t flow >>= fun () ->
           Lwt.return (Ok `Eof)
         | Error `Msg msg ->
-          (* TODO what is the desired behaviour? should we be responsible to close th flow? *)
-          close t flow >>= fun () ->
           Log.err (fun m -> m "error while read %s" msg);
           (* TODO better error *)
           Lwt.return (Error `Refused)
       ) else (
         Lwt.return (Ok (`Data data)))
     | Error `Eof ->
-      close t flow >>= fun () ->
       Lwt.return (Ok `Eof)
     | Error `Msg msg ->
-      close t flow >>= fun () ->
       Log.err (fun m -> m "error while read %s" msg);
       (* TODO better error *)
       Lwt.return (Error `Refused)
@@ -99,7 +94,6 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       maybe_output_ign t seg >|= fun () ->
       Ok ()
     | Error `Msg msg ->
-      close t flow >>= fun () ->
       Log.err (fun m -> m "error while write %s" msg);
       (* TODO better error *)
       Lwt.return (Error `Refused)
