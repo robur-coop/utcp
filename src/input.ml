@@ -1084,11 +1084,8 @@ let handle_buf t now ~src ~dst data =
       | _ -> None
     in
     match out with
-    | None ->
-      Log.info (fun m -> m "no answer");
-      t', ev, None
+    | None -> t', ev, None
     | Some (src', dst', d) ->
-      Log.info (fun m -> m "answer %a" Segment.pp d);
       let src, _, dst, _ = id in
       if Ipaddr.compare src' src <> 0 then
         Log.err (fun m -> m "bad IP reply src' %a vs src %a"
