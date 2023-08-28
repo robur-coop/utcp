@@ -612,11 +612,9 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
 let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked fin =
   (* hannes 2019-07-19: there used to be let seq = seg.seq + if SYN then 1 else
      0, but we'll never execute this code with a segment that has SYN *)
-  (*: Pull out the senders advertised window and apply the sender's scale factor :*)
+  (* hannes 2023-08-26: this used to compute the sender's advertised window and
+     shift by scale, but that value was never used. *)
   let cb = conn.control_block in
-  let _win = seg.Segment.window lsl cb.snd_scale in
-  (* Get the socket's control block using the monadic state accessor
-     [[get_cb]]. Process the segments data and possibly update the send window *)
   (*: Trim segment to be within the receive window :*)
   (*: Trim duplicate data from the left edge of [[data]], \ie, data before
      [[cb.rcv_nxt]].  Adjust [[seq]], [[URG]] and [[urp]] in respect of left
@@ -626,7 +624,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
      the segment's data. An urgent pointer of zero signifies that there is no
      urgent data in the segment. :*)
   let trim_amt_left =
-    if Sequence.greater cb.rcv_nxt seg.seq then
+    if Sequence.greater cb.rcv_nxt seg.Segment.seq then
       min (Sequence.window cb.rcv_nxt seg.seq) (Cstruct.length seg.payload)
     else
       0
@@ -644,7 +642,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
     Cstruct.sub data_trimmed_left 0 (min cb.rcv_wnd (Cstruct.length data_trimmed_left))
   in
   let fin_trimmed =
-    if data_trimmed_left_right = data_trimmed_left then
+    if Cstruct.equal data_trimmed_left_right data_trimmed_left then
       fin
     else
       false
@@ -767,9 +765,8 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
          [[ACK]]. Note: the length of the original segment (not the trimmed
          segment) is used in the guard to ensure this really was a pure [[ACK]]
          segment. :*)
-      (* TODO hannes 2019-07-20 fin_trimmed vs FIN *)
     else if Sequence.equal seq_trimmed cb.rcv_nxt &&
-            Cstruct.length seg.payload + (if fin_trimmed then 1 else 0) = 0
+            Cstruct.length seg.payload + (if fin then 1 else 0) = 0
     then
       (*: Hack: assertion used to share values with later conditions :*)
       (* assert (FIN_reass = F) (*: Have not received a FIN :*) *)
@@ -783,12 +780,11 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
          below---the trimmed variants are useless here! :*)
       (*: Case (6) Segment is completely beyond the window and is not a window
          probe :*)
-      (* TODO hannes 2019-07-20 fin_trimmed vs FIN *)
     else if
       (Sequence.less seg.seq cb.rcv_nxt &&
        Sequence.less_equal (Sequence.addi seg.seq (Cstruct.length seg.payload + if fin_trimmed then 1 else 0)) cb.rcv_nxt) || (* (4) *)
       (Sequence.equal seq_trimmed cb.rcv_nxt && cb.rcv_wnd = 0 &&
-       Cstruct.length seg.payload + (if fin_trimmed then 1 else 0) > 0) || (* (5) *)
+       Cstruct.length seg.payload + (if fin then 1 else 0) > 0) || (* (5) *)
       true (* uhm, really? (6) *)
     then
       (*: Hack: assertion used to share values with later conditions :*)
