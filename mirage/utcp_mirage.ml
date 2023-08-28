@@ -25,7 +25,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
   type t = {
     mutable tcp : Utcp.state ;
     ip : Ip.t ;
-    mutable waiting : (unit, [ `Msg of string ]) result Lwt_condition.t Utcp.FM.t ;
+    mutable waiting : (unit, [ `Eof | `Msg of string ]) result Lwt_condition.t Utcp.FM.t ;
     mutable listeners : (flow -> unit Lwt.t) Port_map.t ;
   }
   and flow = t * Utcp.flow
@@ -55,21 +55,29 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       if Cstruct.length data = 0 then (
         let cond = Lwt_condition.create () in
         t.waiting <- Utcp.FM.add flow cond t.waiting;
-        Lwt_condition.wait cond >>= fun _ ->
+        Lwt_condition.wait cond >>= fun r ->
         t.waiting <- Utcp.FM.remove flow t.waiting;
-        match Utcp.recv t.tcp flow with
-        | Ok (tcp, data) ->
-          t.tcp <- tcp ;
-          if Cstruct.length data = 0 then
-            Lwt.return (Ok `Eof) (* can this happen? *)
-          else
-            Lwt.return (Ok (`Data data))
+        match r with
         | Error `Eof ->
           Lwt.return (Ok `Eof)
         | Error `Msg msg ->
-          Log.err (fun m -> m "error while read %s" msg);
+          Log.err (fun m -> m "error %s from condition while recv" msg);
           (* TODO better error *)
           Lwt.return (Error `Refused)
+        | Ok () ->
+          match Utcp.recv t.tcp flow with
+          | Ok (tcp, data) ->
+            t.tcp <- tcp ;
+            if Cstruct.length data = 0 then
+              Lwt.return (Ok `Eof) (* can this happen? *)
+            else
+              Lwt.return (Ok (`Data data))
+          | Error `Eof ->
+            Lwt.return (Ok `Eof)
+          | Error `Msg msg ->
+            Log.err (fun m -> m "error while read (second recv) %s" msg);
+            (* TODO better error *)
+            Lwt.return (Error `Refused)
       ) else (
         Lwt.return (Ok (`Data data)))
     | Error `Eof ->
@@ -121,6 +129,10 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       t.waiting <- Utcp.FM.remove id t.waiting;
       match r with
       | Ok () -> Ok (t, id)
+      | Error `Eof ->
+        Log.err (fun m -> m "error establishing connection (timeout)");
+        (* TODO better error *)
+        Error `Timeout
       | Error `Msg msg ->
         Log.err (fun m -> m "error establishing connection: %s" msg);
         (* TODO better error *)
@@ -151,7 +163,11 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
                 Lwt.async (fun () -> cb (t, id))
             in
             find ~f ctx id (Ok ())
-          | `Drop id -> find "drop" id (Error (`Msg "dropped"))
+          | `Drop (id, recv) ->
+            if recv then
+              find "drop" id (Ok ())
+            else
+              find "drop" id (Error `Eof)
           | `Received id -> find "received" id (Ok ()))
       ev;
     (* TODO do not ignore IP write error *)
@@ -166,12 +182,18 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
         let timer () =
           let tcp, drops, outs = Utcp.timer t.tcp (now ()) in
           t.tcp <- tcp;
-          List.iter (fun id ->
+          List.iter (fun (id, err) ->
               match Utcp.FM.find_opt id t.waiting with
               | None -> Log.warn (fun m -> m "%a not found in waiting"
                                      Utcp.pp_flow id)
               | Some c ->
-                Lwt_condition.signal c (Error (`Msg "timer timed out")))
+                let err = match err with
+                  | `Retransmission_exceeded -> `Msg "retransmission exceeded"
+                  | `Timer_2msl -> `Eof
+                  | `Timer_connection_established -> `Eof
+                  | `Timer_fin_wait_2 -> `Eof
+                in
+                Lwt_condition.signal c (Error err))
             drops ;
           (* TODO do not ignore IP write error *)
           Lwt_list.iter_p (fun data -> output_ip t data >|= ignore) outs

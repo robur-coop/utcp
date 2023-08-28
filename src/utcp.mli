@@ -71,11 +71,12 @@ end
 
 type output = Ipaddr.t * Ipaddr.t * Segment.t
 
-val timer : state -> Mtime.t -> (state * flow list * output list)
+val timer : state -> Mtime.t ->
+  (state * (flow * [ `Retransmission_exceeded | `Timer_2msl | `Timer_connection_established | `Timer_fin_wait_2 ]) list * output list)
 
 val handle_buf : state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
   Cstruct.t ->
-  (state * [ `Established of flow | `Drop of flow | `Received of flow ] option * output option)
+  (state * [ `Established of flow | `Drop of flow * bool | `Received of flow ] option * output option)
 
 val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
   state -> Mtime.t -> (state * flow * output)

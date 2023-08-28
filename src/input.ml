@@ -1079,7 +1079,7 @@ let handle_buf t now ~src ~dst data =
     let ev =
       match was_established, is_established, received with
       | false, true, _ -> Some (`Established id)
-      | true, false, _ -> Some (`Drop id)
+      | true, false, _ -> Some (`Drop (id, received))
       | _, _, true -> Some (`Received id)
       | _ -> None
     in

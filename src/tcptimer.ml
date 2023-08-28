@@ -12,7 +12,7 @@ let timer_tt_rexmtsyn now shift id conn =
     if succ shift > Params.tcp_maxrxtshift then begin
       Log.info (fun m -> m "%a syn retransmission reached maxrxtshift, dropping" Connection.pp id);
       let rst = Segment.drop_and_close id conn in
-      None, rst
+      Error `Retransmission_exceeded, rst
     end else
       let cb = conn.control_block in
       let request_r_scale = if succ shift = 3 then None else cb.request_r_scale in
@@ -36,11 +36,11 @@ let timer_tt_rexmtsyn now shift id conn =
       in
       let conn' = { conn with control_block } in
       Log.info (fun m -> m "%a retransmitting syn %a" Connection.pp id pp_conn_state conn');
-      Some conn', Some (Segment.make_syn control_block id)
+      Ok conn', Some (Segment.make_syn control_block id)
   | _ ->
     Log.warn (fun m -> m "%a rexmtsyn timer, not in syn_sent state %a"
                 Connection.pp id pp_conn_state conn);
-    Some conn, None
+    Ok conn, None
 
 let timer_tt_rexmt now shift id conn =
   let cb, tcp_state = conn.control_block, conn.tcp_state in
@@ -48,13 +48,13 @@ let timer_tt_rexmt now shift id conn =
   | Syn_sent | Close_wait | Fin_wait_2 | Time_wait ->
     Log.warn (fun m -> m "%a rexmt timer, in syn_sent, close_wait, fin_wait_2, time_wait state %a"
                  Connection.pp id pp_conn_state conn);
-    Some conn, None
+    Ok conn, None
   | _ ->
     let maxshift = match tcp_state with Syn_received -> Params.tcp_synackmaxrxtshift | _ -> Params.tcp_maxrxtshift in
     if succ shift > maxshift then begin
       Log.info (fun m -> m "%a retransmission reached maxrxtshift, dropping" Connection.pp id);
       let rst = Segment.drop_and_close id conn in
-      None, rst
+      Error `Retransmission_exceeded, rst
     end else
       let snd_cwnd_prev, snd_ssthresh_prev = (* , t_badrxtwin *)
         if succ shift = 1 then
@@ -84,18 +84,18 @@ let timer_tt_rexmt now shift id conn =
         | Syn_received -> conn', Segment.make_syn_ack control_block id
         | _ -> Segment.tcp_output_really now id false conn'
       in
-      Some c', Some out
+      Ok c', Some out
 
 let timer_tt_persist now shift id conn =
   if succ shift >= Array.length Params.tcp_backoff then begin
     Log.err (fun m -> m "persist timer shift exceeded backoff array length");
-    Some conn, None
+    Ok conn, None
   end else
     let tt_rexmt = Subr.start_tt_persist now (succ shift) conn.control_block.t_rttinf in
     let control_block = { conn.control_block with tt_rexmt } in
     let conn' = { conn with control_block } in
     let conn', seg = Segment.tcp_output_really now id true conn' in
-    Some conn', Some seg
+    Ok conn', Some seg
 
 let timer_tt_delack now id conn =
   let control_block = { conn.control_block with tt_delack = None } in
@@ -144,23 +144,23 @@ let slow_timer t now =
             (* timer_tt_2msl_1 *)
             Log.warn (fun m -> m "%a 2msl timer expired %a" Connection.pp id pp_conn_state conn);
             if not (conn.tcp_state = Time_wait) then Log.err (fun m -> m "not in time_wait!!!!");
-            None, None
+            Error `Timer_2msl, None
           | None, None, Some (), _ ->
             (* timer_tt_conn_est_1 *)
             Log.warn (fun m -> m "%a connection established timer expired %a" Connection.pp id pp_conn_state conn);
             if not (conn.tcp_state = Syn_sent) then Log.err (fun m -> m "not in syn_sent");
-            None, Segment.drop_and_close id conn
+            Error `Timer_connection_established, Segment.drop_and_close id conn
           | None, None, None, Some () ->
             (* timer_tt_fin_wait_2_1 *)
             Log.warn (fun m -> m "%a fin_wait_2 timer expired %a" Connection.pp id pp_conn_state conn);
-            if not (conn.tcp_state = Syn_sent) then Log.err (fun m -> m "not in fin_wait_2");
-            None, None
-          | None, None, None, None -> Some conn, None
+            if not (conn.tcp_state = Fin_wait_2) then Log.err (fun m -> m "not in fin_wait_2");
+            Error `Timer_fin_wait_2, None
+          | None, None, None, None -> Ok conn, None
         in
         let out = maybe_out out_opt in
         match r with
-        | None -> acc, id :: drops, out
-        | Some c -> CM.add id c acc, drops, out)
+        | Error e -> acc, (id, e) :: drops, out
+        | Ok c -> CM.add id c acc, drops, out)
       t.connections (CM.empty, [], [])
   in
   { t with connections }, drops, outs
