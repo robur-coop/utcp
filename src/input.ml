@@ -612,7 +612,7 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
 let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked fin =
   (* hannes 2019-07-19: there used to be let seq = seg.seq + if SYN then 1 else
      0, but we'll never execute this code with a segment that has SYN *)
-  (* hannes 2023-08-26: this used to compute the sender's advertised window and
+  (* hannes 2023-08-28: this used to compute the sender's advertised window and
      shift by scale, but that value was never used. *)
   let cb = conn.control_block in
   (*: Trim segment to be within the receive window :*)
@@ -781,7 +781,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
       (*: Case (6) Segment is completely beyond the window and is not a window
          probe :*)
     else
-      (* hannes 2023-08-27 since the last case is "true", skip the conditional.
+      (* hannes 2023-08-29 since the last case is "true", skip the conditional.
          no need to evaluate any conditions with a "|| true" at the end *)
     (* if
        (Sequence.less seg.seq cb.rcv_nxt &&
