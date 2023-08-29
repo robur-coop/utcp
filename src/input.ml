@@ -780,21 +780,20 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
          below---the trimmed variants are useless here! :*)
       (*: Case (6) Segment is completely beyond the window and is not a window
          probe :*)
-    else if
-      (Sequence.less seg.seq cb.rcv_nxt &&
+    else
+      (* hannes 2023-08-27 since the last case is "true", skip the conditional.
+         no need to evaluate any conditions with a "|| true" at the end *)
+    (* if
+       (Sequence.less seg.seq cb.rcv_nxt &&
        Sequence.less_equal (Sequence.addi seg.seq (Cstruct.length seg.payload + if fin_trimmed then 1 else 0)) cb.rcv_nxt) || (* (4) *)
-      (Sequence.equal seq_trimmed cb.rcv_nxt && cb.rcv_wnd = 0 &&
+       (Sequence.equal seq_trimmed cb.rcv_nxt && cb.rcv_wnd = 0 &&
        Cstruct.length seg.payload + (if fin then 1 else 0) > 0) || (* (5) *)
-      true (* uhm, really? (6) *)
-    then
-      (*: Hack: assertion used to share values with later conditions :*)
-      (* assert (FIN_reass = F) andThen *)  (* Definitely false---segment is outside window *)
+       true (* uhm, really? (6) *)
+       then *)
       (*: Update socket's control block to assert that an [[ACK]] segment should be sent now. :*)
       (*: Source: TCPIPv2p959 says "segment is discarded and an ack is sent as a reply" :*)
       let control_block = { cb with tf_shouldacknow = true } in
       ({ conn with control_block }, []), true
-    else
-      invalid_arg "di3_really_datastuff"  (* impossible *)
   in
   (*: Finished processing the segment's data :*)
   (*: Thread the reassembled [[FIN]] flag through to [[di3_ststuff]] :*)
