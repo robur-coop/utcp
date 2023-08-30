@@ -606,6 +606,7 @@ let decode_and_validate ~src ~dst data =
   let* t, pkt_csum = decode data in
   let computed = checksum ~src ~dst data in
   (* these are already checks done in deliver_in_4, etc. *)
+  let pkt_csum = if pkt_csum = 0xffff then 0x0 else pkt_csum in
   let* () = guard (computed = pkt_csum) (`Msg "invalid checksum") in
   let* () =
     match src, dst with
