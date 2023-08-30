@@ -652,12 +652,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
      urgent byte is stored in [[iobc]]), remove the urgent byte from the
      segment's data so that it does not get placed in the receive queue, and set
      [[spliced_urp]] to the sequence number of the urgent byte. :*)
-(*  let rseg = <| seq  := seq_trimmed;
-                   FIN  := FIN_trimmed;
-                   data := data_trimmed_left_right
-                |> in *)
   (*: Processing of non-urgent data. There are 6 cases to consider: :*)
-  (* TODO reassembly area, fin_reassembly *)
   (*: Case (1) The segment contains new in-order, in-window data possibly with a
      [[FIN]] and the receive window is not closed. Note: it is possible that the
      segment contains just one byte of OOB data that may have already been
@@ -671,7 +666,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
     Sequence.addi seq_trimmed
       (Cstruct.length data_trimmed_left_right + (if fin_trimmed then 1 else 0))
   in
-  let (conn', out), cont =
+  let (conn', fin_reass, out), cont =
     if
       Sequence.equal seq_trimmed cb.rcv_nxt &&
       Sequence.greater rseq_trimmed cb.rcv_nxt &&
@@ -688,38 +683,28 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
          delayed, then delay the [[ACK]]. :*)
       let delay_ack =
         is_connected conn.tcp_state &&
-        have_stuff_to_ack && not fin_trimmed && (* cb.t_segq = [] /\ *)
+        have_stuff_to_ack && not fin_trimmed && Reassembly_queue.is_empty cb.t_segq &&
         not cb.tf_rxwin0sent && cb.tt_delack = None
       in
       (*: Check to see whether any data or a [[FIN]] can be
-         reassembled. [[tcp_reass]] returns the set of all possible
-         reassemblies, one of which is chosen non-deterministically here. Note:
-         a [[FIN]] can only be reassembled once all the data has been
-         reassembled. The [[len]] result from [[tcp_reass]] is the length of the
-         reassembled data, [[data_reass]], plus the length of any out-of-line
-         urgent data that is not included in the reassembled data but logically
-         occurs within it. This is to ensure that control block variables such
-         as [[rcv_nxt]] are incremented by the correct amount, \ie, by the
-         amount of data (whether urgent or not) received successfully by the
-         socket. See {@link [[tcp_reass]]} for further details. :*)
-      (* let rsegq = rseg :: cb.t_segq in
-         (chooseM (tcp_reass cb.rcv_nxt rsegq) \ (data_reass,len,FIN_reass0). *)
+          reassembled. hannes (2023-08-30 nothing non-deterministically here,
+          also not dealing with oob (as does this stack) :*)
+      let t_segq, r = Reassembly_queue.maybe_take cb.t_segq rseq_trimmed in
       (* Length (in sequence space) of reassembled data, counting a [[FIN]] as
          one byte and including any out-of-line urgent data previously removed *)
-      (* let len_reass = len + (if FIN_reass0 then 1 else 0) in *)
+      let data_reass, fin_reass0 = Option.value ~default:(Cstruct.empty, false) r in
+      let data = Cstruct.append data_trimmed_left_right data_reass in
+      let fin_reass_trimmed = fin_trimmed || fin_reass0 in
+      let data_len = Cstruct.length data + if fin_reass_trimmed then 1 else 0 in
      (*: Add the reassembled data to the receive queue and increment [[rcv_nxt]]
         to mark the sequence number of the byte past the last byte in the
         receive queue:*)
-      (* let rcvq' = APPEND tcp_sock.rcvq data_reass in *)
-      (* let rcv_nxt' = cb.rcv_nxt + len_reass in *) (* includes oob bytes as they occupy sequence space *)
       (*: Prune the receive queue of any data or [[FIN]]s that were reassembled,
          keeping all segments that contain data at or past sequence number
          [[cb.rcv_nxt + len_reass]]. :*)
-      (* let t_segq' = tcp_reass_prune rcv_nxt' rsegq in *)
       (*: Reduce the receive window in light of the data added to the receive
          queue. Do not include out-of-line urgent data because it does not store
          data in the receive queue. :*)
-      (* let rcv_wnd' = cb.rcv_wnd - LENGTH data_reass in *)
      (*: Hack: assertion used to share values with later conditions :*)
       (* assert (FIN_reass = FIN_reass0) andThen *)
       (*: Update the socket state :*)
@@ -729,20 +714,20 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
       and tf_shouldacknow =
         (*: Set if not delaying an [[ACK]] and have stuff to [[ACK]] :*)
         not delay_ack && have_stuff_to_ack
-      and rcv_nxt = rseq_trimmed
-      and rcv_wnd = cb.rcv_wnd - Cstruct.length data_trimmed_left_right
+      and rcv_nxt = Sequence.addi cb.rcv_nxt data_len
+      and rcv_wnd = cb.rcv_wnd - (Cstruct.length data)
       in
       let control_block = {
         cb with
         tt_delack ;
         tf_shouldacknow ;
-        (* t_segq := t_segq';   (*: updated reassembly queue, post-pruning :*) *)
+        t_segq ;   (*: updated reassembly queue, post-pruning :*)
         rcv_nxt ;
         rcv_wnd ;
       }
-      and rcvq = Cstruct.append conn.rcvq data_trimmed_left_right ; (* TODO reassembly! *)
+      and rcvq = Cstruct.append conn.rcvq data ;
       in
-      ({ conn with control_block ; rcvq }, []), true
+      ({ conn with control_block ; rcvq }, fin_reass_trimmed, []), true
      (*: Case (2) The segment contains new out-of-order in-window data, possibly
         with a [[FIN]], and the receive window is not closed. Note: it may also
         contain in-window urgent data that may have been pulled out-of-line but
@@ -756,9 +741,11 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
       (*: Hack: assertion used to share values with later conditions :*)
       (* assert (FIN_reass = F) andThen *)
       (*: Update the socket's TCP control block state :*)
-      (* TODO insert into reassembly queue! *)
-      let control_block = { cb with tf_shouldacknow = true } in
-      ({ conn with control_block }, []), true
+      let t_segq =
+        Reassembly_queue.insert_seg cb.t_segq (seq_trimmed, fin_trimmed, data_trimmed_left_right)
+      in
+      let control_block = { cb with tf_shouldacknow = true ; t_segq } in
+      ({ conn with control_block }, fin_trimmed, []), true
       (*: Case (3) The segment is a pure [[ACK]] segment (contains no data) (and
          must be in-order). :*)
       (*: Invariant here that [[seq_trimmed = seq]] if segment is a pure
@@ -770,7 +757,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
     then
       (*: Hack: assertion used to share values with later conditions :*)
       (* assert (FIN_reass = F) (*: Have not received a FIN :*) *)
-      (conn, []), true
+      (conn, fin_trimmed, []), true
       (*: Case (4) Segment contained no useful data---was a completely old
          segment. Note: the original fields from the segment, \ie, [[seq]],
          [[data]] and [[FIN]] are used in the guard below---the trimmed variants
@@ -793,12 +780,12 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
       (*: Update socket's control block to assert that an [[ACK]] segment should be sent now. :*)
       (*: Source: TCPIPv2p959 says "segment is discarded and an ack is sent as a reply" :*)
       let control_block = { cb with tf_shouldacknow = true } in
-      ({ conn with control_block }, []), true
+      ({ conn with control_block }, fin_trimmed, []), true
   in
   (*: Finished processing the segment's data :*)
   (*: Thread the reassembled [[FIN]] flag through to [[di3_ststuff]] :*)
   if cont then
-    the_ststuff now conn' fin_trimmed (* FIN_reass *) ourfinisacked, out
+    the_ststuff now conn' fin_reass ourfinisacked, out
   else
     conn', out
 
@@ -824,7 +811,7 @@ let di3_datastuff now the_ststuff conn seg ourfinisacked fin ack =
     Sequence.equal cb.snd_max cb.snd_nxt &&
     ((Sequence.greater ack cb.snd_una && Sequence.less ack cb.snd_max &&
       cb.snd_cwnd >= cb.snd_wnd && cb.t_dupacks < 3)
-     || (Sequence.equal ack cb.snd_una && (* cb.t_segq = [] /\ *)
+     || (Sequence.equal ack cb.snd_una && Reassembly_queue.is_empty cb.t_segq &&
          Cstruct.length seg.payload < conn.rcvbufsize - Cstruct.length conn.rcvq))
   in
   (*: Update the send window using the received segment if the segment will not be processed by
