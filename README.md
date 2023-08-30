@@ -46,7 +46,6 @@ Features included in this implementation that have been specified in later RFCs:
 
 TODO:
 - push handling / when to signal "received data" (nagle)
-- when to send data (793bis has some information about it)
 - path MTU discovery (RFC 1191, including array - also 793bis)
 - ICMP error handling!
 - appropriate byte counting (RFC 3456, not in the HOL4 model, though :/)
@@ -116,7 +115,6 @@ Model anomalies:
 - when is t_maxseg set? is it modified at all? (should not be once ESTABLISHED is reached)
 - t_badrxtwin <- meh (don't understand its value and usage)
 - really need to ensure that we're not talking to ourselves in Segment.decode_and_verify...
-- segment reassembly
 - put cc in a separate module, follow FreeBSD design ack_received / after_idle / conf_signal / post_recovery
 - tcp_output_really and tcp_do_output have quite some code shared...
 - keepalive is in the model, could easily be copied over
@@ -124,7 +122,6 @@ Model anomalies:
 - further avoiding allocations: sndq and rcvq should be lists of cstruct (no need for Cstruct.append!)
 - make the bsd_fast_path a fast path for us ;)
 - the rcv_window computations are done for bad segments (di_2a/7c/7d) on BSD as well, but we don't need that behaviour
-- the rcvq is emptied on close, which leads to data being lost (plus the utcp_mirage semantics that read is repeated)
 - verify with RFC 9293 at hand
 
 ## Testing
