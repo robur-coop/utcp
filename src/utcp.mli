@@ -123,6 +123,7 @@ module State : sig
   module Reassembly_queue : sig
     type t
     val empty : t
+    val is_empty : t -> bool
     val length : t -> int
     val insert_seg : t -> (Sequence.t * bool * Cstruct.t) -> t
     val maybe_take : t -> Sequence.t -> (t * (Cstruct.t * bool) option)

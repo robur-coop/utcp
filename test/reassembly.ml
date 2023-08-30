@@ -36,7 +36,7 @@ let added_can_be_taken2 () =
 let added_can_be_taken3 () =
   let r = insert_seg empty (Sequence.zero, false, data) in
   let r, s = maybe_take r (Sequence.of_int32 10l) in
-  Alcotest.(check int "reassembly queue still holds the segment" 1 (length r));
+  Alcotest.(check int "reassembly queue dropped all segments" 0 (length r));
   match s with
   | None -> ()
   | Some _ -> Alcotest.fail "there shouldn't be anything left"
@@ -191,7 +191,23 @@ let take_works () =
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) -> Alcotest.(check int "data is good" 15 (Cstruct.length s));
   let r', s = maybe_take r (Sequence.of_int32 45l) in
-  Alcotest.(check int "reassembly queue is now one element" 1 (length r'));
+  Alcotest.(check int "reassembly queue is now empty (has been pruned)" 0 (length r'));
+  match s with
+  | None -> ()
+  | Some _ -> Alcotest.fail "there shouldn't be anything"
+
+let take_works_taking_before () =
+  let r = insert_seg empty (Sequence.zero, false, data) in
+  let r', s = maybe_take r (Sequence.of_int32 20l) in
+  Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
+  match s with
+  | None -> ()
+  | Some _ -> Alcotest.fail "there shouldn't be anything"
+
+let take_works_taking_before_2 () =
+  let r = insert_seg empty (Sequence.of_int32 20l, false, data) in
+  let r', s = maybe_take r Sequence.zero in
+  Alcotest.(check int "reassembly queue is not empty" 1 (length r'));
   match s with
   | None -> ()
   | Some _ -> Alcotest.fail "there shouldn't be anything"
@@ -210,4 +226,6 @@ let tests = [
   "coalescing works 6", `Quick, coalescing_works_6 ;
   "coalescing works 7", `Quick, coalescing_works_7 ;
   "take works", `Quick, take_works ;
+  "take works taking before", `Quick, take_works_taking_before ;
+  "take works taking before 2", `Quick, take_works_taking_before_2 ;
 ]

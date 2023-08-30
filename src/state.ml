@@ -69,6 +69,8 @@ module Reassembly_queue = struct
 
   let empty = []
 
+  let is_empty = function [] -> true | _ -> false
+
   let length t = List.length t
 
   let pp_rseg ppf { seq ; data ; _ } =
@@ -160,16 +162,18 @@ module Reassembly_queue = struct
       List.fold_left (fun (r, acc) e ->
           match r with
           | None ->
-            if Sequence.equal e.seq seq then
+            if Sequence.equal seq e.seq then
               Some (Cstruct.concat (List.rev e.data), e.fin), acc
-            else
+            else if Sequence.greater seq e.seq then
               let e_end = Sequence.addi e.seq (Cstruct.lenv e.data) in
               if Sequence.less seq e_end then
                 let to_cut = Sequence.sub seq e.seq in
                 let data = Cstruct.concat (List.rev e.data) in
                 Some (Cstruct.shift data to_cut, e.fin), acc
               else
-                None, e :: acc
+                None, acc
+            else
+              None, e :: acc
           | Some _ -> (r, e :: acc))
         (None, []) t
     in
