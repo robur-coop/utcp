@@ -57,6 +57,125 @@ let mode_of = function
   | None -> None
   | Some ((x, _), _) -> Some x
 
+module Reassembly_queue = struct
+  type reassembly_segment = {
+    seq : Sequence.t ;
+    fin : bool ;
+    data : Cstruct.t list ; (* in reverse order *)
+  }
+
+  (* we take care that the list is sorted by the sequence number *)
+  type t = reassembly_segment list
+
+  let empty = []
+
+  let length t = List.length t
+
+  let pp_rseg ppf { seq ; data ; _ } =
+    Fmt.pf ppf "%a (len %u)" Sequence.pp seq (Cstruct.lenv data)
+
+  let pp = Fmt.(list ~sep:(any ", ") pp_rseg)
+
+  (* insert segment, potentially coalescing existing ones *)
+  let insert_seg t (seq, fin, data) =
+    (* they may overlap, the oldest seg wins *)
+    (* (1) figure out the place whereafter to insert the seg *)
+    (* (2) peek whether the next seg can be already coalesced *)
+    let inserted, segq =
+      List.fold_left (fun (inserted, acc) e ->
+          match inserted with
+          | Some (elt, seq_end) ->
+            (* 2 - the current "e" may be merged into the head of acc *)
+            let acc' = match acc with [] -> [] | _hd :: tl -> tl in
+            if Sequence.less_equal e.seq seq_end then
+              let to_cut = Sequence.sub seq_end e.seq in
+              if to_cut = 0 then
+                (* to_cut = 0, we can just merge them *)
+                let elt = { elt with fin = e.fin || elt.fin ; data = e.data @ elt.data } in
+                Some (elt, Sequence.addi elt.seq (Cstruct.lenv elt.data)), elt :: acc'
+              else
+                (* we need to cut some bytes from the current hd *)
+                match elt.data with
+                | head :: tl ->
+                  let hd = Cstruct.sub head 0 (Cstruct.length head - to_cut) in
+                  let data = e.data @ hd :: tl in
+                  let elt = { elt with fin = e.fin || elt.fin ; data } in
+                  Some (elt, Sequence.addi elt.seq (Cstruct.lenv data)), elt :: acc'
+                | [] -> (inserted, e :: acc)
+            else
+              (* there's still a hole, nothing to merge *)
+              (inserted, e :: acc)
+          | None ->
+            (* 1 *)
+            (* there are three cases:
+               - (a) the new seq is before the existing e.seq -> prepend
+                     (and figure out whether to merge with e)
+                     seq < e.seq
+               - (b) the new seq is within e.seq + len e -> append (partially)
+                     seq <= e.seq + len
+               - (c) the new seq is way behind e.seq + len e -> move along
+                     seq > e.seq + len
+            *)
+            if Sequence.less seq e.seq then
+              (* case (a) *)
+              let seq_e = Sequence.addi seq (Cstruct.length data) in
+              if Sequence.less_equal e.seq seq_e then
+                (* we've to merge e into seq *)
+                let skip_data = Sequence.sub seq_e e.seq in
+                if Cstruct.length data >= skip_data then
+                  let data = Cstruct.shift data skip_data in
+                  let e = { seq ; fin = fin || e.fin ; data = e.data @ [ data ] } in
+                  Some (e, Sequence.addi seq (Cstruct.lenv e.data)), e :: acc
+                else
+                  None, e :: acc
+              else
+                let e' = { seq ; fin ; data = [ data ] } in
+                Some (e', seq_e), e :: e' :: acc
+            else
+              let e_end = Sequence.addi e.seq (Cstruct.lenv e.data) in
+              if Sequence.less_equal seq e_end then
+                (* case (b) we append to the thing *)
+                let skip_data = Sequence.sub e_end seq in
+                if Cstruct.length data >= skip_data then
+                  let data = Cstruct.shift data skip_data in
+                  let e = { e with fin = fin || e.fin ; data = data :: e.data } in
+                  Some (e, Sequence.addi e_end (Cstruct.length data)), e :: acc
+                else
+                  (* we just throw it away *)
+                  Some (e, e_end), e :: acc
+              else
+                (None, e :: acc))
+        (None, []) t
+    in
+    let segq =
+      if inserted = None then
+        { seq ; fin ; data = [ data ] } :: segq
+      else
+        segq
+    in
+    List.rev segq
+
+  let maybe_take t seq =
+    let r, t' =
+      List.fold_left (fun (r, acc) e ->
+          match r with
+          | None ->
+            if Sequence.equal e.seq seq then
+              Some (Cstruct.concat (List.rev e.data), e.fin), acc
+            else
+              let e_end = Sequence.addi e.seq (Cstruct.lenv e.data) in
+              if Sequence.less seq e_end then
+                let to_cut = Sequence.sub seq e.seq in
+                let data = Cstruct.concat (List.rev e.data) in
+                Some (Cstruct.shift data to_cut, e.fin), acc
+              else
+                None, e :: acc
+          | Some _ -> (r, e :: acc))
+        (None, []) t
+    in
+    List.rev t', r
+end
+
 (* hostTypes:230 but dropped urg and ts stuff *)
 type control_block = {
   (*: timers :*)
@@ -128,7 +247,7 @@ type control_block = {
   snd_recover : Sequence.t ; (*: highest sequence number sent at time of receipt of partial ack (used in RFC2581/RFC2582 fast recovery) :*)
 
   (*: other :*)
-  (* t_segq :  tcpReassSegment list;  (\*: segment reassembly queue :*\) *)
+  t_segq :  Reassembly_queue.t;  (*: segment reassembly queue :*)
   t_softerror : string option      (*: current transient error; reported only if failure becomes permanent :*)
   (*: could cut this down to the actually-possible errors? :*)
 
@@ -177,6 +296,7 @@ let initial_cb =
     t_rttinf = initial_rttinf ;
     t_dupacks = 0;
     t_idletime = Mtime.of_uint64_ns 0L;
+    t_segq = Reassembly_queue.empty ;
     t_softerror = None;
     snd_scale = 0;
     rcv_scale = 0;

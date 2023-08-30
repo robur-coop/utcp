@@ -11,6 +11,7 @@ val add : t -> t -> t
 val incr : t -> t
 
 val addi : t -> int -> t
+val sub : t -> t -> int
 
 val window : t -> t -> int
 

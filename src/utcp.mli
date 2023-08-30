@@ -120,6 +120,14 @@ module State : sig
     t_wassyn : bool
   }
   type rexmtmode = private RexmtSyn | Rexmt | Persist
+  module Reassembly_queue : sig
+    type t
+    val empty : t
+    val length : t -> int
+    val insert_seg : t -> (Sequence.t * bool * Cstruct.t) -> t
+    val maybe_take : t -> Sequence.t -> (t * (Cstruct.t * bool) option)
+    val pp : t Fmt.t
+  end
   type control_block = {
     tt_rexmt : (rexmtmode * int) Timers.timed option;
     tt_2msl : unit Timers.timed option ;
@@ -157,6 +165,7 @@ module State : sig
     snd_cwnd_prev : int ;
     snd_ssthresh_prev : int ;
     snd_recover : Sequence.t ;
+    t_segq : Reassembly_queue.t ;
     t_softerror : string option
   }
   val initial_cb : control_block
