@@ -20,8 +20,8 @@ features are excluded:
 
 Very informative to read is [RFC 7414](https://tools.ietf.org/html/rfc7414) - a
 roadmap for TCP specification documents, and
-[RFC 793bis](https://tools.ietf.org/html/draft-ietf-tcpm-rfc793bis-13) TCP
-specification (which combines several RFCs).
+[RFC 9293](https://tools.ietf.org/html/rfc9293) TCP
+specification (which combines and obsoletes several RFCs).
 
 Initially, I thought timestamp option would be a good idea, but then they mainly
 are privacy risks exposing a global counter (you could do a per-connection
@@ -43,15 +43,6 @@ Features included in this implementation that have been specified in later RFCs:
 - [RFC 5961](https://tools.ietf.org/html/rfc5961) - blind in-window attacks
 - [RFC 6528](https://tools.ietf.org/html/rfc6528) - defending against sequence number attacks
 - [RFC 7323](https://tools.ietf.org/html/rfc7323) - TCP Extensions for high-performance
-
-TODO:
-- push handling / when to signal "received data" (nagle)
-- path MTU discovery (RFC 1191, including array - also 793bis)
-- ICMP error handling!
-- appropriate byte counting (RFC 3456, not in the HOL4 model, though :/)
-- increased initial window size
-- SACK
-- CC
 
 ## Intentional differences to the NetSem specification
 
@@ -88,17 +79,6 @@ Model anomalies:
 - di3_ackstuff: hostLTS:452 "ack <= snd_una", but text "strictly less than snd_una"
 - di3_newackstuff: hostLTS:251 uses "cb'.snd_nxt" which is the same (and a no-op)
 
-## Things to ensure and verify
-
-- each incoming segment with reasonable window is handled properly
-- there's always a path (e.g. via timers) to drop the connection (with/out RST) - that'll be hard
-- timers: is one sufficient (with either rexmtsyn, persist, idle, rexmt)?
-- no, at least time_wait and fin_wait_2 are special afaict
-- see also comment in hostTypes:301
-- esp in the connection setup states (syn_sent/syn_received) and connection
-  teardown states (close_wait/fin_wait_1/..) ensure that the pcb will eventually
-  be discarded
-
 ## TODO
 
 - I copied over various functions which need to be properly tested:
@@ -111,18 +91,20 @@ Model anomalies:
 - error propagation: cb can get some errors (from ip / icmp)
    (maybe temporary) which are preserved in softerror, and bubble up
    [also timeouts] <- this is to-be-returned when connect/read/write/close fails
-- icmp also for path-mtu
+- path MTU discovery (RFC 1191, ICMP)
 - when is t_maxseg set? is it modified at all? (should not be once ESTABLISHED is reached)
 - t_badrxtwin <- meh (don't understand its value and usage)
 - really need to ensure that we're not talking to ourselves in Segment.decode_and_verify...
-- put cc in a separate module, follow FreeBSD design ack_received / after_idle / conf_signal / post_recovery
-- tcp_output_really and tcp_do_output have quite some code shared...
-- keepalive is in the model, could easily be copied over
-- recheck with draft793bis whether (all of) our transitions are legitimate and none is really missing
 - further avoiding allocations: sndq and rcvq should be lists of cstruct (no need for Cstruct.append!)
-- make the bsd_fast_path a fast path for us ;)
 - the rcv_window computations are done for bad segments (di_2a/7c/7d) on BSD as well, but we don't need that behaviour
 - verify with RFC 9293 at hand
+- appropriate byte counting (RFC 3456, not in the HOL4 model, though :/)
+- increased initial window size
+- make the bsd_fast_path a fast path for us ;)
+- SACK
+- tcp_output_really and tcp_do_output have quite some code shared...
+- keepalive is in the model, could easily be copied over
+- put cc in a separate module, follow FreeBSD design ack_received / after_idle / conf_signal / post_recovery
 
 ## Testing
 
