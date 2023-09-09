@@ -1,9 +1,9 @@
 opam-version: "2.0"
 maintainer: "Robur <team@robur.coop>"
 authors: ["Robur <team@robur.coop>"]
-homepage: "https://github.com/roburio/utcp"
-dev-repo: "git+https://github.com/roburio/utcp.git"
-bug-reports: "https://github.com/roburio/utcp/issues"
+homepage: "https://github.com/robur-coop/utcp"
+dev-repo: "git+https://github.com/robur-coop/utcp.git"
+bug-reports: "https://github.com/robur-coop/utcp/issues"
 
 depends: [
   "ocaml" {>= "4.08.0"}
