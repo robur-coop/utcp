@@ -274,7 +274,7 @@ let tcp_output_required now conn =
       effectively still have a [[SYN]] on the send queue. :*)
   let syn_not_acked = match conn.State.tcp_state with Syn_sent | Syn_received -> true | _ -> false in
   (*: Is there data or a FIN to transmit? :*)
-  let last_sndq_data_seq = Sequence.addi cb.State.snd_una (Cstruct.length conn.State.sndq) in
+  let last_sndq_data_seq = Sequence.addi cb.State.snd_una (Cstruct.lenv conn.State.sndq) in
   let last_sndq_data_and_fin_seq =
     Sequence.(addi (addi last_sndq_data_seq (if fin_required then 1 else 0))
                 (if syn_not_acked then 1 else 0))
@@ -284,7 +284,7 @@ let tcp_output_required now conn =
   (*: The amount by which the right edge of the advertised window could be moved :*)
   let window_update_delta =
     (min (Params.tcp_maxwin lsl cb.State.rcv_scale))
-       (conn.rcvbufsize - Cstruct.length conn.rcvq) -
+       (conn.rcvbufsize - Cstruct.lenv conn.rcvq) -
     Sequence.window cb.State.rcv_adv cb.State.rcv_nxt
   in
   (*: Send a window update? This occurs when (a) the advertised window can be increased by at
@@ -306,7 +306,7 @@ let tcp_output_required now conn =
     cb.State.tf_shouldacknow
   in
   let persist_fun =
-    let cant_send = not do_output && Cstruct.length conn.sndq = 0 && cb.State.tt_rexmt = None in
+    let cant_send = not do_output && Cstruct.lenv conn.sndq = 0 && cb.State.tt_rexmt = None in
     let window_shrunk = win = 0 && snd_wnd_unused < 0 in  (*: [[win = 0]] if in [[SYN_SENT]], but still may send FIN :*)
                                                      (* (bsd_arch arch ==> tcp_sock.st <> SYN_SENT)) in *)
     if cant_send then  (* takes priority over window_shrunk; note this needs to be checked *)
@@ -356,21 +356,22 @@ let tcp_output_really now (src, src_port, dst, dst_port) window_probe conn =
     conn.State.cantsndmore &&
     match conn.State.tcp_state with State.Fin_wait_2 | State.Time_wait -> false | _ -> true
   in
-  let last_sndq_data_seq = Sequence.addi cb.State.snd_una (Cstruct.length conn.sndq) in
+  let last_sndq_data_seq = Sequence.addi cb.State.snd_una (Cstruct.lenv conn.sndq) in
   (*: The data to send in this segment (if any) :*)
-  let data' =
-    Cstruct.shift conn.State.sndq
-      (min (Cstruct.length conn.State.sndq)
-         (Sequence.window cb.State.snd_nxt cb.State.snd_una))
-      (* taking the minimum to avoid exceeding the sndq *)
-  in
   let data_to_send =
+    let data' =
+      Cstruct.shiftv (List.rev conn.State.sndq)
+        (min (Cstruct.lenv conn.State.sndq)
+           (Sequence.window cb.State.snd_nxt cb.State.snd_una))
+        (* taking the minimum to avoid exceeding the sndq *)
+    in
+    let data' = Cstruct.concat data' in
     Cstruct.sub data' 0
       (min (Cstruct.length data') (min (max 0 snd_wnd_unused) cb.State.t_maxseg))
   in
   let dlen = Cstruct.length data_to_send in
   (*: Should [[FIN]] be set in this segment? :*)
-  let fin = fin_required && Sequence.(greater_equal (addi cb.State.snd_nxt (Cstruct.length data_to_send)) last_sndq_data_seq) in
+  let fin = fin_required && Sequence.(greater_equal (addi cb.State.snd_nxt dlen) last_sndq_data_seq) in
   (*: If this socket has previously sent a [[FIN]] which has not yet been acked, and [[snd_nxt]]
       is past the [[FIN]]'s sequence number, then [[snd_nxt]] should be set to the sequence number
       of the [[FIN]] flag, i.e. a retransmission. Check that [[snd_una <> iss]] as in this case no

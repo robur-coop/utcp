@@ -97,22 +97,26 @@ let equal_tcp_state a b = match a, b with
   | Time_wait, Time_wait -> true
   | _ -> false
 
+let leq f a b =
+  List.length a = List.length b &&
+  List.for_all2 f a b
+
 let equal_conn_state_full a b =
   equal_tcp_state a.State.tcp_state b.State.tcp_state &&
   a.cantrcvmore = b.cantrcvmore &&
   a.cantsndmore = b.cantsndmore &&
   a.rcvbufsize = b.rcvbufsize &&
   a.sndbufsize = b.sndbufsize &&
-  Cstruct.equal a.sndq b.sndq &&
-  Cstruct.equal a.rcvq b.rcvq &&
+  leq Cstruct.equal a.sndq b.sndq &&
+  leq Cstruct.equal a.rcvq b.rcvq &&
   equal_control_block a.control_block b.control_block
 
 let equal_conn_state a b =
   equal_tcp_state a.State.tcp_state b.State.tcp_state &&
   a.cantrcvmore = b.cantrcvmore &&
   a.cantsndmore = b.cantsndmore &&
-  Cstruct.equal a.sndq b.sndq &&
-  Cstruct.equal a.rcvq b.rcvq
+  leq Cstruct.equal a.sndq b.sndq &&
+  leq Cstruct.equal a.rcvq b.rcvq
 
 let equal_tcp_full a b =
   State.IS.equal a.State.listeners b.State.listeners &&

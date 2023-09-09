@@ -95,7 +95,6 @@ Model anomalies:
 - when is t_maxseg set? is it modified at all? (should not be once ESTABLISHED is reached)
 - t_badrxtwin <- meh (don't understand its value and usage)
 - really need to ensure that we're not talking to ourselves in Segment.decode_and_verify...
-- further avoiding allocations: sndq and rcvq should be lists of cstruct (no need for Cstruct.append!)
 - the rcv_window computations are done for bad segments (di_2a/7c/7d) on BSD as well, but we don't need that behaviour
 - verify with RFC 9293 at hand
 - appropriate byte counting (RFC 3456, not in the HOL4 model, though :/)

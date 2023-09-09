@@ -56,7 +56,7 @@ let shutdown t now id v =
       and cantrcvmore = read || conn.cantrcvmore
       in
       let tf_shouldacknow = write in
-      let rcvq = if read then Cstruct.empty else conn.rcvq in
+      let rcvq = if read then [] else conn.rcvq in
       let control_block = { conn.control_block with tf_shouldacknow } in
       let conn' =
         { conn with control_block; cantsndmore; cantrcvmore; rcvq }
@@ -84,7 +84,7 @@ let close t now id =
     in
     let control_block = { conn.control_block with tf_shouldacknow = true } in
     let conn' =
-      let cantsndmore = true and cantrcvmore = true and rcvq = Cstruct.empty in
+      let cantsndmore = true and cantrcvmore = true and rcvq = [] in
       { conn with control_block; cantsndmore; cantrcvmore; rcvq }
     in
     (* if we've already been close()d, don't need to output anything *)
@@ -107,7 +107,7 @@ let send t now id buf =
       guard (not conn.cantsndmore) (`Msg "cant write")
     in
     (* TODO sndq should have a size limit (and if exceeded, return an error) *)
-    let sndq = Cstruct.append conn.sndq buf in
+    let sndq = buf :: conn.sndq in
     let conn' = { conn with sndq } in
     let conn', out = Segment.tcp_output_perhaps now id conn' in
     Ok ({ t with connections = CM.add id conn' t.connections }, out)
@@ -119,7 +119,7 @@ let recv t id =
     let* () =
       guard (behind_established conn.tcp_state) (`Msg "not yet connected")
     in
-    let rcvq = conn.rcvq in
+    let rcvq = Cstruct.concat (List.rev conn.rcvq) in
     let* () = guard (not (Cstruct.length rcvq = 0 && conn.cantrcvmore)) `Eof in
-    let conn' = { conn with rcvq = Cstruct.empty } in
+    let conn' = { conn with rcvq = [] } in
     Ok ({ t with connections = CM.add id conn' t.connections }, rcvq)

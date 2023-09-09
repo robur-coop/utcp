@@ -365,18 +365,9 @@ module CM = Map.Make(Connection)
    -- put into tcp_state (allowing SYN_SENT (and closing states) to be slimmer)?
    -- segments to be retransmitted need to be preserved as well somewhere!
    --> and they may change whenever an ACK is received *)
-(* sndq/rcvq: what is the ownership discipline?
-   - at the moment, we allocate (by calling Cstruct.append)
-   - we could instead allocate _once_ a Cstruct.t and copy into
-     -> then when an app takes data out, it needs to copy (otherwise overwrite)
-     -> when something is received on the network, we blit into
-   - on the sending side: does an application give up ownership of the buffer?
-     -> then we could just use that buffer
-
-   -> a Cstruct.t list should be fine, no need to allocate and blit
-     -> receive side and MirageOS: "listen (mirage-net)": the ownership of packet is transferred to the callback
-
-   on the send side, the mirage-flow docs also says that buffer ownership is now at the flow
+(* sndq/rcvq: ownership discipline - as defined by the docs:
+  - listen (mirage-net): the ownership of packet is transferred to the callback
+  - send (mirage-flow) says that buffer ownership is now at the flow
 *)
 type conn_state = {
   tcp_state : tcp_state ;
@@ -385,15 +376,14 @@ type conn_state = {
   cantsndmore : bool ;
   rcvbufsize : int ;
   sndbufsize : int ;
-  sndq : Cstruct.t ;
-  rcvq : Cstruct.t ;
-  (* reassembly : Cstruct.t list ; (* TODO nicer data structure! *) *)
+  sndq : Cstruct.t list ; (* reverse list of data to be sent out *)
+  rcvq : Cstruct.t list ; (* reverse of the received data *)
 }
 
 let conn_state ~rcvbufsize ~sndbufsize tcp_state control_block = {
   tcp_state ; control_block ;
   cantrcvmore = false ; cantsndmore = false ;
-  sndq = Cstruct.empty ; rcvq = Cstruct.empty ;
+  sndq = [] ; rcvq = [] ;
   rcvbufsize ; sndbufsize
 }
 

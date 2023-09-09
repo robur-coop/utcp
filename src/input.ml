@@ -402,7 +402,7 @@ let di3_newackstuff now id conn ourfinisacked ack =
         (*: If this socket has previously emitted a [[FIN]] segment and the
            [[FIN]] has now been [[ACK]]ed, decrease [[snd_wnd]] by the length of
            the send queue and clear the send queue.:*)
-        cb.snd_wnd - Cstruct.length conn.sndq, Cstruct.empty
+        cb.snd_wnd - Cstruct.lenv conn.sndq, []
       else
         (*: Otherwise, reduce the send window by the amound of data acknowledged
            as it is now consuming space on the receiver's receive queue. Remove
@@ -410,7 +410,7 @@ let di3_newackstuff now id conn ourfinisacked ack =
            be retransmitted.:*)
         let acked = Sequence.window ack cb.snd_una in
         cb.snd_wnd - acked,
-        Cstruct.sub conn.sndq acked (Cstruct.length conn.sndq - acked)
+        List.rev (Cstruct.shiftv (List.rev conn.sndq) acked)
     in
     (*: Update the control block :*)
     let cb' =
@@ -725,7 +725,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
         rcv_nxt ;
         rcv_wnd ;
       }
-      and rcvq = Cstruct.append conn.rcvq data ;
+      and rcvq = data :: conn.rcvq
       in
       ({ conn with control_block ; rcvq }, fin_reass_trimmed, []), true
      (*: Case (2) The segment contains new out-of-order in-window data, possibly
@@ -812,7 +812,7 @@ let di3_datastuff now the_ststuff conn seg ourfinisacked fin ack =
     ((Sequence.greater ack cb.snd_una && Sequence.less ack cb.snd_max &&
       cb.snd_cwnd >= cb.snd_wnd && cb.t_dupacks < 3)
      || (Sequence.equal ack cb.snd_una && Reassembly_queue.is_empty cb.t_segq &&
-         Cstruct.length seg.payload < conn.rcvbufsize - Cstruct.length conn.rcvq))
+         Cstruct.length seg.payload < conn.rcvbufsize - Cstruct.lenv conn.rcvq))
   in
   (*: Update the send window using the received segment if the segment will not be processed by
       BSD's fast path, has the [[ACK]] flag set, is not to the right of the window, and either:
@@ -897,7 +897,7 @@ let deliver_in_3 now id conn seg flag ack =
   let fin = flag = Some `Fin in
   (* PAWS, timers, rcv_wnd may have opened! updates fin_wait_2 timer *)
   let cb = conn.control_block in
-  let wesentafin = Sequence.greater cb.snd_max (Sequence.addi cb.snd_una (Cstruct.length conn.sndq)) in
+  let wesentafin = Sequence.greater cb.snd_max (Sequence.addi cb.snd_una (Cstruct.lenv conn.sndq)) in
   let ourfinisacked = wesentafin && Sequence.greater_equal ack cb.snd_max in
   let control_block = di3_topstuff now conn in
   (* ACK processing *)
@@ -1056,7 +1056,7 @@ let handle_buf t now ~src ~dst data =
       | None -> false, false
       | Some s ->
         s.tcp_state = Established,
-        Cstruct.length s.rcvq > 0
+        Cstruct.lenv s.rcvq > 0
     in
     let ev =
       match was_established, is_established, received with

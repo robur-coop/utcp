@@ -177,8 +177,8 @@ module State : sig
     cantsndmore : bool ;
     rcvbufsize : int ;
     sndbufsize : int ;
-    sndq : Cstruct.t ;
-    rcvq : Cstruct.t ;
+    sndq : Cstruct.t list ;
+    rcvq : Cstruct.t list ;
   }
   val conn_state : rcvbufsize:int -> sndbufsize:int -> tcp_state ->
     control_block -> conn_state

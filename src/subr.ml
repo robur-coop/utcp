@@ -72,7 +72,7 @@ let calculate_buf_sizes (* conn *) cb_t_maxseg seg_mss bw_delay_product_for_rt r
 
 let calculate_bsd_rcv_wnd conn =
   max (Sequence.window conn.control_block.rcv_adv conn.control_block.rcv_nxt)
-    (conn.rcvbufsize - Cstruct.length conn.rcvq)
+    (conn.rcvbufsize - Cstruct.lenv conn.rcvq)
 
 let update_rtt rtt ri =
   let rtt = Mtime.Span.to_uint64_ns rtt in
