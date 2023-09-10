@@ -955,7 +955,8 @@ let handle_noconn t now id seg =
     in
     t, out
   | false, syn ->
-    Log.warn (fun m -> m "dropping segment with reset (SYN %B) %a" syn Segment.pp seg);
+    Log.warn (fun m -> m "%a dropping segment with reset (SYN %B) %a"
+                 Connection.pp id syn Segment.pp seg);
     (* deliver_in_5 / deliver_in_6 *)
     t, dropwithreset id seg
 
@@ -1000,7 +1001,12 @@ let handle_conn t now id conn seg =
       let* conn' = deliver_in_3c_3d conn seg in
       Ok (add conn', None)
     | _ ->
-      let* () = guard (in_window conn.control_block seg) (`Drop "in_window") in
+      let* () =
+        guard (in_window conn.control_block seg)
+          (`Drop (Fmt.str "in_window seq %a seql %u rcv_nxt %a rcv_wnd %u"
+                    Sequence.pp seg.Segment.seq (Cstruct.length seg.payload)
+                    Sequence.pp conn.control_block.rcv_nxt conn.control_block.rcv_wnd)
+          ) in
       (* RFC 5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
       match seg.Segment.flag, seg.Segment.ack with
       | Some `Rst, _ ->
@@ -1024,10 +1030,11 @@ let handle_conn t now id conn seg =
   match r with
   | Ok (t, a) -> t, a
   | Error (`Drop msg) ->
-    Log.err (fun m -> m "dropping segment in %a failed condition %s" pp_fsm conn.tcp_state msg);
+    Log.err (fun m -> m "%a dropping segment in %a failed condition %s"
+                Connection.pp id pp_fsm conn.tcp_state msg);
     t, None
   | Error (`Reset msg) ->
-    Log.err (fun m -> m "reset in %a %s" pp_fsm conn.tcp_state msg);
+    Log.err (fun m -> m "%a reset in %a %s" Connection.pp id pp_fsm conn.tcp_state msg);
     drop (), dropwithreset id seg
 
 let handle_segment t now id seg =
