@@ -112,7 +112,7 @@ let send t now id buf =
     let conn', out = Segment.tcp_output_perhaps now id conn' in
     Ok ({ t with connections = CM.add id conn' t.connections }, out)
 
-let recv t id =
+let recv t now id =
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->
@@ -122,4 +122,5 @@ let recv t id =
     let rcvq = Cstruct.concat (List.rev conn.rcvq) in
     let* () = guard (not (Cstruct.length rcvq = 0 && conn.cantrcvmore)) `Eof in
     let conn' = { conn with rcvq = [] } in
-    Ok ({ t with connections = CM.add id conn' t.connections }, rcvq)
+    let conn', out = Segment.tcp_output_perhaps now id conn' in
+    Ok ({ t with connections = CM.add id conn' t.connections }, rcvq, out)

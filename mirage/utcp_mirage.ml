@@ -49,9 +49,10 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       seg
 
   let read (t, flow) =
-    match Utcp.recv t.tcp flow with
-    | Ok (tcp, data) ->
+    match Utcp.recv t.tcp (now ()) flow with
+    | Ok (tcp, data, seg) ->
       t.tcp <- tcp ;
+      maybe_output_ign t seg >>= fun () ->
       if Cstruct.length data = 0 then (
         let cond = Lwt_condition.create () in
         t.waiting <- Utcp.FM.add flow cond t.waiting;
@@ -65,9 +66,10 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
           (* TODO better error *)
           Lwt.return (Error `Refused)
         | Ok () ->
-          match Utcp.recv t.tcp flow with
-          | Ok (tcp, data) ->
+          match Utcp.recv t.tcp (now ()) flow with
+          | Ok (tcp, data, seg) ->
             t.tcp <- tcp ;
+            maybe_output_ign t seg >>= fun () ->
             if Cstruct.length data = 0 then
               Lwt.return (Ok `Eof) (* can this happen? *)
             else

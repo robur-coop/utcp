@@ -468,7 +468,8 @@ let tcp_output_really now (src, src_port, dst, dst_port) window_probe conn =
     snd_nxt = snd_nxt' ;
     tt_delack = None ;
     last_ack_sent = cb.State.rcv_nxt ;
-    rcv_adv = Sequence.addi cb.State.rcv_nxt rcv_wnd'
+    rcv_adv = Sequence.addi cb.State.rcv_nxt rcv_wnd' ;
+    rcv_wnd = rcv_wnd' ;
   } in
   { conn with tcp_state ; control_block }, (src, dst, seg)
 
