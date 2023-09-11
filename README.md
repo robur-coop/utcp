@@ -78,6 +78,7 @@ Model anomalies:
 - tt_persist doesn't check whether shift + 1 is < tcp_maxrxtshift
 - di3_ackstuff: hostLTS:452 "ack <= snd_una", but text "strictly less than snd_una"
 - di3_newackstuff: hostLTS:251 uses "cb'.snd_nxt" which is the same (and a no-op)
+- we update rcv_wnd (of the control block) in tcp_output_really, the model does not (see TCP1_hostTypesScript.sml:538 - they compute the rcv_wnd lazily)
 
 ## TODO
 

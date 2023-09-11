@@ -470,6 +470,12 @@ let tcp_output_really now (src, src_port, dst, dst_port) window_probe conn =
     last_ack_sent = cb.State.rcv_nxt ;
     rcv_adv = Sequence.addi cb.State.rcv_nxt rcv_wnd' ;
     rcv_wnd = rcv_wnd' ;
+    (* the rcv_wnd update does not occur in the model, the reasoning is
+       TCP1_hostTypesScript.sml:538: "Don't check equality of [[rcv_wnd]]: we
+       recalculate [[rcv_wnd]] lazily in [[tcp_output]] instead of after every
+       successful [[recv()]] call, so our value is often out of date."
+       we're doing this update here, since we use cb rcv_wnd in the in_window
+       check in input.ml *)
   } in
   { conn with tcp_state ; control_block }, (src, dst, seg)
 

@@ -239,6 +239,8 @@ let in_window cb seg =
     let rseq = Sequence.addi seq (pred dl) in
     (Sequence.less_equal cb.rcv_nxt seq && Sequence.less seq max) ||
     (Sequence.less_equal cb.rcv_nxt rseq && Sequence.less rseq max)
+(* TODO are we missing (from di3_topstuff) the window probe
+   ("segment_off_right_hand_edge" and rcv_wnd' is <> 0) *)
 
 let di3_topstuff now conn =
   (* we're not doing PAWS (no timestamp), and already checked in_window *)
