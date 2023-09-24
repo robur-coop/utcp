@@ -1,7 +1,5 @@
 ## µTCP - Transmission control protocol
 
-ALPHA: This is still under development and not yet ready for being used.
-
 This repository contains a TCP stack with a pure functional core. Its design is
 close to the [HOL4 specification](https://www.cl.cam.ac.uk/~pes20/Netsem/alldoc.pdf)
 developed in the [Netsem](https://www.cl.cam.ac.uk/~pes20/Netsem/) project -
