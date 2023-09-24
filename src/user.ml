@@ -41,6 +41,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
     Log.debug (fun m -> m "%a active open %a" Connection.pp id pp_conn_state conn);
     CM.add id conn t.connections
   in
+  Stats.incr_active t.stats;
   { t with connections }, id, (src, dst, seg)
 
 (* shutdown_1 and shutdown_3 *)

@@ -38,7 +38,7 @@ let dropwithreset (src, _, dst, _) seg =
   | None -> None
   | Some x -> Some (src, dst, x)
 
-let deliver_in_1 rng now id seg =
+let deliver_in_1 stats rng now id seg =
   let conn =
     let advmss = Subr.tcp_mssopt id in
     let rcvbufsize, sndbufsize, t_maxseg', snd_cwnd' =
@@ -84,9 +84,10 @@ let deliver_in_1 rng now id seg =
   in
   let reply = Segment.make_syn_ack conn.control_block id in
   Log.debug (fun m -> m "%a passive open %a" Connection.pp id pp_conn_state conn);
+  Stats.incr_passive stats;
   conn, reply
 
-let deliver_in_2 now id conn seg ack =
+let deliver_in_2 stats now id conn seg ack =
   let cb = conn.control_block in
   let* () = guard (Sequence.equal ack cb.snd_nxt) (`Drop "ack = snd_nxt") in
   let tf_doing_ws, snd_scale, rcv_scale =
@@ -170,6 +171,7 @@ let deliver_in_2 now id conn seg ack =
     t_rttinf ;
   }
   in
+  Stats.incr_established stats;
   Ok ({ conn with control_block; tcp_state = Established; rcvbufsize; sndbufsize },
       Segment.make_ack control_block ~fin:false id)
 
@@ -189,7 +191,7 @@ let deliver_in_2a conn seg f =
       Error (`Drop "ACK in-window")
   | _ -> Error (`Drop "RA")
 
-let deliver_in_3c_3d conn seg =
+let deliver_in_3c_3d stats conn seg =
   (* deliver_in_3c and syn_received parts of deliver_in_3 (now deliver_in_3d) *)
   (* TODO hostLTS:15801: [[SYN]] flag set may be set in the final segment of a
      simultaneous open (does this change anything for us?) *)
@@ -224,6 +226,7 @@ let deliver_in_3c_3d conn seg =
               snd_wl2 = ack ;
     } in
     (* if not cantsendmore established else if ourfinisacked fin_wait2 else fin_wait_1 *)
+    Stats.incr_established stats;
     Ok { conn with control_block ; tcp_state = Established }
 
 let in_window cb seg =
@@ -946,7 +949,7 @@ let handle_noconn t now id seg =
     (* there can't be anything in TIME_WAIT, otherwise we wouldn't end up here *)
     (* TODO check RFC 1122 Section 4.2.2.13 whether this actually happens (socket reusage) *)
     (* TODO resource management: limit number of outstanding connection attempts *)
-    let conn, reply = deliver_in_1 t.rng now id seg in
+    let conn, reply = deliver_in_1 t.stats t.rng now id seg in
     { t with connections = CM.add id conn t.connections }, Some reply
   | true, false ->
     (* deliver_in_1b *)
@@ -975,7 +978,7 @@ let handle_conn t now id conn seg =
     | Syn_sent ->
       begin match seg.Segment.ack, seg.Segment.flag with
         | Some ack, Some `Syn ->
-          let* c', o = deliver_in_2 now id conn seg ack in
+          let* c', o = deliver_in_2 t.stats now id conn seg ack in
           Ok (add c', Some o)
         | None, Some `Syn ->
           let* c', o = deliver_in_2b now id conn seg in
@@ -1000,7 +1003,7 @@ let handle_conn t now id conn seg =
          even may emit syn+ack (with seq = iss) to move forward [but then, as
          well just an ack is possible with seq = iss + 1]
       *)
-      let* conn' = deliver_in_3c_3d conn seg in
+      let* conn' = deliver_in_3c_3d t.stats conn seg in
       Ok (add conn', None)
     | _ ->
       let* () =

@@ -185,10 +185,13 @@ module State : sig
     control_block -> conn_state
   module IS : Set.S with type elt = int
   module CM : Map.S with type key = flow
+  module Stats : sig type t end
   type t = {
     rng : int -> Cstruct.t ;
     listeners : IS.t ;
-    connections : conn_state CM.t
+    connections : conn_state CM.t ;
+    stats : Stats.t ;
+    id : string ;
   }
   val pp : t Fmt.t
   val empty : (int -> Cstruct.t) -> t

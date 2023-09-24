@@ -392,12 +392,67 @@ let pp_conn_state ppf c =
 
 module IS = Set.Make(struct type t = int let compare = compare_int end)
 
+module Stats = struct
+  type t = {
+    mutable total_established : int ;
+    mutable total_passive_connections : int ;
+    mutable total_active_connections : int ;
+  }
+
+  let empty = {
+    total_established = 0 ;
+    total_passive_connections = 0 ;
+    total_active_connections = 0 ;
+  }
+
+  let incr_passive t =
+    t.total_passive_connections <- succ t.total_passive_connections
+
+  let incr_established t =
+    t.total_established <- succ t.total_established
+
+  let incr_active t =
+    t.total_active_connections <- succ t.total_active_connections
+end
+
 (* path mtu (its global to a stack) *)
 type t = {
   rng : int -> Cstruct.t ;
   listeners : IS.t ;
-  connections : conn_state CM.t
+  connections : conn_state CM.t ;
+  stats : Stats.t ;
+  id : string ;
 }
+
+let metrics =
+  let open Metrics in
+  let doc = "uTCP metrics" in
+  let data t =
+    let syn_rcvd, syn_sent, est, teardown, total =
+      CM.fold (fun _ conn (sr, ss, e, t, total) ->
+          match conn.tcp_state with
+          | Syn_received -> succ sr, ss, e, t, succ total
+          | Syn_sent -> sr, succ ss, e, t, succ total
+          | Established -> sr, ss, succ e, t, succ total
+          | _ -> sr, ss, e, succ t, succ total)
+        t.connections (0,0,0,0,0)
+    in
+    let stats = t.stats in
+    Data.v
+      [ int "syn-rcvd state" syn_rcvd
+      ; int "established state" est
+      ; int "client connections" syn_sent
+      ; int "teardown" teardown
+      ; int "total connections" total
+      ; int "total established" stats.Stats.total_established
+      ; int "total syn-rcvd" stats.total_passive_connections
+      ; int "total client" stats.total_active_connections ]
+  in
+  let tag = Tags.string "stack-id" in
+  Src.v ~doc ~tags:Tags.[ tag ] ~data "utcp"
+
+let add_metrics t =
+  Metrics.add metrics (fun x -> x t.id) (fun d -> d t)
 
 let pp ppf t =
   Fmt.pf ppf "listener %a, connections: %a"
@@ -408,4 +463,14 @@ let pp ppf t =
 let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 
-let empty rng = { rng ; listeners = IS.empty ; connections = CM.empty }
+let id = ref 0
+
+let empty rng =
+  incr id;
+  {
+    id = string_of_int !id ;
+    rng ;
+    listeners = IS.empty ;
+    connections = CM.empty ;
+    stats = Stats.empty ;
+  }
