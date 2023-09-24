@@ -177,8 +177,8 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       ~some:(fun data -> output_ip t data >|= ignore)
       data
 
-  let connect ip =
-    let tcp = Utcp.empty R.generate in
+  let connect id ip =
+    let tcp = Utcp.empty id R.generate in
     let t = { tcp ; ip ; waiting = Utcp.FM.empty ; listeners = Port_map.empty } in
     Lwt.async (fun () ->
         let timer () =

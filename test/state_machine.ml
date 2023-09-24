@@ -146,7 +146,7 @@ and src_port = 4321
 let quad = Obj.magic (my_ip, listen_port, your_ip, src_port)
 
 (* a TCP stack listening on port 1234 *)
-let tcp = State.empty static_rng
+let tcp = State.empty "" static_rng
 let tcp_listen = State.start_listen tcp listen_port
 
 let basic_seg = {

@@ -1,6 +1,6 @@
 type state
 
-val empty : (int -> Cstruct.t) -> state
+val empty : string -> (int -> Cstruct.t) -> state
 
 val start_listen : state -> int -> state
 
@@ -194,7 +194,7 @@ module State : sig
     id : string ;
   }
   val pp : t Fmt.t
-  val empty : (int -> Cstruct.t) -> t
+  val empty : string -> (int -> Cstruct.t) -> t
   val start_listen : t -> int -> t
   val stop_listen : t -> int -> t
 end
