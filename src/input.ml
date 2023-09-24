@@ -10,7 +10,7 @@ let guard p e = if p then Ok () else Error e
 let ( let* ) = Result.bind
 
 (* input rules from netsem
-deliver_in_1 - passive open (listener, receive SYN) - handle_noconnn
+deliver_in_1 - passive open (listener, receive SYN) - handle_noconn
 deliver_in_1b - drop bad for listening (listener, receive anything else) - handle_noconn
 deliver_in_2 - active open (Syn_sent, receive SYN+ACK) - handle_conn
 deliver_in_2a - bad or boring, RST or ignore (Syn_sent, receive RST) - handle_conn
