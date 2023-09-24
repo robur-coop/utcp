@@ -203,8 +203,8 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
           Time.sleep_ns (Duration.of_ms 100)
         in
         let rec go () =
-          Lwt.join [ timer () ; timeout () ] >>=
-          go
+          Lwt.join [ timer () ; timeout () ] >>= fun () ->
+          (go [@tailcall]) ()
         in
         go ());
     t
