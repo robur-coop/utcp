@@ -423,6 +423,7 @@ type t = {
   connections : conn_state CM.t ;
   stats : Stats.t ;
   id : string ;
+  mutable ctr : int ;
 }
 
 module States = Map.Make (struct
@@ -479,4 +480,5 @@ let empty id rng =
     listeners = IS.empty ;
     connections = CM.empty ;
     stats = Stats.empty ;
+    ctr = 0 ;
   }

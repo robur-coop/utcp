@@ -165,13 +165,11 @@ let slow_timer t now =
   in
   { t with connections }, drops, outs
 
-let ctr = ref 0
-
 (* expected to be called every 100msec - we have slow timers (500ms) and fast timers (200ms) used by delayed ack *)
 let timer t now =
-  incr ctr ;
+  t.ctr <- succ t.ctr ;
   (* every 9.5 seconds, compute metrics *)
-  if !ctr mod 95 = 0 then add_metrics t;
-  if !ctr mod 2 = 0 then fast_timer t now
-  else if !ctr mod 5 = 0 then slow_timer t now
+  if t.ctr mod 95 = 0 then add_metrics t;
+  if t.ctr mod 2 = 0 then fast_timer t now
+  else if t.ctr mod 5 = 0 then slow_timer t now
   else t, [], []

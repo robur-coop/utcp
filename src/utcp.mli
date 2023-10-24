@@ -192,6 +192,7 @@ module State : sig
     connections : conn_state CM.t ;
     stats : Stats.t ;
     id : string ;
+    mutable ctr : int ;
   }
   val pp : t Fmt.t
   val empty : string -> (int -> Cstruct.t) -> t
