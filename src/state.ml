@@ -431,6 +431,11 @@ module States = Map.Make (struct
   end)
 
 let metrics =
+  let tcp_states =
+    [ Syn_sent ; Syn_received ; Established ; Close_wait ; Fin_wait_1 ;
+      Closing ; Last_ack ; Fin_wait_2 ; Time_wait
+    ]
+  in
   let open Metrics in
   let doc = "uTCP metrics" in
   let data t =
@@ -443,10 +448,10 @@ let metrics =
     let total = States.fold (fun _ v acc -> v + acc) states 0 in
     let stats = t.stats in
     Data.v
-      (States.fold (fun k v acc ->
-          int (fsm_to_string k) v :: acc)
-          states
-          [] @
+      (List.map (fun tcp_state ->
+           let v = Option.value ~default:0 (States.find_opt tcp_state states) in
+           int (fsm_to_string tcp_state) v)
+          tcp_states @
        [ int "active connections" total
        ; int "total established" stats.Stats.total_established
        ; int "total server" stats.total_passive_connections
