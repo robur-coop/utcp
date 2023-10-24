@@ -221,7 +221,7 @@ let deliver_in_3c_3d stats conn seg =
     (* expect (assume for now): no data in that segment !? *)
     let control_block = {
       cb with snd_una = ack ;
-              (* snd_wnd = seg.Segment.window ; *)
+              snd_wnd = seg.Segment.window lsl cb.snd_scale ;
               snd_wl1 = seg.Segment.seq ; (* need to check with model, from RFC 1122 4.2.2.20 *)
               snd_wl2 = ack ;
     } in
