@@ -19,9 +19,7 @@ let is_connected = function
   | Established | Close_wait | Fin_wait_1 | Closing | Last_ack | Fin_wait_2 -> true
   | _ -> false
 
-let pp_fsm ppf s =
-  Fmt.string ppf @@
-  match s with
+let fsm_to_string = function
   | Syn_received -> "syn received"
   | Syn_sent -> "syn sent"
   | Established -> "established"
@@ -31,6 +29,9 @@ let pp_fsm ppf s =
   | Time_wait -> "time wait"
   | Close_wait -> "close wait"
   | Last_ack -> "last ack"
+
+let pp_fsm ppf s =
+  Fmt.string ppf (fsm_to_string s)
 
 (* hostTypes:182 *)
 type rttinf = {
@@ -424,29 +425,32 @@ type t = {
   id : string ;
 }
 
+module States = Map.Make (struct
+    type t = tcp_state
+    let compare a b = compare a b
+  end)
+
 let metrics =
   let open Metrics in
   let doc = "uTCP metrics" in
   let data t =
-    let syn_rcvd, syn_sent, est, teardown, total =
-      CM.fold (fun _ conn (sr, ss, e, t, total) ->
-          match conn.tcp_state with
-          | Syn_received -> succ sr, ss, e, t, succ total
-          | Syn_sent -> sr, succ ss, e, t, succ total
-          | Established -> sr, ss, succ e, t, succ total
-          | _ -> sr, ss, e, succ t, succ total)
-        t.connections (0,0,0,0,0)
+    let states =
+      CM.fold (fun _ conn ->
+          States.update conn.tcp_state (fun v -> Some (succ (Option.value ~default:0 v))))
+        t.connections
+        States.empty
     in
+    let total = States.fold (fun _ v acc -> v + acc) states 0 in
     let stats = t.stats in
     Data.v
-      [ int "syn-rcvd state" syn_rcvd
-      ; int "established state" est
-      ; int "client connections" syn_sent
-      ; int "teardown" teardown
-      ; int "total connections" total
-      ; int "total established" stats.Stats.total_established
-      ; int "total syn-rcvd" stats.total_passive_connections
-      ; int "total client" stats.total_active_connections ]
+      (States.fold (fun k v acc ->
+          int (fsm_to_string k) v :: acc)
+          states
+          [] @
+       [ int "active connections" total
+       ; int "total established" stats.Stats.total_established
+       ; int "total server" stats.total_passive_connections
+       ; int "total client" stats.total_active_connections ])
   in
   let tag = Tags.string "stack-id" in
   Src.v ~doc ~tags:Tags.[ tag ] ~data "utcp"
