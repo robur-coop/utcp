@@ -34,9 +34,7 @@ deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - not handled
 ??deliver_in_10 - stupid flag combinations are dropped (without reset)
 *)
 let dropwithreset (src, _, dst, _) seg =
-  match Segment.dropwithreset seg with
-  | None -> None
-  | Some x -> Some (src, dst, x)
+  Option.map (fun x -> src, dst, x) (Segment.dropwithreset seg)
 
 let deliver_in_1 stats rng now id seg =
   let conn =
