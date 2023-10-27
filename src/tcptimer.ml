@@ -45,8 +45,8 @@ let timer_tt_rexmtsyn now shift id conn =
 let timer_tt_rexmt now shift id conn =
   let cb, tcp_state = conn.control_block, conn.tcp_state in
   match tcp_state with
-  | Syn_sent | Close_wait | Fin_wait_2 | Time_wait ->
-    Log.warn (fun m -> m "%a rexmt timer, in syn_sent, close_wait, fin_wait_2, time_wait state %a"
+  | Syn_sent | Fin_wait_2 | Time_wait ->
+    Log.warn (fun m -> m "%a rexmt timer, in syn_sent, fin_wait_2, time_wait state %a"
                  Connection.pp id pp_conn_state conn);
     Ok conn, None
   | _ ->
