@@ -615,7 +615,13 @@ let decode_and_validate ~src ~dst data =
   let computed = checksum ~src ~dst data in
   (* these are already checks done in deliver_in_4, etc. *)
   let pkt_csum = if pkt_csum = 0xffff then 0x0 else pkt_csum in
-  let* () = guard (computed = pkt_csum) (`Msg "invalid checksum") in
+  let* () =
+    guard (computed = pkt_csum)
+      (`Msg (Fmt.str "invalid checksum: computed %u, decoded %u in src %a dst %a@.%a"
+               computed pkt_csum
+               Ipaddr.pp src Ipaddr.pp dst
+               Cstruct.hexdump_pp data))
+  in
   let* () =
     match src, dst with
     | Ipaddr.V4 src, Ipaddr.V4 dst ->
