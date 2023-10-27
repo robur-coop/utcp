@@ -128,7 +128,7 @@ let deliver_in_2 stats now id conn seg ack =
               which is always zero because of the above updates to
               the RTT estimators and shift value. :*)
           Subr.start_tt_rexmt_syn now 0 true t_rttinf'
-        | Some ((Rexmt, _), _) ->
+        | None | Some ((Rexmt, _), _) ->
           (*: ditto :*)
           Subr.start_tt_rexmt now 0 true t_rttinf'
         | Some ((Persist, _), _) when emission_time <> None ->
@@ -270,7 +270,9 @@ let di3_newackstuff now id conn ourfinisacked ack =
       (*: If there have been fewer than 3 duplicate [[ACKS]] then clear the
          duplicate [[ACK]] counter. If there were more than 3 duplicate [[ACKS]]
          previously then the congestion window was inflated as per RFC2581 so
-         retract it to [[snd_ssthresh]] :*)
+         retract it to [[snd_ssthresh]]
+        -- hannes, 20231027: not needed to retract cwnd, since we do new reno,
+           and thus t_dupacks will never be >= 3 here :*)
       let control_block = { cb with t_dupacks = 0 } in
       { conn with control_block }, []
     else if cb.t_dupacks >= 3 && Sequence.less ack cb.snd_recover then
