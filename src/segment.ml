@@ -435,7 +435,7 @@ let tcp_output_really now (src, src_port, dst, dst_port) window_probe conn =
          data), then start the retransmit timer. Note: if the persist timer is
          running it will be implicitly stopped :*)
       Subr.start_tt_rexmt now 0 false cb.t_rttinf
-    else if window_probe && win0 <> 0 then
+    else if window_probe && win0 <> 0 && State.mode_of cb.tt_rexmt = Some State.Persist then
       (*: If the segment is a window probe, and in either case the send window
          is not closed, stop any running persist timer. :*)
       None (*: stop persisting :*)
