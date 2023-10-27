@@ -39,7 +39,7 @@ let tcp_maxseg conn =
   conn.control_block.t_maxseg - optlen
 
 (* utils:85 *)
-let roundup bs v = (v + (pred bs) / bs) * bs
+let roundup bs v = ((v + (pred bs)) / bs) * bs
 
 (* auxFns:386 tcp_input:332 *)
 let calculate_buf_sizes (* conn *) cb_t_maxseg seg_mss bw_delay_product_for_rt rcvbufsize sndbufsize =
