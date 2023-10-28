@@ -78,6 +78,11 @@ Model anomalies:
 - di3_newackstuff: hostLTS:251 uses "cb'.snd_nxt" which is the same (and a no-op)
 - we update rcv_wnd (of the control block) in tcp_output_really, the model does not (see TCP1_hostTypesScript.sml:538 - they compute the rcv_wnd lazily)
 - the timer_tt_rexmt_1 is restricted to tcp_state <> [ CLOSED; LISTEN; ] SYN SENT; CLOSE WAIT; FIN WAIT 2; TIME WAIT, but in CLOSE WAIT we need a retransmit timer, implementation changed in f3a083fc082f580e387917ebbb135b1c940fd5bc
+- no tf_shoulacknow in close or shutdown (if the write part is shutdown, the cantsndmore signals tcp_output_* that a fin is needed anyways)
+
+When to output segments?
+- basically on every incoming segment, on any user operation, and any timer (mostly rexmt, but as well persist and delack)
+- in tcp_output we establish a list of segments to be sent (if any), avoiding the necessity to wait for other interaction if the congestion window is big enough
 
 ## TODO
 

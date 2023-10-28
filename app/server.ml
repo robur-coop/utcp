@@ -58,7 +58,7 @@ let jump () =
           | Some `Received _id -> Logs.app (fun m -> m "data received")
           | None -> ());
          s := s' ;
-         handle_data ip (Option.to_list data)) (*,
+         handle_data ip data) (*,
       (fun () ->
          match Tcp.close !s conn with
          | Error (`Msg msg) -> Logs.err (fun m -> m "close failed %s" msg)

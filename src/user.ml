@@ -56,16 +56,14 @@ let shutdown t now id v =
       let cantsndmore = write || conn.cantsndmore
       and cantrcvmore = read || conn.cantrcvmore
       in
-      let tf_shouldacknow = write in
       let rcvq = if read then [] else conn.rcvq in
-      let control_block = { conn.control_block with tf_shouldacknow } in
       let conn' =
-        { conn with control_block; cantsndmore; cantrcvmore; rcvq }
+        { conn with cantsndmore; cantrcvmore; rcvq }
       in
       let conn', out =
         (* if only shutdown read side, or we already closed something *)
         if conn.cantsndmore || v = `read then
-          conn', None
+          conn', []
         else
           Segment.tcp_output_perhaps now id conn'
       in
@@ -83,15 +81,14 @@ let close t now id =
     let* () =
       guard (behind_established conn.tcp_state) (`Msg "not yet established")
     in
-    let control_block = { conn.control_block with tf_shouldacknow = true } in
     let conn' =
       let cantsndmore = true and cantrcvmore = true and rcvq = [] in
-      { conn with control_block; cantsndmore; cantrcvmore; rcvq }
+      { conn with cantsndmore; cantrcvmore; rcvq }
     in
     (* if we've already been close()d, don't need to output anything *)
     let conn', out =
       if conn.cantsndmore then
-        conn', None
+        conn', []
       else
         Segment.tcp_output_perhaps now id conn'
     in

@@ -310,7 +310,6 @@ let di3_newackstuff now id conn ourfinisacked ack =
         snd_cwnd = cb'.snd_cwnd - Sequence.window ack cb'.snd_una + cb'.t_maxseg;
         snd_nxt = snd_nxt' (*: restore previous value :*)
       } in
-      let out = match out with None -> [] | Some s -> [ s ] in
       { conn' with control_block }, out
     else if cb.t_dupacks >= 3 && Sequence.greater_equal ack cb.snd_recover then
       (*: The host supports NewReno-style Fast Recovery, the socket has received
@@ -554,8 +553,7 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
       (* TODO hannes 2019-07-19 increment by cb.t_maxseg changes due to ABC *)
       let control_block = { cb with t_dupacks ; snd_cwnd } in
       let conn' = { conn with control_block } in
-      let conn'', seg = Segment.tcp_output_perhaps now id conn' in
-      let out = match seg with None -> [] | Some s -> [ s ] in
+      let conn'', out = Segment.tcp_output_perhaps now id conn' in
       (Some conn'', out), false
     else if t_dupacks' = 3 && not (Sequence.less ack cb.snd_recover) then
       (*: If this is the 3rd duplicate segment and if the host supports NewReno
@@ -587,7 +585,7 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
       (*: Attempt to create a segment for output using the modified control
          block (this is all a relational monad idiom) :*)
       let conn' = { conn with control_block } in
-      let conn'', seg = Segment.tcp_output_perhaps now id conn' in
+      let conn'', out = Segment.tcp_output_perhaps now id conn' in
       (*: Finally, update the congestion window to [[snd_ssthresh]] plus 3
          maximum segment sizes (this is the artificial inflation of RFC2581/2582
          because it is known that the 3 segments that generated the 3 duplicate
@@ -598,7 +596,6 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
         snd_cwnd = control_block.snd_ssthresh + cb.t_maxseg * t_dupacks' ;
         snd_nxt = Sequence.max cb.snd_nxt control_block.snd_nxt
       } in
-      let out = match seg with None -> [] | Some s -> [ s ] in
       (Some { conn'' with control_block }, out), false
     else
       invalid_arg "di3_ackstuff" (*: Believed to be impossible---here for completion and safety :*)
@@ -911,7 +908,7 @@ let deliver_in_3 now id conn seg flag ack =
   in
   (* may have some fresh data to report which needs to be acked *)
   Option.fold
-    ~none:(Ok (None, None))
+    ~none:(Ok (None, []))
     ~some:(fun conn' ->
         let conn'', outs' =
           if cont then
@@ -920,9 +917,9 @@ let deliver_in_3 now id conn seg flag ack =
             (conn', [])
         in
         let out = match outs, outs' with
-          | [], [x] -> Some x
-          | [x], [] -> Some x
-          | [], [] -> None
+          | [], [ x ] -> [ x ]
+          | [ x ], [] -> [ x ]
+          | [], [] -> []
           | _ -> assert false
         in
         Ok (Some conn'', out))
@@ -950,20 +947,16 @@ let handle_noconn t now id seg =
     (* TODO check RFC 1122 Section 4.2.2.13 whether this actually happens (socket reusage) *)
     (* TODO resource management: limit number of outstanding connection attempts *)
     let conn, reply = deliver_in_1 t.stats t.rng now id seg in
-    { t with connections = CM.add id conn t.connections }, Some reply
+    { t with connections = CM.add id conn t.connections }, [ reply ]
   | true, false ->
     (* deliver_in_1b *)
-    let out =
-      match seg.Segment.ack with
-      | None -> None
-      | Some _ack -> dropwithreset id seg
-    in
-    t, out
+    let out = Option.map (fun _ack -> dropwithreset id seg) seg.Segment.ack in
+    t, Option.to_list (Option.join out)
   | false, syn ->
     Log.warn (fun m -> m "%a dropping segment with reset (SYN %B) %a"
                  Connection.pp id syn Segment.pp seg);
     (* deliver_in_5 / deliver_in_6 *)
-    t, dropwithreset id seg
+    t, Option.to_list (dropwithreset id seg)
 
 let handle_conn t now id conn seg =
   Log.debug (fun m -> m "%a handle_conn %a@ seg %a" Connection.pp id pp_conn_state conn Segment.pp seg);
@@ -979,13 +972,13 @@ let handle_conn t now id conn seg =
       begin match seg.Segment.ack, seg.Segment.flag with
         | Some ack, Some `Syn ->
           let* c', o = deliver_in_2 t.stats now id conn seg ack in
-          Ok (add c', Some o)
+          Ok (add c', [ o ])
         | None, Some `Syn ->
           let* c', o = deliver_in_2b now id conn seg in
-          Ok (add c', Some o)
+          Ok (add c', [ o ])
         | _, ((None | Some `Rst | Some `Fin) as f) ->
           let* () = deliver_in_2a conn seg f in
-          Ok (drop (), None)
+          Ok (drop (), [])
       end
     | Syn_received ->
       (* expected is:
@@ -1004,7 +997,7 @@ let handle_conn t now id conn seg =
          well just an ack is possible with seq = iss + 1]
       *)
       let* conn' = deliver_in_3c_3d t.stats conn seg in
-      Ok (add conn', None)
+      Ok (add conn', [])
     | _ ->
       let* () =
         guard (in_window conn.control_block seg)
@@ -1016,19 +1009,19 @@ let handle_conn t now id conn seg =
       match seg.Segment.flag, seg.Segment.ack with
       | Some `Rst, _ ->
         let* seg' = deliver_in_7 id conn seg in
-        Ok (t, Some seg')
+        Ok (t, [ seg' ])
       | Some `Syn, _ ->
         let* seg' = deliver_in_8 id conn seg in
-        Ok (t, Some seg')
+        Ok (t, [ seg' ])
       | _, None -> Error (`Drop "no ACK")
       | f, Some ack ->
         let* conn', out = deliver_in_3 now id conn seg f ack in
         match conn' with
-        | None -> Ok (drop (), None)
+        | None -> Ok (drop (), [])
         | Some conn' ->
           let conn'', out' = match out with
-            | None -> Segment.tcp_output_perhaps now id conn'
-            | Some x -> conn', Some x
+            | [] -> Segment.tcp_output_perhaps now id conn'
+            | x -> conn', x
           in
           Ok (add conn'', out')
   in
@@ -1037,10 +1030,10 @@ let handle_conn t now id conn seg =
   | Error (`Drop msg) ->
     Log.err (fun m -> m "%a dropping segment in %a failed condition %s"
                 Connection.pp id pp_fsm conn.tcp_state msg);
-    t, None
+    t, []
   | Error (`Reset msg) ->
     Log.err (fun m -> m "%a reset in %a %s" Connection.pp id pp_fsm conn.tcp_state msg);
-    drop (), dropwithreset id seg
+    drop (), Option.to_list (dropwithreset id seg)
 
 let handle_segment t now id seg =
   Log.info (fun m -> m "%a TCP %a" Connection.pp id Segment.pp seg) ;
@@ -1054,7 +1047,7 @@ let handle_buf t now ~src ~dst data =
   match Segment.decode_and_validate ~src ~dst data with
   | Error (`Msg msg) ->
     Log.err (fun m -> m "dropping invalid segment %s" msg);
-    t, None, None
+    t, None, []
   | Ok (seg, id) ->
     (* deliver_in_3a deliver_in_4 are done now! *)
     let was_established =
@@ -1077,14 +1070,13 @@ let handle_buf t now ~src ~dst data =
       | _, _, true -> Some (`Received id)
       | _ -> None
     in
-    match out with
-    | None -> t', ev, None
-    | Some (src', dst', d) ->
-      let src, _, dst, _ = id in
-      if Ipaddr.compare src' src <> 0 then
-        Log.err (fun m -> m "bad IP reply src' %a vs src %a"
-                    Ipaddr.pp src' Ipaddr.pp src);
-      if Ipaddr.compare dst' dst <> 0 then
-        Log.err (fun m -> m "bad IP reply dst' %a vs dst %a"
-                    Ipaddr.pp dst' Ipaddr.pp dst);
-      t', ev, Some (src, dst, d)
+    List.iter (fun (src', dst', _) ->
+        let src, _, dst, _ = id in
+        if Ipaddr.compare src' src <> 0 then
+          Log.err (fun m -> m "bad IP reply src' %a vs src %a"
+                      Ipaddr.pp src' Ipaddr.pp src);
+        if Ipaddr.compare dst' dst <> 0 then
+          Log.err (fun m -> m "bad IP reply dst' %a vs dst %a"
+                      Ipaddr.pp dst' Ipaddr.pp dst))
+      out ;
+    t', ev, out

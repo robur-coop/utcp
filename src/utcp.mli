@@ -76,22 +76,22 @@ val timer : state -> Mtime.t ->
 
 val handle_buf : state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
   Cstruct.t ->
-  (state * [ `Established of flow | `Drop of flow * bool | `Received of flow ] option * output option)
+  (state * [ `Established of flow | `Drop of flow * bool | `Received of flow ] option * output list)
 
 val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
   state -> Mtime.t -> (state * flow * output)
 
 val close : state -> Mtime.t -> flow ->
-  (state * output option, [ `Msg of string ]) result
+  (state * output list, [ `Msg of string ]) result
 
 val shutdown : state -> Mtime.t -> flow -> [ `read | `write | `read_write ] ->
-  (state * output option, [ `Msg of string ]) result
+  (state * output list, [ `Msg of string ]) result
 
 val recv : state -> Mtime.t -> flow ->
-  (state * Cstruct.t * output option, [ `Msg of string | `Eof ]) result
+  (state * Cstruct.t * output list, [ `Msg of string | `Eof ]) result
 
 val send : state -> Mtime.t -> flow -> Cstruct.t ->
-  (state * output option, [ `Msg of string ]) result
+  (state * output list, [ `Msg of string ]) result
 
 (**/**)
 (* only to be used for testing! *)
@@ -202,7 +202,7 @@ end
 
 module Input : sig
   val handle_segment : State.t -> Mtime.t -> flow -> Segment.t ->
-    State.t * (Ipaddr.t * Ipaddr.t * Segment.t) option
+    State.t * (Ipaddr.t * Ipaddr.t * Segment.t) list
 end
 
 module User : sig

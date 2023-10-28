@@ -334,7 +334,7 @@ let tcp_output_required now conn =
   do_output, persist_fun
 
 (* auxFns:1774 no ts and arch, though *)
-let tcp_output_really now (src, src_port, dst, dst_port) window_probe conn =
+let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe conn =
   let cb = conn.State.control_block in
   let snd_cwnd =
     let rxtcur = Subr.computed_rxtcur cb.State.t_rttinf in
@@ -358,7 +358,7 @@ let tcp_output_really now (src, src_port, dst, dst_port) window_probe conn =
   in
   let last_sndq_data_seq = Sequence.addi cb.State.snd_una (Cstruct.lenv conn.sndq) in
   (*: The data to send in this segment (if any) :*)
-  let data_to_send =
+  let data_to_send, more_data_could_be_sent =
     let data' =
       Cstruct.shiftv (List.rev conn.State.sndq)
         (min (Cstruct.lenv conn.State.sndq)
@@ -366,8 +366,10 @@ let tcp_output_really now (src, src_port, dst, dst_port) window_probe conn =
         (* taking the minimum to avoid exceeding the sndq *)
     in
     let data' = Cstruct.concat data' in
-    Cstruct.sub data' 0
-      (min (Cstruct.length data') (min (max 0 snd_wnd_unused) cb.State.t_maxseg))
+    let len_could_be_sent = max 0 snd_wnd_unused in
+    let dlen = Cstruct.length data' in
+    Cstruct.sub data' 0 (min dlen (min len_could_be_sent cb.State.t_maxseg)),
+    dlen > cb.t_maxseg && len_could_be_sent > cb.t_maxseg
   in
   let dlen = Cstruct.length data_to_send in
   (*: Should [[FIN]] be set in this segment? :*)
@@ -477,7 +479,11 @@ let tcp_output_really now (src, src_port, dst, dst_port) window_probe conn =
        we're doing this update here, since we use cb rcv_wnd in the in_window
        check in input.ml *)
   } in
-  { conn with tcp_state ; control_block }, (src, dst, seg)
+  { conn with tcp_state ; control_block }, (src, dst, seg), more_data_could_be_sent
+
+let tcp_output_really now (src, src_port, dst, dst_port) window_probe conn =
+  let cb, seg, _ = tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe conn in
+  cb, seg
 
 (* auxFns:2000 *)
 let tcp_output_perhaps now id conn =
@@ -489,10 +495,18 @@ let tcp_output_perhaps now id conn =
       { conn with control_block }
   in
   if do_output then
-    let conn'', seg = tcp_output_really now id false conn' in
-    conn'', Some seg
+    let rec send_more conn acc =
+      let conn', seg, more_possible = tcp_output_really_helper now id false conn in
+      let outs = seg :: acc in
+      if more_possible then
+        send_more conn' outs
+      else
+        conn', outs
+    in
+    let conn', outs = send_more conn' [] in
+    conn', List.rev outs
   else
-    conn', None
+    conn', []
 
 (* auxFns:1384 *)
 let make_syn_ack cb (src, src_port, dst, dst_port) =
