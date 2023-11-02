@@ -15,12 +15,3 @@
    tcpip.ipv4 mirage-random-test mirage-unix mirage-clock-unix lwt.unix
    cmdliner logs.fmt fmt.cli logs.cli fmt.tty mtime.clock.os)
  (optional))
-
-(executable
- (name client)
- (public_name client)
- (modules client)
- (libraries utcp mirage-net-unix cstruct lwt logs ethernet arp.mirage
-   tcpip.ipv4 mirage-random-test mirage-unix mirage-clock-unix lwt.unix
-   cmdliner logs.fmt fmt.cli logs.cli fmt.tty mtime.clock.os)
- (optional))
