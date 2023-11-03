@@ -15,3 +15,11 @@
    tcpip.ipv4 mirage-random-test mirage-unix mirage-clock-unix lwt.unix
    cmdliner logs.fmt fmt.cli logs.cli fmt.tty mtime.clock.os)
  (optional))
+
+(executable
+ (name pcap_replay)
+ (public_name pcap)
+ (modules pcap_replay)
+ (libraries utcp cstruct pcap-format ipaddr mtime logs ipaddr-cstruct cmdliner
+   logs.fmt fmt.cli logs.cli fmt.tty)
+ (optional))
