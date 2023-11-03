@@ -299,7 +299,7 @@ let tcp_output_required now conn =
   let do_output =
     (*: Data to send and the send window has some space, or a FIN can be sent :*)
     (have_data_or_fin_to_send &&
-     (have_data_to_send && snd_wnd_unused > 0)) || (* don't need space if only sending FIN *)
+     (if have_data_to_send then snd_wnd_unused > 0 else true)) || (* don't need space if only sending FIN *)
     (*: Can send a window update :*)
     need_to_send_a_window_update ||
     (*: An ACK should be sent immediately (e.g. in reply to a window probe) :*)
@@ -513,7 +513,7 @@ let make_syn_ack cb (src, src_port, dst, dst_port) =
   let window = min cb.State.rcv_wnd max_win in
   let options =
     MaximumSegmentSize cb.t_advmss ::
-    (match cb.request_r_scale with None -> [] | Some sc -> [ WindowScale sc ])
+    (Option.map (fun sc -> WindowScale sc) cb.request_r_scale |> Option.to_list)
   in
   src, dst,
   { src_port ; dst_port ; seq = cb.iss ; ack = Some cb.rcv_nxt ;
@@ -525,7 +525,7 @@ let make_syn cb (src, src_port, dst, dst_port) =
   let window = min cb.State.rcv_wnd max_win in
   let options =
     MaximumSegmentSize cb.State.t_advmss ::
-    (match cb.request_r_scale with None -> [] | Some sc -> [ WindowScale sc ])
+    (Option.map (fun sc -> WindowScale sc) cb.request_r_scale |> Option.to_list)
   in
   src, dst,
   { src_port ; dst_port ; seq = cb.State.iss ; ack = None ;
