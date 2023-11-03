@@ -75,6 +75,10 @@ let pcap_reader filename =
   in
   go_along 0 (Mtime.of_uint64_ns 0L)
 
+let print_out (src, dst, seg) =
+  Logs.info (fun m -> m "sending %a -> %a: %a" Ipaddr.pp src Ipaddr.pp dst
+                Utcp.Segment.pp seg)
+
 let initial_packet state ip rng_data now ~src ~dst tcp =
   let src_port = Cstruct.BE.get_uint16 tcp 0
   and dst_port = Cstruct.BE.get_uint16 tcp 2
@@ -82,9 +86,10 @@ let initial_packet state ip rng_data now ~src ~dst tcp =
   if Ipaddr.compare ip src = 0 then begin
     (* we're the client - set ISS to match *)
     Cstruct.LE.set_uint32 rng_data 0 (Cstruct.BE.get_uint32 tcp 4);
-    let state, flow, _out =
+    let state, flow, out =
       Utcp.connect ~src ~src_port ~dst ~dst_port state now
     in
+    print_out out;
     state, None, Some flow
   end else begin
     (* we're the server - don't know our ISS yet *)
@@ -100,7 +105,8 @@ let initial_packet state ip rng_data now ~src ~dst tcp =
       Cstruct.LE.set_uint32 rng_data 0 (Cstruct.BE.get_uint32 tcp' 4);
       (* replay the 0 packet *)
       Logs.info (fun m -> m "replay packet 0");
-      let state, _stuff, _out = Utcp.handle_buf state now ~src ~dst tcp in
+      let state, _stuff, out = Utcp.handle_buf state now ~src ~dst tcp in
+      List.iter print_out out;
       state
     in
     state, Some f, None
@@ -131,8 +137,12 @@ let jump () filename ip =
           state, f
         else if Ipaddr.compare x dst = 0 then begin
           Logs.info (fun m -> m "replay packet %u" idx);
-          let state, stuff, _out = Utcp.handle_buf state mt ~src ~dst tcp in
-          (match stuff with Some `Established fl -> flow := Some fl | _ -> ());
+          let state, stuff, out = Utcp.handle_buf state mt ~src ~dst tcp in
+          (match stuff with Some `Established fl ->
+             Logs.info (fun m -> m "flow established! (previously %s)"
+                           (match !flow with Some _ -> "SOME" | None -> "none"));
+             flow := Some fl | _ -> ());
+          List.iter print_out out;
           state, None
         end else if Ipaddr.compare x src = 0 then begin
           (* NB: we need to inject the read/write/close calls somehow *)
@@ -161,7 +171,8 @@ let jump () filename ip =
                   | Error `Msg msg ->
                     Logs.err (fun m -> m "failure during send: %s" msg);
                     assert false
-                  | Ok (state, _out) ->
+                  | Ok (state, out) ->
+                    List.iter print_out out;
                     state
                 ) else
                   state
@@ -172,7 +183,8 @@ let jump () filename ip =
                 | Error `Msg msg ->
                   Logs.err (fun m -> m "failure during close: %s" msg);
                   assert false
-                | Ok (state, _out) ->
+                | Ok (state, out) ->
+                  List.iter print_out out;
                   state)
               else
                 state
