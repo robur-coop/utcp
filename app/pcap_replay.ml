@@ -75,6 +75,37 @@ let pcap_reader filename =
   in
   go_along 0 (Mtime.of_uint64_ns 0L)
 
+let initial_packet state ip rng_data now ~src ~dst tcp =
+  let src_port = Cstruct.BE.get_uint16 tcp 0
+  and dst_port = Cstruct.BE.get_uint16 tcp 2
+  in
+  if Ipaddr.compare ip src = 0 then begin
+    (* we're the client - set ISS to match *)
+    Cstruct.LE.set_uint32 rng_data 0 (Cstruct.BE.get_uint32 tcp 4);
+    let state, flow, _out =
+      Utcp.connect ~src ~src_port ~dst ~dst_port state now
+    in
+    state, None, Some flow
+  end else begin
+    (* we're the server - don't know our ISS yet *)
+    let state = Utcp.start_listen state dst_port in
+    let f state ~src:src' ~dst:dst' tcp' =
+      (* ensure we got the other direction *)
+      assert (Ipaddr.compare dst src' = 0);
+      assert (Ipaddr.compare ip src' = 0);
+      assert (Ipaddr.compare src dst' = 0);
+      assert (dst_port = Cstruct.BE.get_uint16 tcp' 0);
+      assert (src_port = Cstruct.BE.get_uint16 tcp' 2);
+      (* set ISS to the seq in the next segment ;) *)
+      Cstruct.LE.set_uint32 rng_data 0 (Cstruct.BE.get_uint32 tcp' 4);
+      (* replay the 0 packet *)
+      Logs.info (fun m -> m "replay packet 0");
+      let state, _stuff, _out = Utcp.handle_buf state now ~src ~dst tcp in
+      state
+    in
+    state, Some f, None
+  end
+
 let jump () filename ip =
   if ip = None then
     Logs.warn (fun m -> m "only decoding and printing pcap, no replaying done (specify --ip=<IP> to take an endpoint)");
@@ -82,6 +113,7 @@ let jump () filename ip =
   let rng_data = Cstruct.create 4 in
   let rng i = assert (i = 4) ; rng_data in
   let state = Utcp.empty "pcap-replay" rng in
+  let flow = ref None in
   fold (fun (state, act) idx ts ~src ~dst tcp ->
       let state =
         match act with
@@ -90,48 +122,66 @@ let jump () filename ip =
       in
       Logs.info (fun m -> m "frame %u ts %a src %a dst %a tcp %u bytes"
                     idx Mtime.Span.pp ts Ipaddr.pp src Ipaddr.pp dst (Cstruct.length tcp));
-      let src_port = Cstruct.BE.get_uint16 tcp 0
-      and dst_port = Cstruct.BE.get_uint16 tcp 2
-      in
       let mt = Mtime.of_uint64_ns (Mtime.Span.to_uint64_ns ts) in
       match ip with
       | Some x ->
         if idx = 0 then
-          if Ipaddr.compare x src = 0 then begin
-            (* we're the client - set ISS to match *)
-            Cstruct.LE.set_uint32 rng_data 0 (Cstruct.BE.get_uint32 tcp 4);
-            let state, _flow, _out =
-              Utcp.connect ~src ~src_port ~dst ~dst_port state mt
-            in
-            state, None
-          end else begin
-            (* we're the server - don't know our ISS yet *)
-            let state = Utcp.start_listen state dst_port in
-            let f state ~src:src' ~dst:dst' tcp' =
-              (* ensure we got the other direction *)
-              assert (Ipaddr.compare dst src' = 0);
-              assert (Ipaddr.compare x src' = 0);
-              assert (Ipaddr.compare src dst' = 0);
-              assert (dst_port = Cstruct.BE.get_uint16 tcp' 0);
-              assert (src_port = Cstruct.BE.get_uint16 tcp' 2);
-              (* set ISS to the seq in the next segment ;) *)
-              Cstruct.LE.set_uint32 rng_data 0 (Cstruct.BE.get_uint32 tcp' 4);
-              (* replay the 0 packet *)
-              Logs.info (fun m -> m "replay packet 0");
-              let state, _stuff, _out = Utcp.handle_buf state mt ~src ~dst tcp in
-              state
-            in
-            state, Some f
-          end
+          let state, f, fl = initial_packet state x rng_data mt ~src ~dst tcp in
+          flow := fl;
+          state, f
         else if Ipaddr.compare x dst = 0 then begin
           Logs.info (fun m -> m "replay packet %u" idx);
-          let state, _stuff, _out = Utcp.handle_buf state mt ~src ~dst tcp in
+          let state, stuff, _out = Utcp.handle_buf state mt ~src ~dst tcp in
+          (match stuff with Some `Established fl -> flow := Some fl | _ -> ());
+          state, None
+        end else if Ipaddr.compare x src = 0 then begin
+          (* NB: we need to inject the read/write/close calls somehow *)
+          (* TODO: check that the respective state matches the sequence numbers in the pcap *)
+          let payload =
+            let off = (Cstruct.get_uint8 tcp 12 lsr 4) * 4 in
+            Cstruct.shift tcp off
+          in
+          let syn, fin =
+            let flags = Cstruct.get_uint8 tcp 13 in
+            let f = (1 lsl 0) land flags > 0
+            and s = (1 lsl 1) land flags > 0
+            in
+            s, f
+          in
+          let state =
+            if syn then begin
+              Logs.warn (fun m -> m "weird, packet %u carries a SYN, ignoring" idx);
+              state
+            end else if fin || Cstruct.length payload > 0 then
+              let flow = Option.get !flow in
+              let state =
+                if Cstruct.length payload > 0 then (
+                  Logs.info (fun m -> m "sending with %u bytes" (Cstruct.length payload));
+                  match Utcp.send state mt flow payload with
+                  | Error `Msg msg ->
+                    Logs.err (fun m -> m "failure during send: %s" msg);
+                    assert false
+                  | Ok (state, _out) ->
+                    state
+                ) else
+                  state
+              in
+              if fin then
+                (Logs.info (fun m -> m "close");
+                 match Utcp.close state mt flow with
+                | Error `Msg msg ->
+                  Logs.err (fun m -> m "failure during close: %s" msg);
+                  assert false
+                | Ok (state, _out) ->
+                  state)
+              else
+                state
+            else state
+          in
           state, None
         end else begin
-          (* NB: we need to inject the read/write/close calls somehow *)
-          (* also could check that the respective state matches the sequence numbers in the pcap *)
-          (* or actually implement a reasonable tracing approach in utcp for replaying *)
-          Logs.info (fun m -> m "ignoring packet %u" idx);
+          Logs.info (fun m -> m "ignoring packet (neither src %a nor dst %a are us %a) %u"
+                        Ipaddr.pp src Ipaddr.pp dst Ipaddr.pp x idx);
           state, None
         end
       | _ -> state, None
