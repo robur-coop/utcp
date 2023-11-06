@@ -1,5 +1,8 @@
 (* (c) 2017-2019 Hannes Mehnert, all rights reserved *)
 
+let src = Logs.Src.create "tcp.tracing" ~doc:"TCP tracing"
+module Tracing = (val Logs.src_log src : Logs.LOG)
+
 (* in contrast to literature, there is no need for LISTEN nor CLOSED --
    there's no tcp socket for them anyways *)
 type tcp_state =

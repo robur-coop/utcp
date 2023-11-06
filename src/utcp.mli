@@ -66,7 +66,7 @@ module Segment : sig
   val decode_and_validate : src:Ipaddr.t -> dst:Ipaddr.t -> Cstruct.t ->
     (t * flow, [ `Msg of string ]) result
 
-  val encode_and_checksum : src:Ipaddr.t -> dst:Ipaddr.t -> t -> Cstruct.t
+  val encode_and_checksum : Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t -> t -> Cstruct.t
 end
 
 type output = Ipaddr.t * Ipaddr.t * Segment.t

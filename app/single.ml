@@ -53,7 +53,7 @@ let jump _ src src_port dst dst_port syn fin rst push ack seq window data =
         seq = Sequence.of_int32 (Int32.of_int seq) ;
         ack ; flag ; push ; window ; options = [] ; payload
       } in
-      encode_and_checksum ~src:Ipaddr.(V4 (V4.Prefix.address cidr)) ~dst s
+      encode_and_checksum (Mtime_clock.now ()) ~src:Ipaddr.(V4 (V4.Prefix.address cidr)) ~dst s
     in
     Netif.connect "tap3" >>= fun tap ->
     Ethernet.connect tap >>= fun eth ->

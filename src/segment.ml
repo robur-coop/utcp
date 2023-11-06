@@ -595,10 +595,14 @@ let encode t =
   Cstruct.BE.set_uint16 hdr 14 t.window;
   Cstruct.concat [ hdr ; options ; t.payload ]
 
-let encode_and_checksum ~src ~dst t =
+let encode_and_checksum now ~src ~dst t =
   let data = encode t in
   let checksum = checksum ~src ~dst data in
   Cstruct.BE.set_uint16 data 16 checksum;
+  State.Tracing.info (fun m -> m "%a [%a] out %s"
+                         State.Connection.pp (src, t.src_port, dst, t.dst_port)
+                         Mtime.pp now
+                         (Base64.encode_string (Cstruct.to_string data)));
   data
 
 let decode data =

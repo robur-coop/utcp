@@ -1049,13 +1049,16 @@ let handle_buf t now ~src ~dst data =
     Log.err (fun m -> m "dropping invalid segment %s" msg);
     t, None, []
   | Ok (seg, id) ->
+    Tracing.info (fun m -> m "%a [%a] handle_buf %s"
+                     Connection.pp id Mtime.pp now
+                     (Base64.encode_string (Cstruct.to_string data)));
     (* deliver_in_3a deliver_in_4 are done now! *)
     let was_established =
       match CM.find_opt id t.connections with
       | None -> false
       | Some s -> s.tcp_state = Established
     in
-    let t', out = handle_segment t now id seg in
+    let t', outs = handle_segment t now id seg in
     let is_established, received =
       match CM.find_opt id t'.connections with
       | None -> false, false
@@ -1078,5 +1081,5 @@ let handle_buf t now ~src ~dst data =
         if Ipaddr.compare dst' dst <> 0 then
           Log.err (fun m -> m "bad IP reply dst' %a vs dst %a"
                       Ipaddr.pp dst' Ipaddr.pp dst))
-      out ;
-    t', ev, out
+      outs ;
+    t', ev, outs

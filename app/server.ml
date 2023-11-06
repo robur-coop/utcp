@@ -10,7 +10,7 @@ let log_err ~pp_error = function
 
 let handle_data ip =
   Lwt_list.iter_s (fun (src, dst, seg) ->
-      let data = Utcp.Segment.encode_and_checksum ~src ~dst seg in
+      let data = Utcp.Segment.encode_and_checksum (Mtime_clock.now ()) ~src ~dst seg in
       match src, dst with
       | Ipaddr.V4 _, Ipaddr.V4 dst ->
         IPv4.write ip dst `TCP (fun _ -> 0) [ data ] >|=
