@@ -189,7 +189,7 @@ let deliver_in_2a conn seg f =
       Error (`Drop "ACK in-window")
   | _ -> Error (`Drop "RA")
 
-let deliver_in_3c_3d stats conn seg =
+let deliver_in_3c_3d stats now conn seg =
   (* deliver_in_3c and syn_received parts of deliver_in_3 (now deliver_in_3d) *)
   (* TODO hostLTS:15801: [[SYN]] flag set may be set in the final segment of a
      simultaneous open (does this change anything for us?) *)
@@ -215,13 +215,14 @@ let deliver_in_3c_3d stats conn seg =
     (* TODO what is an acceptable ack? snd_nxt, if <> what to do? *)
     let* () = guard (Sequence.equal ack cb.snd_nxt) (`Reset "ack = snd_nxt") in
     (* not (ack <= tcp_sock.cb.snd_una \/ ack > tcp_sock.cb.snd_max) *)
-    (* TODO rtt measurement likely, reset idle time! *)
+    (* TODO rtt measurement likely *)
     (* expect (assume for now): no data in that segment !? *)
     let control_block = {
       cb with snd_una = ack ;
               snd_wnd = seg.Segment.window lsl cb.snd_scale ;
               snd_wl1 = seg.Segment.seq ; (* need to check with model, from RFC 1122 4.2.2.20 *)
               snd_wl2 = ack ;
+              t_idletime = now ;
     } in
     (* if not cantsendmore established else if ourfinisacked fin_wait2 else fin_wait_1 *)
     Stats.incr_established stats;
@@ -996,7 +997,7 @@ let handle_conn t now id conn seg =
          even may emit syn+ack (with seq = iss) to move forward [but then, as
          well just an ack is possible with seq = iss + 1]
       *)
-      let* conn' = deliver_in_3c_3d t.stats conn seg in
+      let* conn' = deliver_in_3c_3d t.stats now conn seg in
       Ok (add conn', [])
     | _ ->
       let* () =
