@@ -47,8 +47,9 @@ let connect ~src ?src_port ~dst ~dst_port t now =
 
 (* shutdown_1 and shutdown_3 *)
 let shutdown t now id v =
-  Tracing.info (fun m -> m "%a [%a] shutdown %s" Connection.pp id Mtime.pp now
-                   (match v with `read -> "read" | `write -> "write" | `read_write -> "readwrite"));
+  Tracing.info (fun m -> m "%a [%a] %s" Connection.pp id Mtime.pp now
+                   ("shutdown_" ^
+                    (match v with `read -> "read" | `write -> "write" | `read_write -> "readwrite")));
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->
