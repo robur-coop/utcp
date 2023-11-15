@@ -599,9 +599,9 @@ let encode_and_checksum now ~src ~dst t =
   let data = encode t in
   let checksum = checksum ~src ~dst data in
   Cstruct.BE.set_uint16 data 16 checksum;
-  State.Tracing.info (fun m -> m "%a [%a] out %s"
+  State.Tracing.info (fun m -> m "%a [%a] out %u %s"
                          State.Connection.pp (src, t.src_port, dst, t.dst_port)
-                         Mtime.pp now
+                         Mtime.pp now (Cstruct.length t.payload)
                          (Base64.encode_string (Cstruct.to_string data)));
   data
 

@@ -99,8 +99,9 @@ let close t now id =
     Ok ({ t with connections = CM.add id conn' t.connections }, out)
 
 let send t now id buf =
-  Tracing.info (fun m -> m "%a [%a] send %s" Connection.pp id Mtime.pp now
-                    (Base64.encode_string (Cstruct.to_string buf)));
+  Tracing.info (fun m -> m "%a [%a] send %u %s" Connection.pp id Mtime.pp now
+                   (Cstruct.length buf)
+                   (Base64.encode_string (Cstruct.to_string buf)));
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->
