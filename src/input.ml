@@ -879,7 +879,18 @@ let di3_ststuff now conn rcvd_fin ourfinisacked =
   | Established, false -> conn'
   | Established, true -> state Close_wait
   | Close_wait, _ -> conn'
-  | Fin_wait_1, false when ourfinisacked -> state Fin_wait_2
+  | Fin_wait_1, false when ourfinisacked ->
+    let conn' = state Fin_wait_2 in
+    let control_block =
+      let tt_fin_wait_2 =
+        if conn'.cantrcvmore then
+          Some (Timers.timer now () Params.tcptv_maxidle)
+        else
+          None
+      in
+      { conn'.control_block with tt_fin_wait_2 }
+    in
+    { conn' with control_block }
   | Fin_wait_1, false -> conn'
   | Fin_wait_1, true when ourfinisacked -> enter_time_wait
   | Fin_wait_1, true -> state Closing
