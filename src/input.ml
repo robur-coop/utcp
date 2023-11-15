@@ -248,10 +248,10 @@ let di3_topstuff now conn =
   (* we're not doing PAWS (no timestamp), and already checked in_window *)
   let rcv_wnd = Subr.calculate_bsd_rcv_wnd conn in
   let cb = conn.control_block in
-  let t_idletime, tt_fin_wait_2 =
-    now, match cb.tt_fin_wait_2 with
-    | None -> None
-    | Some _ -> Some (Timers.timer now () Params.tcptv_maxidle)
+  let t_idletime = now
+  and tt_fin_wait_2 =
+    Option.map (fun _ -> Timers.timer now () Params.tcptv_maxidle)
+      cb.tt_fin_wait_2
   in
   { cb with t_idletime ; tt_fin_wait_2 ; rcv_wnd }
 
