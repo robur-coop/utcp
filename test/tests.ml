@@ -1,6 +1,7 @@
 (* (c) 2019 Hannes Mehnert, all rights reserved *)
 
 let tests = [
+  "Checksum", Checksum.tests ;
   "State machine", State_machine.tests ;
   "Reassembly", Reassembly.tests ;
 ]

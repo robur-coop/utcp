@@ -67,6 +67,10 @@ module Segment : sig
     (t * flow, [ `Msg of string ]) result
 
   val encode_and_checksum : Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t -> t -> Cstruct.t
+
+  val checksum : src:Ipaddr.t -> dst:Ipaddr.t -> Cstruct.t -> int
+
+  val encode : t -> Cstruct.t
 end
 
 type output = Ipaddr.t * Ipaddr.t * Segment.t
