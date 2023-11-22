@@ -25,32 +25,36 @@ let pp_option ppf = function
   | WindowScale f -> Fmt.pf ppf "window scale %d" f
   | Unknown (typ, v) -> Fmt.pf ppf "typ %X value %a" typ Cstruct.hexdump_pp v
 
-let encode_option = function
+let encode_option buf off = function
   | MaximumSegmentSize mss ->
-    let buf = Cstruct.create 4 in
-    Cstruct.set_uint8 buf 0 2;
-    Cstruct.set_uint8 buf 1 4;
-    Cstruct.BE.set_uint16 buf 2 mss;
-    buf
+    Cstruct.set_uint8 buf off 2;
+    Cstruct.set_uint8 buf (off + 1) 4;
+    Cstruct.BE.set_uint16 buf (off + 2) mss;
+    off + 4
   | WindowScale f ->
-    let buf = Cstruct.create 3 in
-    Cstruct.set_uint8 buf 0 3;
-    Cstruct.set_uint8 buf 1 3;
-    Cstruct.set_uint8 buf 2 f;
-    buf
+    Cstruct.set_uint8 buf off 3;
+    Cstruct.set_uint8 buf (off + 1) 3;
+    Cstruct.set_uint8 buf (off + 2) f;
+    off + 3
   | Unknown (typ, data) ->
-    let buf = Cstruct.create 2 in
-    Cstruct.set_uint8 buf 0 typ;
-    Cstruct.set_uint8 buf 1 (Cstruct.length data);
-    Cstruct.append buf data
+    let len = Cstruct.length data in
+    Cstruct.set_uint8 buf off typ;
+    Cstruct.set_uint8 buf (off + 1) len;
+    Cstruct.blit data 0 buf (off + 2) len;
+    off + len + 2
 
-let encode_options opts =
-  let opts = Cstruct.concat (List.map encode_option opts) in
-  let mod4len = Cstruct.length opts mod 4 in
-  if mod4len > 0 then
-    Cstruct.append opts (Cstruct.create (4 - mod4len))
-  else
-    opts
+let length_options opts =
+  let needed =
+    List.fold_left (fun l -> function
+        | MaximumSegmentSize _ -> 4 + l
+        | WindowScale _ -> 3 + l
+        | Unknown (_, data) -> Cstruct.length data + 2 + l)
+      0 opts
+  in
+  ((needed + 3) lsr 2) lsl 2
+
+let encode_options buf off opts =
+  List.fold_left (encode_option buf) off opts
 
 let decode_option data =
   match Cstruct.get_uint8 data 0 with
@@ -584,16 +588,18 @@ let checksum ~src ~dst buf =
   (lnot !sum) land 0xFFFF
 
 let encode t =
-  let hdr = Cstruct.create header_size in
-  let options = encode_options t.options in
-  Cstruct.BE.set_uint16 hdr 0 t.src_port;
-  Cstruct.BE.set_uint16 hdr 2 t.dst_port;
-  Cstruct.BE.set_uint32 hdr 4 (Sequence.to_int32 t.seq);
-  Cstruct.BE.set_uint32 hdr 8 (match t.ack with None -> 0l | Some a -> Sequence.to_int32 a);
-  Cstruct.set_uint8 hdr 12 ((header_size + Cstruct.length options) lsl 2); (* upper 4 bit, lower 4 reserved *)
-  Cstruct.set_uint8 hdr 13 (Flag.encode ((match t.ack with None -> false | Some _ -> true), t.flag, t.push));
-  Cstruct.BE.set_uint16 hdr 14 t.window;
-  Cstruct.concat [ hdr ; options ; t.payload ]
+  let opt_len = length_options t.options in
+  let buf = Cstruct.create (header_size + Cstruct.length t.payload + opt_len) in
+  Cstruct.BE.set_uint16 buf 0 t.src_port;
+  Cstruct.BE.set_uint16 buf 2 t.dst_port;
+  Cstruct.BE.set_uint32 buf 4 (Sequence.to_int32 t.seq);
+  Cstruct.BE.set_uint32 buf 8 (match t.ack with None -> 0l | Some a -> Sequence.to_int32 a);
+  Cstruct.set_uint8 buf 12 ((header_size + opt_len) lsl 2); (* upper 4 bit, lower 4 reserved *)
+  Cstruct.set_uint8 buf 13 (Flag.encode ((match t.ack with None -> false | Some _ -> true), t.flag, t.push));
+  Cstruct.BE.set_uint16 buf 14 t.window;
+  let _ = encode_options buf 20 t.options in
+  Cstruct.blit t.payload 0 buf (20 + opt_len) (Cstruct.length t.payload);
+  buf
 
 let encode_and_checksum now ~src ~dst t =
   let data = encode t in
