@@ -42,3 +42,5 @@ module State = State
 module Input = Input
 
 module User = User
+
+module Checksum = Checksum

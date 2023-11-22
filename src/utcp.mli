@@ -217,4 +217,6 @@ module User : sig
   val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
     State.t -> Mtime.t -> (State.t * flow * output)
 end
+
+module Checksum = Checksum
 (**/**)

@@ -1,0 +1,8 @@
+(executable
+ (name fuzz)
+ (libraries crowbar utcp))
+
+(rule
+ (alias runtest)
+ (enabled_if (= %{arch_sixtyfour} true))
+ (action (run %{dep:fuzz.exe})))
