@@ -37,6 +37,13 @@ let dropwithreset (src, _, dst, _) seg =
   Option.map (fun x -> src, dst, x) (Segment.dropwithreset seg)
 
 let deliver_in_1 stats rng now id seg =
+  (* there's a difference from the model, namely that we don't care about
+     sockets in TIME_WAIT - this is handled in handle_conn explicitly (allowing
+     port reusage with strictly higher sequence numbers - RFC1122 4.2.2.13).
+
+     this rule carries less complexity in this way, and is called via
+     handle_noconn (if there's no flow in the connection table),
+     or via handle_conn if in time_wait, and a syn, and the seq > rcv_nxt. *)
   let conn =
     let advmss = Subr.tcp_mssopt id in
     let rcvbufsize, sndbufsize, t_maxseg', snd_cwnd' =
@@ -220,7 +227,7 @@ let deliver_in_3c_3d stats now conn seg =
     let control_block = {
       cb with snd_una = ack ;
               snd_wnd = seg.Segment.window lsl cb.snd_scale ;
-              snd_wl1 = seg.Segment.seq ; (* need to check with model, from RFC 1122 4.2.2.20 *)
+              snd_wl1 = seg.Segment.seq ; (* need to check with model, from RFC1122 4.2.2.20 *)
               snd_wl2 = ack ;
               t_idletime = now ;
     } in
@@ -518,8 +525,8 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
     (*: Received a duplicate acknowledgement: it is an old acknowledgement
        (strictly less than [[snd_una]]) and it meets the duplicate
        acknowledgement conditions above.  Do Fast Retransmit/Fast Recovery
-       Congestion Control (RFC 2581 Ch3.2 Pg6) and NewReno-style Fast Recovery
-       (RFC 2582, Ch3 Pg3), updating the control block variables and creating
+       Congestion Control (RFC2581 Ch3.2 Pg6) and NewReno-style Fast Recovery
+       (RFC2582, Ch3 Pg3), updating the control block variables and creating
        segments for transmission as appropriate. :*)
     let t_dupacks' = cb.t_dupacks + 1 in
     if t_dupacks' < 3  then
@@ -956,8 +963,6 @@ let handle_noconn t now id seg =
   with
   | true, true ->
     (* there can't be anything in TIME_WAIT, otherwise we wouldn't end up here *)
-    (* TODO check RFC 1122 Section 4.2.2.13 whether this actually happens (socket reusage) *)
-    (* TODO resource management: limit number of outstanding connection attempts *)
     let conn, reply = deliver_in_1 t.stats t.rng now id seg in
     { t with connections = CM.add id conn t.connections }, [ reply ]
   | true, false ->
@@ -1010,6 +1015,39 @@ let handle_conn t now id conn seg =
       *)
       let* conn' = deliver_in_3c_3d t.stats now conn seg in
       Ok (add conn', [])
+    | Time_wait when seg.Segment.flag = Some `Syn &&
+                     seg.Segment.ack = None &&
+                     IS.mem seg.Segment.dst_port t.listeners &&
+                     Sequence.less conn.control_block.rcv_nxt seg.Segment.seq ->
+      (* RFC1122 4.2.2.13:
+            When a connection is closed actively, it MUST linger in
+            TIME-WAIT state for a time 2xMSL (Maximum Segment Lifetime).
+            However, it MAY accept a new SYN from the remote TCP to
+            reopen the connection directly from TIME-WAIT state, if it:
+
+            (1)  assigns its initial sequence number for the new
+                 connection to be larger than the largest sequence
+                 number it used on the previous connection incarnation,
+                 and
+
+            (2)  returns to TIME-WAIT state if the SYN turns out to be
+                 an old duplicate.
+      *)
+      (* model - hostLTSScript:14701 (deliver_in_1):
+         If another socket in the [[TIME_WAIT]] state matches the address quad of the SYN segment
+         then only proceed with the new incoming connection attempt if the sequence number of the
+         segment [[seq]] is strictly greater than the next expected sequence number on the
+         [[TIME_WAIT]] socket, [[rcv_nxt]]. This prevents old or duplicate SYN segments from previous
+         incarnations of the connection from inadvertently creating new connections.
+
+         Note: this models the behaviour in RFC1122 Section 4.2.2.13 which states that a new [[SYN]]
+         with a sequence number larger than the maximum seen in the last incarnation may reopen the
+         connection, \ie, reuse the socket for the new connection changing out of the [[TIME_WAIT]]
+         state. This is modelled by closing the existing [[TIME_WAIT]] socket and creating the new
+         socket from scratch.
+      *)
+      let conn, reply = deliver_in_1 t.stats t.rng now id seg in
+      Ok ({ t with connections = CM.add id conn t.connections }, [ reply ])
     | _ ->
       let* () =
         guard (in_window conn.control_block seg)
@@ -1017,7 +1055,7 @@ let handle_conn t now id conn seg =
                     Sequence.pp seg.Segment.seq (Cstruct.length seg.payload)
                     Sequence.pp conn.control_block.rcv_nxt conn.control_block.rcv_wnd)
           ) in
-      (* RFC 5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
+      (* RFC5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
       match seg.Segment.flag, seg.Segment.ack with
       | Some `Rst, _ ->
         let* seg' = deliver_in_7 id conn seg in
