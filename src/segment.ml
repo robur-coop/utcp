@@ -587,9 +587,8 @@ let checksum ~src ~dst buf =
   done ;
   (lnot !sum) land 0xFFFF
 
-let encode t =
+let encode_into buf t =
   let opt_len = length_options t.options in
-  let buf = Cstruct.create (header_size + Cstruct.length t.payload + opt_len) in
   Cstruct.BE.set_uint16 buf 0 t.src_port;
   Cstruct.BE.set_uint16 buf 2 t.dst_port;
   Cstruct.BE.set_uint32 buf 4 (Sequence.to_int32 t.seq);
@@ -598,18 +597,34 @@ let encode t =
   Cstruct.set_uint8 buf 13 (Flag.encode ((match t.ack with None -> false | Some _ -> true), t.flag, t.push));
   Cstruct.BE.set_uint16 buf 14 t.window;
   let _ = encode_options buf 20 t.options in
-  Cstruct.blit t.payload 0 buf (20 + opt_len) (Cstruct.length t.payload);
+  Cstruct.blit t.payload 0 buf (20 + opt_len) (Cstruct.length t.payload)
+
+let length t =
+  header_size + Cstruct.length t.payload + length_options t.options
+
+let encode t =
+  let buf = Cstruct.create (length t) in
+  encode_into buf t;
   buf
 
-let encode_and_checksum now ~src ~dst t =
-  let data = encode t in
-  let checksum = checksum ~src ~dst data in
-  Cstruct.BE.set_uint16 data 16 checksum;
+let encode_and_checksum_into now buf ~src ~dst t =
+  encode_into buf t;
+  let checksum = checksum ~src ~dst buf in
+  Cstruct.BE.set_uint16 buf 16 checksum;
   State.Tracing.info (fun m -> m "%a [%a] out %u %s"
                          State.Connection.pp (src, t.src_port, dst, t.dst_port)
                          Mtime.pp now (Cstruct.length t.payload)
-                         (Base64.encode_string (Cstruct.to_string data)));
-  data
+                         (Base64.encode_string (Cstruct.to_string buf)))
+
+let encode_and_checksum now ~src ~dst t =
+  let buf = encode t in
+  let checksum = checksum ~src ~dst buf in
+  Cstruct.BE.set_uint16 buf 16 checksum;
+  State.Tracing.info (fun m -> m "%a [%a] out %u %s"
+                         State.Connection.pp (src, t.src_port, dst, t.dst_port)
+                         Mtime.pp now (Cstruct.length t.payload)
+                         (Base64.encode_string (Cstruct.to_string buf)));
+  buf
 
 let decode data =
   let* () = guard (Cstruct.length data >= header_size) (`Msg "too small") in
