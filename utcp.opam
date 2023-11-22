@@ -7,7 +7,7 @@ bug-reports: "https://github.com/robur-coop/utcp/issues"
 
 depends: [
   "ocaml" {>= "4.08.0"}
-  "dune" {>= "2.0.0"}
+  "dune" {>= "2.7.0"}
   "cstruct" {>= "6.0.1"}
   "duration" {>= "0.2.0"}
   "fmt" {>= "0.8.7"}
