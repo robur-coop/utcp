@@ -622,7 +622,7 @@ let decode data =
   let* ackf, flag, push = Flag.decode (Cstruct.get_uint8 data 13) in
   let window = Cstruct.BE.get_uint16 data 14
   and checksum = Cstruct.BE.get_uint16 data 16
-  and _up = Cstruct.BE.get_uint16 data 18
+  (* and _up = Cstruct.BE.get_uint16 data 18 *)
   in
   let* () =
     guard (Cstruct.length data >= data_off) (`Msg "data_offset too big")
