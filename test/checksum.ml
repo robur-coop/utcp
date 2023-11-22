@@ -59,7 +59,7 @@ let data5 () =
 let real1 () =
   let data = Cstruct.of_hex {|
 00 50 d0 c5 90 3b 6f b9 31 8e 90 da 70 12 ff ff
-83 98 00 00 02 04 05 b4 03 03 06 00|}
+00 00 00 00 02 04 05 b4 03 03 06 00|}
   in
   let src = Ipaddr.(V4 (V4.of_string_exn "10.0.42.2"))
   and dst = Ipaddr.(V4 (V4.of_string_exn "10.0.42.1"))

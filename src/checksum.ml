@@ -23,10 +23,10 @@ external unsafe_get_uint8 : bigstring -> int -> int = "%caml_ba_ref_1"
 external unsafe_get_uint16 : bigstring -> int -> int = "%caml_bigstring_get16"
 external swap16 : int -> int = "%bswap16"
 
-let unsafe_digest_16 ?(off = 0) ~len:top buf =
+let unsafe_digest_16 ~sum ~off ~len:top buf =
   let buf16 = to_int16 ~off ~len:top buf in
   let len = ref top in
-  let sum = ref 0 in
+  let sum = ref sum in
   let i = ref 0 in
   while !len >= 2 do
     sum := !sum + buf16.{!i};
@@ -39,10 +39,10 @@ let unsafe_digest_16 ?(off = 0) ~len:top buf =
   if !sum > 0xffff then incr sum;
   lnot !sum land 0xffff
 
-let unsafe_digest_32 ?(off = 0) ~len:top buf =
+let unsafe_digest_32 ~sum ~off ~len:top buf =
   let buf32 = to_int32 ~off ~len:top buf in
   let len = ref top in
-  let sum = ref 0 in
+  let sum = ref sum in
   let i = ref 0 in
   while !len >= 4 do
     let[@warning "-8"] (Some v) = Int32.unsigned_to_int buf32.{!i} in
@@ -59,13 +59,18 @@ let unsafe_digest_32 ?(off = 0) ~len:top buf =
   done;
   lnot !sum land 0xffff
 
-let digest ?(off = 0) ?len buf =
+let digest ?sum ?(off = 0) ?len buf =
   let len = match len with Some len -> len | None -> length buf - off in
+  let sum =
+    let rev_sum s = lnot (if Sys.big_endian then s else swap16 s) land 0xffff in
+    Option.value ~default:0 (Option.map rev_sum sum)
+  in
   let csum =
     match Sys.word_size with
-    | 32 -> unsafe_digest_16 ~off ~len buf
-    | _ -> unsafe_digest_32 ~off ~len buf
+    | 32 -> unsafe_digest_16 ~sum ~off ~len buf
+    | _ -> unsafe_digest_32 ~sum ~off ~len buf
   in
   if Sys.big_endian then csum else swap16 csum
 
-let digest_cstruct { Cstruct.buffer; off; len } = digest ~off ~len buffer
+let digest_cstruct ?sum { Cstruct.buffer; off; len } =
+  digest ?sum ~off ~len buffer

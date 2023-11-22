@@ -550,31 +550,28 @@ let make_ack cb ~fin (src, src_port, dst, dst_port) =
 let checksum ~src ~dst buf =
   let plen = Cstruct.length buf in
   (* construct pseudoheader *)
-  let mybuf, off =
+  let header =
     let protocol = 0x06 in
     match src, dst with
     | Ipaddr.V4 src, Ipaddr.V4 dst ->
-      let mybuf = Cstruct.create (12 + plen) in
+      let mybuf = Cstruct.create 12 in
       Ipaddr_cstruct.V4.write_cstruct_exn src mybuf;
       Ipaddr_cstruct.V4.write_cstruct_exn dst (Cstruct.shift mybuf 4);
       Cstruct.set_uint8 mybuf 9 protocol;
       Cstruct.BE.set_uint16 mybuf 10 plen;
-      mybuf, 12
+      mybuf
     | Ipaddr.V6 src, Ipaddr.V6 dst ->
-      let mybuf = Cstruct.create (40 + plen) in
+      let mybuf = Cstruct.create 40 in
       Ipaddr_cstruct.V6.write_cstruct_exn src mybuf;
       Ipaddr_cstruct.V6.write_cstruct_exn dst (Cstruct.shift mybuf 16);
       Cstruct.BE.set_uint16 mybuf 34 plen;
       Cstruct.set_uint8 mybuf 39 protocol;
-      mybuf, 40
+      mybuf
     | _ -> invalid_arg "mixing IPv4 and IPv6 addresses not supported"
   in
-  (* blit tcp packet *)
-  Cstruct.blit buf 0 mybuf off plen;
-  (* ensure checksum to be 0 *)
-  Cstruct.BE.set_uint16 mybuf (off + 16) 0;
+  let sum = Checksum.digest_cstruct header in
   (* compute checksum *)
-  Checksum.digest_cstruct mybuf
+  Checksum.digest_cstruct ~sum buf
 
 let encode_into buf t =
   let opt_len = length_options t.options in
@@ -640,6 +637,7 @@ let decode data =
 
 let decode_and_validate ~src ~dst data =
   let* t, pkt_csum = decode data in
+  Cstruct.BE.set_uint16 data 16 0; (* set checksum to 0 *)
   let computed = checksum ~src ~dst data in
   (* these are already checks done in deliver_in_4, etc. *)
   let pkt_csum = if pkt_csum = 0xffff then 0x0 else pkt_csum in
