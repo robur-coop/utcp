@@ -551,22 +551,21 @@ let checksum ~src ~dst buf =
   let plen = Cstruct.length buf in
   (* construct pseudoheader *)
   let mybuf, off =
+    let protocol = 0x06 in
     match src, dst with
     | Ipaddr.V4 src, Ipaddr.V4 dst ->
       let mybuf = Cstruct.create (12 + plen) in
       Ipaddr_cstruct.V4.write_cstruct_exn src mybuf;
       Ipaddr_cstruct.V4.write_cstruct_exn dst (Cstruct.shift mybuf 4);
-      (* protocol is 0x0006 *)
-      Cstruct.BE.set_uint16 mybuf 8 0x0006;
+      Cstruct.set_uint8 mybuf 9 protocol;
       Cstruct.BE.set_uint16 mybuf 10 plen;
       mybuf, 12
     | Ipaddr.V6 src, Ipaddr.V6 dst ->
       let mybuf = Cstruct.create (40 + plen) in
       Ipaddr_cstruct.V6.write_cstruct_exn src mybuf;
       Ipaddr_cstruct.V6.write_cstruct_exn dst (Cstruct.shift mybuf 16);
-      (* protocol is 0x0006 *)
-      Cstruct.BE.set_uint32 mybuf 32 (Int32.of_int plen);
-      Cstruct.set_uint8 mybuf 39 0x06;
+      Cstruct.BE.set_uint16 mybuf 34 plen;
+      Cstruct.set_uint8 mybuf 39 protocol;
       mybuf, 40
     | _ -> invalid_arg "mixing IPv4 and IPv6 addresses not supported"
   in
