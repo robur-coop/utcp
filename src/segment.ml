@@ -549,13 +549,11 @@ let make_ack cb ~fin (src, src_port, dst, dst_port) =
 
 let checksum ~src ~dst buf =
   let plen = Cstruct.length buf in
-  (* potentially pad *)
-  let pad = plen mod 2 in
   (* construct pseudoheader *)
   let mybuf, off =
     match src, dst with
     | Ipaddr.V4 src, Ipaddr.V4 dst ->
-      let mybuf = Cstruct.create (12 + plen + pad) in
+      let mybuf = Cstruct.create (12 + plen) in
       Ipaddr_cstruct.V4.write_cstruct_exn src mybuf;
       Ipaddr_cstruct.V4.write_cstruct_exn dst (Cstruct.shift mybuf 4);
       (* protocol is 0x0006 *)
@@ -563,7 +561,7 @@ let checksum ~src ~dst buf =
       Cstruct.BE.set_uint16 mybuf 10 plen;
       mybuf, 12
     | Ipaddr.V6 src, Ipaddr.V6 dst ->
-      let mybuf = Cstruct.create (40 + plen + pad) in
+      let mybuf = Cstruct.create (40 + plen) in
       Ipaddr_cstruct.V6.write_cstruct_exn src mybuf;
       Ipaddr_cstruct.V6.write_cstruct_exn dst (Cstruct.shift mybuf 16);
       (* protocol is 0x0006 *)
