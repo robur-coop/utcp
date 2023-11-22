@@ -576,16 +576,8 @@ let checksum ~src ~dst buf =
   Cstruct.blit buf 0 mybuf off plen;
   (* ensure checksum to be 0 *)
   Cstruct.BE.set_uint16 mybuf (off + 16) 0;
-  (* compute 2s complement 16 bit checksum *)
-  let sum = ref 0 in
   (* compute checksum *)
-  for i = 0 to pred (Cstruct.length mybuf / 2) do
-    let v = Cstruct.BE.get_uint16 mybuf (i * 2) in
-    let sum' = !sum + v in
-    let sum'' = if sum' > 0xFFFF then succ sum' else sum' in
-    sum := sum'' land 0xFFFF
-  done ;
-  (lnot !sum) land 0xFFFF
+  Checksum.digest_cstruct mybuf
 
 let encode_into buf t =
   let opt_len = length_options t.options in
