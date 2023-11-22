@@ -35,9 +35,12 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
     dst, dst_port
 
   let output_ip t (src, dst, seg) =
-    let data = Utcp.Segment.encode_and_checksum (now ()) ~src ~dst seg in
+    let size = Utcp.Segment.length seg in
     Log.debug (fun m -> m "output to %a: %a" Ipaddr.pp dst Utcp.Segment.pp seg);
-    Ip.write t.ip ~src dst `TCP (fun _ -> 0) [data]
+    Ip.write t.ip ~src dst `TCP ~size
+      (fun buf ->
+         Utcp.Segment.encode_and_checksum_into (now ()) buf ~src ~dst seg;
+         size) []
 
   let output_ign t segs =
     List.fold_left (fun r seg ->
