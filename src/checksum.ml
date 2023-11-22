@@ -39,7 +39,7 @@ let unsafe_digest_16 ?(off = 0) ~len:top buf =
   done;
   if !len = 1 then sum := !sum + unsafe_get_uint8 buf (off + top - 1);
   if !sum > 0xffff then incr sum;
-  swap16 (lnot !sum land 0xffff)
+  lnot !sum land 0xffff
 
 let unsafe_digest_32 ?(off = 0) ~len:top buf =
   let buf32 = to_int32 buf in
@@ -59,12 +59,15 @@ let unsafe_digest_32 ?(off = 0) ~len:top buf =
   while !sum lsr 16 <> 0 do
     sum := (!sum land 0xffff) + (!sum lsr 16)
   done;
-  swap16 (lnot !sum land 0xffff)
+  lnot !sum land 0xffff
 
 let digest ?(off = 0) ?len buf =
   let len = match len with Some len -> len | None -> length buf - off in
-  match Sys.word_size with
-  | 32 -> unsafe_digest_16 ~off ~len buf
-  | _ -> unsafe_digest_32 ~off ~len buf
+  let csum =
+    match Sys.word_size with
+    | 32 -> unsafe_digest_16 ~off ~len buf
+    | _ -> unsafe_digest_32 ~off ~len buf
+  in
+  if Sys.big_endian then csum else swap16 csum
 
 let digest_cstruct { Cstruct.buffer; off; len } = digest ~off ~len buffer
