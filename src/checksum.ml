@@ -3,22 +3,20 @@ type bigstring =
 
 let length x = Bigarray.Array1.dim x [@@inline]
 
-let to_int32 :
+let to_int32 ~off ~len :
     bigstring ->
     (int32, Bigarray.int32_elt, Bigarray.c_layout) Bigarray.Array1.t =
  fun ba ->
-  let len = length ba in
   let pad = len mod 4 in
-  let buf = Bigarray.Array1.sub ba 0 (len - pad) in
+  let buf = Bigarray.Array1.sub ba off (len - pad) in
   Obj.magic buf
 
-let to_int16 :
+let to_int16 ~off ~len :
     bigstring ->
     (int, Bigarray.int16_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t =
  fun ba ->
-  let len = length ba in
   let pad = len mod 2 in
-  let buf = Bigarray.Array1.sub ba 0 (len - pad) in
+  let buf = Bigarray.Array1.sub ba off (len - pad) in
   Obj.magic buf
 
 external unsafe_get_uint8 : bigstring -> int -> int = "%caml_ba_ref_1"
@@ -26,12 +24,12 @@ external unsafe_get_uint16 : bigstring -> int -> int = "%caml_bigstring_get16"
 external swap16 : int -> int = "%bswap16"
 
 let unsafe_digest_16 ?(off = 0) ~len:top buf =
-  let buf16 = to_int16 buf in
+  let buf16 = to_int16 ~off ~len:top buf in
   let len = ref top in
   let sum = ref 0 in
   let i = ref 0 in
   while !len >= 2 do
-    sum := !sum + buf16.{off + !i};
+    sum := !sum + buf16.{!i};
     if !sum > 0xffff then incr sum;
     sum := !sum land 0xffff;
     incr i;
@@ -42,12 +40,12 @@ let unsafe_digest_16 ?(off = 0) ~len:top buf =
   lnot !sum land 0xffff
 
 let unsafe_digest_32 ?(off = 0) ~len:top buf =
-  let buf32 = to_int32 buf in
+  let buf32 = to_int32 ~off ~len:top buf in
   let len = ref top in
   let sum = ref 0 in
   let i = ref 0 in
   while !len >= 4 do
-    let[@warning "-8"] (Some v) = Int32.unsigned_to_int buf32.{off + !i} in
+    let[@warning "-8"] (Some v) = Int32.unsigned_to_int buf32.{!i} in
     sum := !sum + v;
     incr i;
     len := !len - 4
