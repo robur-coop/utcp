@@ -58,7 +58,7 @@ numbers are refering to git commit 2374ad26b2f4f32f62aaea62ac641c3a91b2efbc
 rather private).
 
 We'll likely need to define a new ARCH for this implementation in the model and
-then hope it's good enough ;) (or only run tests which behave similat to
+then hope it's good enough ;) (or only run tests which behave similar to
 FreeBSD).
 
 - Appropriate Byte Counting (this is what I intend to implement)
