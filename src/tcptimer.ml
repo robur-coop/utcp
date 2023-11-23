@@ -10,7 +10,7 @@ let timer_tt_rexmtsyn now shift id conn =
   match conn.tcp_state with
   | Syn_sent (* simultaneous open (deliver_in_2b) may put us into Syn_received *) ->
     if succ shift > Params.tcp_maxrxtshift then begin
-      Log.info (fun m -> m "%a syn retransmission reached maxrxtshift, dropping" Connection.pp id);
+      Log.debug (fun m -> m "%a syn retransmission reached maxrxtshift, dropping" Connection.pp id);
       let rst = Segment.drop_and_close id conn in
       Error `Retransmission_exceeded, rst
     end else
@@ -35,7 +35,7 @@ let timer_tt_rexmtsyn now shift id conn =
       }
       in
       let conn' = { conn with control_block } in
-      Log.info (fun m -> m "%a retransmitting syn %a" Connection.pp id pp_conn_state conn');
+      Log.debug (fun m -> m "%a retransmitting syn %a" Connection.pp id pp_conn_state conn');
       Ok conn', Some (Segment.make_syn control_block id)
   | _ ->
     Log.warn (fun m -> m "%a rexmtsyn timer, not in syn_sent state %a"
@@ -52,7 +52,7 @@ let timer_tt_rexmt now shift id conn =
   | _ ->
     let maxshift = match tcp_state with Syn_received -> Params.tcp_synackmaxrxtshift | _ -> Params.tcp_maxrxtshift in
     if succ shift > maxshift then begin
-      Log.info (fun m -> m "%a retransmission reached maxrxtshift, dropping" Connection.pp id);
+      Log.debug (fun m -> m "%a retransmission reached maxrxtshift, dropping" Connection.pp id);
       let rst = Segment.drop_and_close id conn in
       Error `Retransmission_exceeded, rst
     end else

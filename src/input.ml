@@ -1086,7 +1086,7 @@ let handle_conn t now id conn seg =
     drop (), Option.to_list (dropwithreset id seg)
 
 let handle_segment t now id seg =
-  Log.info (fun m -> m "%a TCP %a" Connection.pp id Segment.pp seg) ;
+  Log.debug (fun m -> m "%a TCP %a" Connection.pp id Segment.pp seg) ;
   let t', out = match CM.find_opt id t.connections with
     | None -> handle_noconn t now id seg
     | Some conn -> handle_conn t now id conn seg
