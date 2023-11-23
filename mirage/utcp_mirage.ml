@@ -152,7 +152,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       | Some c -> Lwt_condition.signal c r
       | None -> match f with
         | Some f -> f ()
-        | None -> Log.warn (fun m -> m "%a not found in waiting (%s)" Utcp.pp_flow id ctx)
+        | None -> Log.debug (fun m -> m "%a not found in waiting (%s)" Utcp.pp_flow id ctx)
     in
     Option.fold ~none:()
       ~some:(function
@@ -162,8 +162,8 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
               let (_, port), _ = Utcp.peers id in
               match Port_map.find_opt port t.listeners with
               | None ->
-                Log.warn (fun m -> m "%a not found in waiting or listeners (%s)"
-                             Utcp.pp_flow id ctx)
+                Log.debug (fun m -> m "%a not found in waiting or listeners (%s)"
+                              Utcp.pp_flow id ctx)
               | Some cb ->
                 (* NOTE we start an asynchronous task with the callback *)
                 Lwt.async (fun () -> cb (t, id))
@@ -188,8 +188,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
           t.tcp <- tcp;
           List.iter (fun (id, err) ->
               match Utcp.FM.find_opt id t.waiting with
-              | None -> Log.warn (fun m -> m "%a not found in waiting"
-                                     Utcp.pp_flow id)
+              | None -> Log.debug (fun m -> m "%a not found in waiting" Utcp.pp_flow id)
               | Some c ->
                 let err = match err with
                   | `Retransmission_exceeded -> `Msg "retransmission exceeded"

@@ -130,29 +130,29 @@ let slow_timer t now =
         let r, out_opt =
           match expired cb.tt_rexmt, expired cb.tt_2msl, expired cb.tt_conn_est, expired cb.tt_fin_wait_2 with
           | Some (RexmtSyn, shift), _, _, _ ->
-            Log.warn (fun m -> m "%a syn retransmit expired %a" Connection.pp id pp_conn_state conn);
+            Log.debug (fun m -> m "%a syn retransmit expired %a" Connection.pp id pp_conn_state conn);
             if not (conn.tcp_state = Syn_sent) then Log.err (fun m -> m "not in syn_sent");
             timer_tt_rexmtsyn now shift id conn
           | Some (Rexmt, shift), _, _, _ ->
-            Log.warn (fun m -> m "%a retransmit expired %a" Connection.pp id pp_conn_state conn);
+            Log.debug (fun m -> m "%a retransmit expired %a" Connection.pp id pp_conn_state conn);
             timer_tt_rexmt now shift id conn
           | Some (Persist, shift), _, _, _ ->
-            Log.warn (fun m -> m "%a persist timer expired %a" Connection.pp id pp_conn_state conn);
+            Log.debug (fun m -> m "%a persist timer expired %a" Connection.pp id pp_conn_state conn);
             (* it's easy: restart and tcp_output_really! *)
             timer_tt_persist now shift id conn
           | None, Some (), _, _ ->
             (* timer_tt_2msl_1 *)
-            Log.warn (fun m -> m "%a 2msl timer expired %a" Connection.pp id pp_conn_state conn);
+            Log.debug (fun m -> m "%a 2msl timer expired %a" Connection.pp id pp_conn_state conn);
             if not (conn.tcp_state = Time_wait) then Log.err (fun m -> m "not in time_wait!!!!");
             Error `Timer_2msl, None
           | None, None, Some (), _ ->
             (* timer_tt_conn_est_1 *)
-            Log.warn (fun m -> m "%a connection established timer expired %a" Connection.pp id pp_conn_state conn);
+            Log.debug (fun m -> m "%a connection established timer expired %a" Connection.pp id pp_conn_state conn);
             if not (conn.tcp_state = Syn_sent) then Log.err (fun m -> m "not in syn_sent");
             Error `Timer_connection_established, Segment.drop_and_close id conn
           | None, None, None, Some () ->
             (* timer_tt_fin_wait_2_1 *)
-            Log.warn (fun m -> m "%a fin_wait_2 timer expired %a" Connection.pp id pp_conn_state conn);
+            Log.debug (fun m -> m "%a fin_wait_2 timer expired %a" Connection.pp id pp_conn_state conn);
             if not (conn.tcp_state = Fin_wait_2) then Log.err (fun m -> m "not in fin_wait_2");
             Error `Timer_fin_wait_2, None
           | None, None, None, None -> Ok conn, None
