@@ -427,6 +427,7 @@ type t = {
   stats : Stats.t ;
   id : string ;
   mutable ctr : int ;
+  metrics : (string -> Metrics.field list, conn_state CM.t * Stats.t -> Metrics.data) Metrics.src;
 }
 
 module States = Map.Make (struct
@@ -434,7 +435,7 @@ module States = Map.Make (struct
     let compare a b = compare a b
   end)
 
-let metrics =
+let metrics () =
   let tcp_states =
     [ Syn_sent ; Syn_received ; Established ; Close_wait ; Fin_wait_1 ;
       Closing ; Last_ack ; Fin_wait_2 ; Time_wait
@@ -442,15 +443,14 @@ let metrics =
   in
   let open Metrics in
   let doc = "uTCP metrics" in
-  let data t =
+  let data (connections, stats) =
     let states =
       CM.fold (fun _ conn ->
           States.update conn.tcp_state (fun v -> Some (succ (Option.value ~default:0 v))))
-        t.connections
+        connections
         States.empty
     in
     let total = States.fold (fun _ v acc -> v + acc) states 0 in
-    let stats = t.stats in
     Data.v
       (List.map (fun tcp_state ->
            let v = Option.value ~default:0 (States.find_opt tcp_state states) in
@@ -465,7 +465,7 @@ let metrics =
   Src.v ~doc ~tags:Tags.[ tag ] ~data "utcp"
 
 let add_metrics t =
-  Metrics.add metrics (fun x -> x t.id) (fun d -> d t)
+  Metrics.add t.metrics (fun x -> x t.id) (fun d -> d (t.connections, t.stats))
 
 let pp ppf t =
   Fmt.pf ppf "listener %a, connections: %a"
@@ -477,6 +477,7 @@ let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 
 let empty id rng =
+  let metrics = metrics () in
   {
     id ;
     rng ;
@@ -484,4 +485,5 @@ let empty id rng =
     connections = CM.empty ;
     stats = Stats.empty ;
     ctr = 0 ;
+    metrics ;
   }
