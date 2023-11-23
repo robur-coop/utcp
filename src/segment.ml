@@ -365,8 +365,9 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
   let data_to_send, more_data_could_be_sent =
     let data' =
       Cstruct.shiftv (List.rev conn.State.sndq)
-        (min (Cstruct.lenv conn.State.sndq)
-           (Sequence.window cb.State.snd_nxt cb.State.snd_una))
+        (max 0
+           (min (Cstruct.lenv conn.State.sndq)
+              (Sequence.window cb.State.snd_nxt cb.State.snd_una)))
         (* taking the minimum to avoid exceeding the sndq *)
     in
     let data' = Cstruct.concat data' in
