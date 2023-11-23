@@ -970,8 +970,8 @@ let handle_noconn t now id seg =
     let out = Option.map (fun _ack -> dropwithreset id seg) seg.Segment.ack in
     t, Option.to_list (Option.join out)
   | false, syn ->
-    Log.warn (fun m -> m "%a dropping segment with reset (SYN %B) %a"
-                 Connection.pp id syn Segment.pp seg);
+    Log.debug (fun m -> m "%a dropping segment with reset (SYN %B) %a"
+                  Connection.pp id syn Segment.pp seg);
     (* deliver_in_5 / deliver_in_6 *)
     t, Option.to_list (dropwithreset id seg)
 
@@ -1078,11 +1078,11 @@ let handle_conn t now id conn seg =
   match r with
   | Ok (t, a) -> t, a
   | Error (`Drop msg) ->
-    Log.err (fun m -> m "%a dropping segment in %a failed condition %s"
+    Log.debug (fun m -> m "%a dropping segment in %a failed condition %s"
                 Connection.pp id pp_fsm conn.tcp_state msg);
     t, []
   | Error (`Reset msg) ->
-    Log.err (fun m -> m "%a reset in %a %s" Connection.pp id pp_fsm conn.tcp_state msg);
+    Log.debug (fun m -> m "%a reset in %a %s" Connection.pp id pp_fsm conn.tcp_state msg);
     drop (), Option.to_list (dropwithreset id seg)
 
 let handle_segment t now id seg =
@@ -1096,7 +1096,7 @@ let handle_segment t now id seg =
 let handle_buf t now ~src ~dst data =
   match Segment.decode_and_validate ~src ~dst data with
   | Error (`Msg msg) ->
-    Log.err (fun m -> m "dropping invalid segment %s" msg);
+    Log.debug (fun m -> m "dropping invalid segment %s" msg);
     t, None, []
   | Ok (seg, id) ->
     Tracing.debug (fun m -> m "%a [%a] handle_buf %u %s"
@@ -1127,10 +1127,10 @@ let handle_buf t now ~src ~dst data =
     List.iter (fun (src', dst', _) ->
         let src, _, dst, _ = id in
         if Ipaddr.compare src' src <> 0 then
-          Log.err (fun m -> m "bad IP reply src' %a vs src %a"
-                      Ipaddr.pp src' Ipaddr.pp src);
+          Log.debug (fun m -> m "bad IP reply src' %a vs src %a"
+                        Ipaddr.pp src' Ipaddr.pp src);
         if Ipaddr.compare dst' dst <> 0 then
-          Log.err (fun m -> m "bad IP reply dst' %a vs dst %a"
-                      Ipaddr.pp dst' Ipaddr.pp dst))
+          Log.debug (fun m -> m "bad IP reply dst' %a vs dst %a"
+                        Ipaddr.pp dst' Ipaddr.pp dst))
       outs ;
     t', ev, outs
