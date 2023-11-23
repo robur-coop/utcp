@@ -403,7 +403,7 @@ module Stats = struct
     mutable total_active_connections : int ;
   }
 
-  let empty = {
+  let empty () = {
     total_established = 0 ;
     total_passive_connections = 0 ;
     total_active_connections = 0 ;
@@ -483,7 +483,7 @@ let empty id rng =
     rng ;
     listeners = IS.empty ;
     connections = CM.empty ;
-    stats = Stats.empty ;
+    stats = Stats.empty () ;
     ctr = 0 ;
     metrics ;
   }
