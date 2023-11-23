@@ -23,3 +23,11 @@
  (libraries utcp cstruct pcap-format ipaddr mtime logs ipaddr-cstruct cmdliner
    logs.fmt fmt.cli logs.cli fmt.tty)
  (optional))
+
+(executable
+ (name trace_replay)
+ (public_name trace)
+ (modules trace_replay)
+ (libraries utcp base64 cstruct ipaddr mtime logs ipaddr-cstruct cmdliner
+   logs.fmt fmt.cli logs.cli fmt.tty)
+ (optional))
