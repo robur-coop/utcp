@@ -600,19 +600,19 @@ let encode_and_checksum_into now buf ~src ~dst t =
   encode_into buf t;
   let checksum = checksum ~src ~dst buf in
   Cstruct.BE.set_uint16 buf 16 checksum;
-  State.Tracing.info (fun m -> m "%a [%a] out %u %s"
-                         State.Connection.pp (src, t.src_port, dst, t.dst_port)
-                         Mtime.pp now (Cstruct.length t.payload)
-                         (Base64.encode_string (Cstruct.to_string buf)))
+  State.Tracing.debug (fun m -> m "%a [%a] out %u %s"
+                          State.Connection.pp (src, t.src_port, dst, t.dst_port)
+                          Mtime.pp now (Cstruct.length t.payload)
+                          (Base64.encode_string (Cstruct.to_string buf)))
 
 let encode_and_checksum now ~src ~dst t =
   let buf = encode t in
   let checksum = checksum ~src ~dst buf in
   Cstruct.BE.set_uint16 buf 16 checksum;
-  State.Tracing.info (fun m -> m "%a [%a] out %u %s"
-                         State.Connection.pp (src, t.src_port, dst, t.dst_port)
-                         Mtime.pp now (Cstruct.length t.payload)
-                         (Base64.encode_string (Cstruct.to_string buf)));
+  State.Tracing.debug (fun m -> m "%a [%a] out %u %s"
+                          State.Connection.pp (src, t.src_port, dst, t.dst_port)
+                          Mtime.pp now (Cstruct.length t.payload)
+                          (Base64.encode_string (Cstruct.to_string buf)));
   buf
 
 let decode data =

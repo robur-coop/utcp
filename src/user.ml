@@ -14,7 +14,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
     | Some p -> p
   in
   let id = src, src_port, dst, dst_port in
-  Tracing.info (fun m -> m "%a [%a] connect" Connection.pp id Mtime.pp now);
+  Tracing.debug (fun m -> m "%a [%a] connect" Connection.pp id Mtime.pp now);
   let conn =
     let iss = Sequence.of_int32 (Randomconv.int32 t.rng) in
     let rcv_wnd = Params.so_rcvbuf in
@@ -47,9 +47,13 @@ let connect ~src ?src_port ~dst ~dst_port t now =
 
 (* shutdown_1 and shutdown_3 *)
 let shutdown t now id v =
-  Tracing.info (fun m -> m "%a [%a] %s" Connection.pp id Mtime.pp now
-                   ("shutdown_" ^
-                    (match v with `read -> "read" | `write -> "write" | `read_write -> "readwrite")));
+  Tracing.debug (fun m ->
+      let side = match v with
+        | `read -> "read"
+        | `write -> "write"
+        | `read_write -> "readwrite"
+      in
+      m "%a [%a] shutdown_%s" Connection.pp id Mtime.pp now side);
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->
@@ -78,7 +82,7 @@ let shutdown t now id v =
 (* in real, this is shutdown `readwrite (close_2) - and we do this in any state *)
 (* there's as well close_3 (the abortive close, i.e. send a RST) -- done when SO_LINGER = 0 *)
 let close t now id =
-  Tracing.info (fun m -> m "%a [%a] close" Connection.pp id Mtime.pp now);
+  Tracing.debug (fun m -> m "%a [%a] close" Connection.pp id Mtime.pp now);
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->
@@ -100,7 +104,7 @@ let close t now id =
     Ok ({ t with connections = CM.add id conn' t.connections }, out)
 
 let send t now id buf =
-  Tracing.info (fun m -> m "%a [%a] send %u %s" Connection.pp id Mtime.pp now
+  Tracing.debug (fun m -> m "%a [%a] send %u %s" Connection.pp id Mtime.pp now
                    (Cstruct.length buf)
                    (Base64.encode_string (Cstruct.to_string buf)));
   match CM.find_opt id t.connections with
@@ -119,7 +123,7 @@ let send t now id buf =
     Ok ({ t with connections = CM.add id conn' t.connections }, out)
 
 let recv t now id =
-  Tracing.info (fun m -> m "%a [%a] receive" Connection.pp id Mtime.pp now);
+  Tracing.debug (fun m -> m "%a [%a] receive" Connection.pp id Mtime.pp now);
   match CM.find_opt id t.connections with
   | None -> Error (`Msg "no connection")
   | Some conn ->

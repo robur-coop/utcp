@@ -1099,10 +1099,10 @@ let handle_buf t now ~src ~dst data =
     Log.err (fun m -> m "dropping invalid segment %s" msg);
     t, None, []
   | Ok (seg, id) ->
-    Tracing.info (fun m -> m "%a [%a] handle_buf %u %s"
-                     Connection.pp id Mtime.pp now
-                     (Cstruct.length seg.payload)
-                     (Base64.encode_string (Cstruct.to_string data)));
+    Tracing.debug (fun m -> m "%a [%a] handle_buf %u %s"
+                      Connection.pp id Mtime.pp now
+                      (Cstruct.length seg.payload)
+                      (Base64.encode_string (Cstruct.to_string data)));
     (* deliver_in_3a deliver_in_4 are done now! *)
     let was_established =
       match CM.find_opt id t.connections with
