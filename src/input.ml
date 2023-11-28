@@ -1104,24 +1104,26 @@ let handle_buf t now ~src ~dst data =
                       (Cstruct.length seg.payload)
                       (Base64.encode_string (Cstruct.to_string data)));
     (* deliver_in_3a deliver_in_4 are done now! *)
-    let was_established =
+    let was_established, was_present =
       match CM.find_opt id t.connections with
-      | None -> false
-      | Some s -> s.tcp_state = Established
+      | None -> false, false
+      | Some s -> s.tcp_state = Established, true
     in
     let t', outs = handle_segment t now id seg in
-    let is_established, received =
+    let is_established, is_present, received =
       match CM.find_opt id t'.connections with
-      | None -> false, false
+      | None -> false, false, false
       | Some s ->
         s.tcp_state = Established,
+        true,
         Cstruct.lenv s.rcvq > 0
     in
     let ev =
-      match was_established, is_established, received with
-      | false, true, _ -> Some (`Established id)
-      | true, false, _ -> Some (`Drop (id, received))
-      | _, _, true -> Some (`Received id)
+      match was_established, is_established, received, was_present, is_present with
+      | false, true, _, _, _ -> Some (`Established id)
+      | true, false, _, _, _
+      | _, _, _, true, false -> Some (`Drop (id, received))
+      | _, _, true, _, _ -> Some (`Received id)
       | _ -> None
     in
     List.iter (fun (src', dst', _) ->
