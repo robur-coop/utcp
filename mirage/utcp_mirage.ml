@@ -180,6 +180,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
     output_ign t segs
 
   let connect id ip =
+    Log.info (fun m -> m "starting µTCP on %S" id);
     let tcp = Utcp.empty id R.generate in
     let t = { tcp ; ip ; waiting = Utcp.FM.empty ; listeners = Port_map.empty } in
     Lwt.async (fun () ->
