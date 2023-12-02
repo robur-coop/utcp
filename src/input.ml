@@ -749,13 +749,14 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
       cb.rcv_wnd > 0
     then
       (*: Hack: assertion used to share values with later conditions :*)
-      (* assert (FIN_reass = F) andThen *)
+      let fin_reass = false in (* it is out-of-order *)
       (*: Update the socket's TCP control block state :*)
       let t_segq =
         Reassembly_queue.insert_seg cb.t_segq (seq_trimmed, fin_trimmed, data_trimmed_left_right)
       in
       let control_block = { cb with tf_shouldacknow = true ; t_segq } in
-      ({ conn with control_block }, fin_trimmed, []), true
+      (* since it is out-of-order, we do not (yet) handle the fin *)
+      ({ conn with control_block }, fin_reass, []), true
       (*: Case (3) The segment is a pure [[ACK]] segment (contains no data) (and
          must be in-order). :*)
       (*: Invariant here that [[seq_trimmed = seq]] if segment is a pure
@@ -766,8 +767,8 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
             Cstruct.length seg.payload + (if fin then 1 else 0) = 0
     then
       (*: Hack: assertion used to share values with later conditions :*)
-      (* assert (FIN_reass = F) (*: Have not received a FIN :*) *)
-      (conn, fin_trimmed, []), true
+      let fin_reass = false in (* Have not received a FIN *)
+      (conn, fin_reass, []), true
       (*: Case (4) Segment contained no useful data---was a completely old
          segment. Note: the original fields from the segment, \ie, [[seq]],
          [[data]] and [[FIN]] are used in the guard below---the trimmed variants
@@ -789,8 +790,10 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
        then *)
       (*: Update socket's control block to assert that an [[ACK]] segment should be sent now. :*)
       (*: Source: TCPIPv2p959 says "segment is discarded and an ack is sent as a reply" :*)
+      (*: Hack: assertion used to share values with later conditions :*)
+      let fin_reass = false in (* Definitely false---segment is outside window *)
       let control_block = { cb with tf_shouldacknow = true } in
-      ({ conn with control_block }, fin_trimmed, []), true
+      ({ conn with control_block }, fin_reass, []), true
   in
   (*: Finished processing the segment's data :*)
   (*: Thread the reassembled [[FIN]] flag through to [[di3_ststuff]] :*)
