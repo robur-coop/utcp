@@ -19,8 +19,8 @@ let to_int16 ~off ~len :
   let buf = Bigarray.Array1.sub ba off (len - pad) in
   Obj.magic buf
 
-external unsafe_get_uint8 : bigstring -> int -> int = "%caml_ba_ref_1"
-external unsafe_get_uint16 : bigstring -> int -> int = "%caml_bigstring_get16"
+external unsafe_get_uint8 : bigstring -> int -> int = "%caml_ba_unsafe_ref_1"
+external unsafe_get_uint16 : bigstring -> int -> int = "%caml_bigstring_get16u"
 external swap16 : int -> int = "%bswap16"
 
 let unsafe_digest_16 ?(off = 0) ~len:top buf =
