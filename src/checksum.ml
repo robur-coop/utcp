@@ -22,8 +22,9 @@ let to_int16 ~off ~len :
 external unsafe_get_uint8 : bigstring -> int -> int = "%caml_ba_unsafe_ref_1"
 external unsafe_get_uint16 : bigstring -> int -> int = "%caml_bigstring_get16u"
 external swap16 : int -> int = "%bswap16"
+external swap32 : int32 -> int32 = "%bswap_int32"
 
-let unsafe_digest_16 ?(off = 0) ~len:top buf =
+let unsafe_digest_16_le ?(off = 0) ~len:top buf =
   let buf16 = to_int16 ~off ~len:top buf in
   let len = ref top in
   let sum = ref 0 in
@@ -37,9 +38,9 @@ let unsafe_digest_16 ?(off = 0) ~len:top buf =
   done;
   if !len = 1 then sum := !sum + unsafe_get_uint8 buf (off + top - 1);
   if !sum > 0xffff then incr sum;
-  lnot !sum land 0xffff
+  swap16 (lnot !sum land 0xffff)
 
-let unsafe_digest_32 ?(off = 0) ~len:top buf =
+let unsafe_digest_32_le ?(off = 0) ~len:top buf =
   let buf32 = to_int32 ~off ~len:top buf in
   let len = ref top in
   let sum = ref 0 in
@@ -57,15 +58,37 @@ let unsafe_digest_32 ?(off = 0) ~len:top buf =
   while !sum lsr 16 <> 0 do
     sum := (!sum land 0xffff) + (!sum lsr 16)
   done;
-  lnot !sum land 0xffff
+  swap16 (lnot !sum land 0xffff)
+
+let unsafe_digest_32_be ?(off = 0) ~len:top buf =
+  let buf32 = to_int32 ~off ~len:top buf in
+  let len = ref top in
+  let sum = ref 0 in
+  let i = ref 0 in
+  while !len >= 4 do
+    let[@warning "-8"] (Some v) = Int32.unsigned_to_int (swap32 buf32.{!i}) in
+    sum := !sum + v;
+    incr i;
+    len := !len - 4
+  done;
+  if !len >= 2 then (
+    sum := !sum + swap16 (unsafe_get_uint16 buf (off + (!i * 4)));
+    len := !len - 2);
+  if !len = 1 then sum := !sum + unsafe_get_uint8 buf (off + top - 1);
+  while !sum lsr 16 <> 0 do
+    sum := (!sum land 0xffff) + (!sum lsr 16)
+  done;
+  swap16 (lnot !sum land 0xffff)
 
 let digest ?(off = 0) ?len buf =
   let len = match len with Some len -> len | None -> length buf - off in
-  let csum =
-    match Sys.word_size with
-    | 32 -> unsafe_digest_16 ~off ~len buf
-    | _ -> unsafe_digest_32 ~off ~len buf
-  in
-  if Sys.big_endian then csum else swap16 csum
+  match Sys.word_size, Sys.big_endian with
+  | 32, false -> unsafe_digest_16_le ~off ~len buf
+  | 64, false -> unsafe_digest_32_le ~off ~len buf
+  | 64, true -> unsafe_digest_32_be ~off ~len buf
+  | n, be ->
+    invalid_arg
+      ("don't know how to checksum on a " ^ string_of_int n ^ " bit " ^
+       (if be then "big-endian" else "little-endian") ^ " machine")
 
 let digest_cstruct { Cstruct.buffer; off; len } = digest ~off ~len buffer
