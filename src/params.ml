@@ -52,8 +52,6 @@ and tcptv_rttvarbase = 0L
 
 let tcp_rtt_invalidate = tcp_maxrxtshift / 4
 and tcp_syn_backoff =
-  Array.map Duration.of_sec
-    [| 1 ; 1 ; 1 ; 1 ; 1 ; 2 ; 4 ; 8 ; 16 ; 32 ; 64 ; 64 ; 64 |]
+    [| 1L ; 1L ; 1L ; 1L ; 1L ; 2L ; 4L ; 8L ; 16L ; 32L ; 64L ; 64L ; 64L |]
 and tcp_backoff =
-  Array.map Duration.of_sec
-    [| 1 ; 2 ; 4 ; 8 ; 16 ; 32 ; 64 ; 128 ; 256 ; 512 ; 512 ; 512 ; 512 |]
+    [| 1L ; 2L ; 4L ; 8L ; 16L ; 32L ; 64L ; 128L ; 256L ; 512L ; 512L ; 512L ; 512L |]
