@@ -19,24 +19,23 @@ digest_32_le (value buf, value size)
 
     uint64_t sum = 0;
     uint64_t sum1 = 0;
-    const uint64_t *u64 = (const uint64_t *)Caml_ba_data_val(buf);
+    const uint32_t *u32 = (const uint32_t *)Caml_ba_data_val(buf);
     uint16_t len = Int_val(size);
 
-    while (len >= 8) {
-        uint64_t d = *u64;
-        sum  += d&0xffffffff;
-        sum1 += d>>32;
-        u64 += 1;
-        len -= 8;
+    while (len >= (sizeof(*u32) * 2)) {
+        sum  += u32[0];
+        sum1 += u32[1];
+        u32 += 2;
+        len -= (sizeof(*u32) * 2);
     }
     sum += sum1;
 
     // Collect remaining 16b data
-    const uint16_t *u16 = (const uint16_t *)u64;
-    while (len >= 2) {
+    const uint16_t *u16 = (const uint16_t *)u32;
+    while (len >= sizeof(*u16)) {
         sum += *u16;
         u16 += 1;
-        len -= 2;
+        len -= sizeof(*u16);
     }
 
     // Last one byte?
