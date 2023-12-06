@@ -151,7 +151,7 @@ let trace_reader filename =
         | Error `Msg2 _ -> acc, succ idx)
       ([], 0) lines |> fst |> List.rev
   in
-  Logs.info (fun m -> m "decoded %u lines" (List.length msgs));
+  Logs.app (fun m -> m "decoded %u lines" (List.length msgs));
   msgs
 
 let print_out (src, dst, seg) =
@@ -180,7 +180,9 @@ let send_out_good msgs =
                  Ok None
                else
                  Ok (Some left)
-             | _ -> Error (`Msg ("expected out in " ^ string_of_int idx ^ ": " ^ string_of_int req)))
+             | _ ->
+               Logs.warn (fun m -> m "expected out, got %s in %u: %u" (func_to_string func) idx req);
+               Ok (Some req))
         in
         r, succ idx)
       (Ok None, 1) msgs |> fst
