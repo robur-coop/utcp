@@ -88,7 +88,7 @@ let deliver_in_1 stats rng now id seg =
     conn_state ~rcvbufsize ~sndbufsize Syn_received control_block
   in
   let reply = Segment.make_syn_ack conn.control_block id in
-  Log.debug (fun m -> m "%a passive open %a" Connection.pp id pp_conn_state conn);
+  Log.debug (fun m -> m "%a passive open %a" Connection.pp id (pp_conn_state now) conn);
   Stats.incr_passive stats;
   conn, reply
 
@@ -979,9 +979,9 @@ let handle_noconn t now id seg =
     t, Option.to_list (dropwithreset id seg)
 
 let handle_conn t now id conn seg =
-  Log.debug (fun m -> m "%a handle_conn %a@ seg %a" Connection.pp id pp_conn_state conn Segment.pp seg);
+  Log.debug (fun m -> m "%a handle_conn %a@ seg %a" Connection.pp id (pp_conn_state now) conn Segment.pp seg);
   let add conn' =
-    Log.debug (fun m -> m "%a now %a" Connection.pp id pp_conn_state conn');
+    Log.debug (fun m -> m "%a now %a" Connection.pp id (pp_conn_state now) conn');
     { t with connections = CM.add id conn' t.connections }
   and drop () =
     Log.debug (fun m -> m "%a dropped" Connection.pp id);

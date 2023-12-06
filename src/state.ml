@@ -55,6 +55,13 @@ type rttinf = {
      returns to slow start if the connection has been idle for >=1RTO *)
 }
 
+let pp_rttinf ppf t =
+  Fmt.pf ppf "rttinf: #updated %u@ valid %B@ smoothed %a@ variance %a@ min %a@ \
+              last %a@ shift %a@ wassyn %B"
+    t.t_rttupdated t.tf_srtt_valid Duration.pp t.t_srtt Duration.pp t.t_rttvar
+    Duration.pp t.t_rttmin Fmt.(option ~none:(any "none") Duration.pp) t.t_lastrtt
+    Fmt.(option ~none:(any "none") int) t.t_lastshift t.t_wassyn
+
 type rexmtmode = RexmtSyn | Rexmt | Persist
 
 let mode_of = function
@@ -316,11 +323,25 @@ let initial_cb =
     t_badrxtwin = Mtime.of_uint64_ns 0L;
   }
 
-let pp_control ppf c =
-  Fmt.pf ppf "needfin %B@ shouldacknow %B@ snd_una %a@ snd_max %a@ snd_nxt %a@ snd_wl1 %a@ snd_wl2 %a@ iss %a@ \
-              snd_wnd %d@ snd_cwnd %d@ snd_sshtresh %d@ \
-              rcv_wnd %d@ tf_rxwin0sent %B@ rcv_nxt %a@ irs %a@ rcv_adv %a@ \
-              snd_recover %a@ t_maxseg %d@ t_advmss %d@ snd_scale %d@ rcv_scale %d@ request_r_scale %a@ tf_doing_ws %B"
+let pp_timer now ppf (_, deadline) =
+  let now_span = Mtime.Span.of_uint64_ns (Mtime.to_uint64_ns now) in
+  Duration.pp ppf
+    (Mtime.to_uint64_ns
+       (Option.value ~default:Mtime.min_stamp (Mtime.sub_span deadline now_span)))
+
+let pp_rexmt now ppf ((mode, shift), deadline) =
+  Fmt.pf ppf "%s, shift %u, deadline %a"
+    (match mode with RexmtSyn -> "syn" | Rexmt -> "rexmt" | Persist -> "persist")
+    shift (pp_timer now) ((), deadline)
+
+let pp_control now ppf c =
+  Fmt.pf ppf "needfin %B@ shouldacknow %B@ snd_una %a@ snd_max %a@ snd_nxt %a@ \
+              snd_wl1 %a@ snd_wl2 %a@ iss %a@ snd_wnd %d@ snd_cwnd %d@ \
+              snd_sshtresh %d@ rcv_wnd %d@ tf_rxwin0sent %B@ rcv_nxt %a@ \
+              irs %a@ rcv_adv %a@ snd_recover %a@ t_maxseg %d@ t_advmss %d@ \
+              snd_scale %d@ rcv_scale %d@ request_r_scale %a@ tf_doing_ws %B@ \
+              tt_rexmt %a@ tt_2msl %a@ tt_delack %a@ tt_conn_est %a@ \
+              tt_fin_wait_2 %a@ dupacks %u@ rttinf %a@ rttseg %a"
     c.tf_needfin c.tf_shouldacknow
     Sequence.pp c.snd_una Sequence.pp c.snd_max Sequence.pp c.snd_nxt
     Sequence.pp c.snd_wl1 Sequence.pp c.snd_wl2 Sequence.pp c.iss
@@ -328,16 +349,23 @@ let pp_control ppf c =
     Sequence.pp c.rcv_nxt Sequence.pp c.irs Sequence.pp c.rcv_adv
     Sequence.pp c.snd_recover c.t_maxseg c.t_advmss
     c.snd_scale c.rcv_scale Fmt.(option ~none:(any "no") int) c.request_r_scale c.tf_doing_ws
+    Fmt.(option ~none:(any "none") (pp_rexmt now)) c.tt_rexmt
+    Fmt.(option ~none:(any "none") (pp_timer now)) c.tt_2msl
+    Fmt.(option ~none:(any "none") (pp_timer now)) c.tt_delack
+    Fmt.(option ~none:(any "none") (pp_timer now)) c.tt_conn_est
+    Fmt.(option ~none:(any "none") (pp_timer now)) c.tt_fin_wait_2
+    c.t_dupacks pp_rttinf c.t_rttinf
+    Fmt.(option ~none:(any "none") (pair ~sep:(any ", ")
+                                      (any "-" ++ Duration.pp) Sequence.pp))
+    (Option.map (fun (ts, seg) ->
+         let sent = Mtime.Span.of_uint64_ns (Mtime.to_uint64_ns ts) in
+         let ts' =
+           Mtime.to_uint64_ns
+             (Option.value ~default:Mtime.min_stamp (Mtime.sub_span now sent))
+         in
+         ts', seg) c.t_rttseg)
 (*
-    tt_rexmt = None;
     (* tt_keep = None; *)
-    tt_2msl = None;
-    tt_delack = None;
-    tt_conn_est = None;
-    tt_fin_wait_2 = None;
-    t_rttseg = None;
-    t_rttinf = initial_rttinf ;
-    t_dupacks = 0;
     t_idletime = Mtime.of_uint64_ns 0L;
     t_softerror = None;
     snd_cwnd_prev = 0;
@@ -391,8 +419,8 @@ let conn_state ~rcvbufsize ~sndbufsize tcp_state control_block = {
   rcvbufsize ; sndbufsize
 }
 
-let pp_conn_state ppf c =
-  Fmt.pf ppf "TCP %a cb %a" pp_fsm c.tcp_state pp_control c.control_block
+let pp_conn_state now ppf c =
+  Fmt.pf ppf "TCP %a cb %a" pp_fsm c.tcp_state (pp_control now) c.control_block
 
 module IS = Set.Make(struct type t = int let compare = compare_int end)
 
@@ -467,10 +495,10 @@ let metrics () =
 let add_metrics t =
   Metrics.add t.metrics (fun x -> x t.id) (fun d -> d (t.connections, t.stats))
 
-let pp ppf t =
+let pp now ppf t =
   Fmt.pf ppf "listener %a, connections: %a"
     Fmt.(list ~sep:(any ", ") int) (IS.elements t.listeners)
-    Fmt.(list ~sep:(any "@.") (pair ~sep:(any ": ") Connection.pp pp_conn_state))
+    Fmt.(list ~sep:(any "@.") (pair ~sep:(any ": ") Connection.pp (pp_conn_state now)))
     (CM.bindings t.connections)
 
 let start_listen t port = { t with listeners = IS.add port t.listeners }

@@ -126,8 +126,8 @@ let equal_tcp a b =
   State.IS.equal a.State.listeners b.State.listeners &&
   State.CM.equal equal_conn_state a.connections b.connections
 
-let test_full_state = Alcotest.testable State.pp equal_tcp_full
-and test_state = Alcotest.testable State.pp equal_tcp
+let test_full_state = Alcotest.testable (State.pp Mtime.min_stamp) equal_tcp_full
+and test_state = Alcotest.testable (State.pp Mtime.min_stamp) equal_tcp
 and test_seg = Alcotest.testable Segment.pp Segment.equal
 and test_ip =
   Alcotest.testable Ipaddr.pp (fun a b -> Ipaddr.compare a b = 0)

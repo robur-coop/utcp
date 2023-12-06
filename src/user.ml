@@ -39,7 +39,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
   in
   let _, _, seg = Segment.make_syn conn.control_block id in
   let connections =
-    Log.debug (fun m -> m "%a active open %a" Connection.pp id pp_conn_state conn);
+    Log.debug (fun m -> m "%a active open %a" Connection.pp id (pp_conn_state now) conn);
     CM.add id conn t.connections
   in
   Stats.incr_active t.stats;
