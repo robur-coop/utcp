@@ -456,6 +456,7 @@ type t = {
   id : string ;
   mutable ctr : int ;
   metrics : (string -> Metrics.field list, conn_state CM.t * Stats.t -> Metrics.data) Metrics.src;
+  transitions : (string -> Metrics.field list, string -> Metrics.data) Metrics.src;
 }
 
 module States = Map.Make (struct
@@ -495,6 +496,33 @@ let metrics () =
 let add_metrics t =
   Metrics.add t.metrics (fun x -> x t.id) (fun d -> d (t.connections, t.stats))
 
+let transitions () =
+  let create () =
+    let data : (string, int) Hashtbl.t = Hashtbl.create 7 in
+    (fun key ->
+       let cur = match Hashtbl.find_opt data key with
+         | None -> 0
+         | Some x -> x
+       in
+       Hashtbl.replace data key (succ cur)),
+    (fun () ->
+       let data, total =
+         Hashtbl.fold (fun key value (acc, total) ->
+             (Metrics.uint key value :: acc), value + total)
+           data ([], 0)
+       in
+       Metrics.uint "total" total :: data)
+  in
+  let open Metrics in
+  let doc = "uTCP transition metrics" in
+  let incr, get = create () in
+  let data thing = incr thing; Data.v (get ()) in
+  let tag = Tags.string "stack-id" in
+  Src.v ~doc ~tags:Metrics.Tags.[ tag ] ~data "utcp_transition"
+
+let rule t name =
+  Metrics.add t.transitions (fun x -> x t.id) (fun d -> d name)
+
 let pp now ppf t =
   Fmt.pf ppf "listener %a, connections: %a"
     Fmt.(list ~sep:(any ", ") int) (IS.elements t.listeners)
@@ -505,7 +533,6 @@ let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 
 let empty id rng =
-  let metrics = metrics () in
   {
     id ;
     rng ;
@@ -513,5 +540,6 @@ let empty id rng =
     connections = CM.empty ;
     stats = Stats.empty () ;
     ctr = 0 ;
-    metrics ;
+    metrics = metrics () ;
+    transitions = transitions () ;
   }

@@ -202,6 +202,7 @@ module State : sig
     id : string ;
     mutable ctr : int ;
     metrics : (string -> Metrics.field list, conn_state CM.t * Stats.t -> Metrics.data) Metrics.src;
+    transitions : (string -> Metrics.field list, string -> Metrics.data) Metrics.src;
   }
   val pp : Mtime.t -> t Fmt.t
   val empty : string -> (int -> Cstruct.t) -> t

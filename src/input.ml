@@ -33,10 +33,11 @@ deliver_in_8 - recv SYN in yy - handle_conn
 deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - not handled
 ??deliver_in_10 - stupid flag combinations are dropped (without reset)
 *)
+
 let dropwithreset (src, _, dst, _) seg =
   Option.map (fun x -> src, dst, x) (Segment.dropwithreset seg)
 
-let deliver_in_1 stats rng now id seg =
+let deliver_in_1 m stats rng now id seg =
   (* there's a difference from the model, namely that we don't care about
      sockets in TIME_WAIT - this is handled in handle_conn explicitly (allowing
      port reusage with strictly higher sequence numbers - RFC1122 4.2.2.13).
@@ -44,6 +45,7 @@ let deliver_in_1 stats rng now id seg =
      this rule carries less complexity in this way, and is called via
      handle_noconn (if there's no flow in the connection table),
      or via handle_conn if in time_wait, and a syn, and the seq > rcv_nxt. *)
+  m "deliver-in-1";
   let conn =
     let advmss = Subr.tcp_mssopt id in
     let rcvbufsize, sndbufsize, t_maxseg', snd_cwnd' =
@@ -92,7 +94,8 @@ let deliver_in_1 stats rng now id seg =
   Stats.incr_passive stats;
   conn, reply
 
-let deliver_in_2 stats now id conn seg ack =
+let deliver_in_2 m stats now id conn seg ack =
+  m "deliver-in-2";
   let cb = conn.control_block in
   let* () = guard (Sequence.equal ack cb.snd_nxt) (`Drop "ack = snd_nxt") in
   let tf_doing_ws, snd_scale, rcv_scale =
@@ -180,11 +183,8 @@ let deliver_in_2 stats now id conn seg ack =
   Ok ({ conn with control_block; tcp_state = Established; rcvbufsize; sndbufsize },
       Segment.make_ack control_block ~fin:false id)
 
-let deliver_in_2b _now _id _conn _seg =
-  (* simultaneous open: accept anything, send syn+ack *)
-  assert false
-
-let deliver_in_2a conn seg f =
+let deliver_in_2a m conn seg f =
+  m "deliver-in-2a";
   (* well well, the remote could have leftover state and send us a ack+fin... but that's fine to drop (and unlikely to happen now that we have random)
      server.exe: [DEBUG] 10.0.42.2:20 -> 10.0.42.1:1234 handle_conn TCP syn sent cb snd_una 0 snd_nxt 1 snd_wl1 0 snd_wl2 0 iss 0 rcv_wnd 65000 rcv_nxt 0 irs 0 seg AF seq 3062921918 ack 1 window 65535 opts 0 bytes data
      server.exe: [ERROR] dropping segment in syn sent failed condition RA *)
@@ -196,7 +196,8 @@ let deliver_in_2a conn seg f =
       Error (`Drop "ACK in-window")
   | _ -> Error (`Drop "RA")
 
-let deliver_in_3c_3d stats now conn seg =
+let deliver_in_3c_3d m stats now conn seg =
+  m "deliver-in-3c-3d";
   (* deliver_in_3c and syn_received parts of deliver_in_3 (now deliver_in_3d) *)
   (* TODO hostLTS:15801: [[SYN]] flag set may be set in the final segment of a
      simultaneous open (does this change anything for us?) *)
@@ -913,7 +914,8 @@ let di3_ststuff now conn rcvd_fin ourfinisacked =
   | Time_wait, _ -> enter_time_wait
   | _ -> assert false
 
-let deliver_in_3 now id conn seg flag ack =
+let deliver_in_3 m now id conn seg flag ack =
+  m "deliver-in-3";
   (* we expect at most FIN PSH ACK - we drop with reset all other combinations *)
   let* () =
     guard (flag = None || flag = Some `Fin) (`Reset "flags ACK | FIN & ACK")
@@ -947,7 +949,8 @@ let deliver_in_3 now id conn seg flag ack =
         Ok (Some conn'', out))
     conn'
 
-let deliver_in_7 id conn seg =
+let deliver_in_7 m id conn seg =
+  m "deliver-in-7";
   let cb = conn.control_block in
   if Sequence.equal cb.rcv_nxt seg.Segment.seq then
     (* we rely that dropwithreset does not RST if a RST was received *)
@@ -955,10 +958,12 @@ let deliver_in_7 id conn seg =
   else
     Ok (Segment.make_ack cb ~fin:false id)
 
-let deliver_in_8 id conn _seg =
+let deliver_in_8 m id conn _seg =
+  m "deliver-in-8";
   Ok (Segment.make_ack conn.control_block ~fin:false id)
 
 let handle_noconn t now id seg =
+  let m = rule t in
   match
     (* TL;DR: if there's a listener, and it is a SYN, we do sth useful. otherwise RST *)
     IS.mem seg.Segment.dst_port t.listeners, seg.Segment.flag = Some `Syn && seg.Segment.ack = None
@@ -966,19 +971,22 @@ let handle_noconn t now id seg =
   with
   | true, true ->
     (* there can't be anything in TIME_WAIT, otherwise we wouldn't end up here *)
-    let conn, reply = deliver_in_1 t.stats t.rng now id seg in
+    let conn, reply = deliver_in_1 m t.stats t.rng now id seg in
     { t with connections = CM.add id conn t.connections }, [ reply ]
   | true, false ->
     (* deliver_in_1b *)
+    m "deliver-in-1b";
     let out = Option.map (fun _ack -> dropwithreset id seg) seg.Segment.ack in
     t, Option.to_list (Option.join out)
   | false, syn ->
+    m "deliver-in-5-6";
     Log.debug (fun m -> m "%a dropping segment with reset (SYN %B) %a"
                   Connection.pp id syn Segment.pp seg);
     (* deliver_in_5 / deliver_in_6 *)
     t, Option.to_list (dropwithreset id seg)
 
 let handle_conn t now id conn seg =
+  let m = rule t in
   Log.debug (fun m -> m "%a handle_conn %a@ seg %a" Connection.pp id (pp_conn_state now) conn Segment.pp seg);
   let add conn' =
     Log.debug (fun m -> m "%a now %a" Connection.pp id (pp_conn_state now) conn');
@@ -991,13 +999,15 @@ let handle_conn t now id conn seg =
     | Syn_sent ->
       begin match seg.Segment.ack, seg.Segment.flag with
         | Some ack, Some `Syn ->
-          let* c', o = deliver_in_2 t.stats now id conn seg ack in
+          let* c', o = deliver_in_2 m t.stats now id conn seg ack in
           Ok (add c', [ o ])
         | None, Some `Syn ->
-          let* c', o = deliver_in_2b now id conn seg in
-          Ok (add c', [ o ])
+          (* simultaneous open: accept anything, send syn+ack *)
+          (* let* c', o = deliver_in_2b now id conn seg in *)
+          m "deliver_in_2b";
+          Ok (drop (), [ ])
         | _, ((None | Some `Rst | Some `Fin) as f) ->
-          let* () = deliver_in_2a conn seg f in
+          let* () = deliver_in_2a m conn seg f in
           Ok (drop (), [])
       end
     | Syn_received ->
@@ -1016,7 +1026,7 @@ let handle_conn t now id conn seg =
          even may emit syn+ack (with seq = iss) to move forward [but then, as
          well just an ack is possible with seq = iss + 1]
       *)
-      let* conn' = deliver_in_3c_3d t.stats now conn seg in
+      let* conn' = deliver_in_3c_3d m t.stats now conn seg in
       Ok (add conn', [])
     | Time_wait when seg.Segment.flag = Some `Syn &&
                      seg.Segment.ack = None &&
@@ -1049,7 +1059,7 @@ let handle_conn t now id conn seg =
          state. This is modelled by closing the existing [[TIME_WAIT]] socket and creating the new
          socket from scratch.
       *)
-      let conn, reply = deliver_in_1 t.stats t.rng now id seg in
+      let conn, reply = deliver_in_1 m t.stats t.rng now id seg in
       Ok ({ t with connections = CM.add id conn t.connections }, [ reply ])
     | _ ->
       let* () =
@@ -1061,14 +1071,14 @@ let handle_conn t now id conn seg =
       (* RFC5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
       match seg.Segment.flag, seg.Segment.ack with
       | Some `Rst, _ ->
-        let* seg' = deliver_in_7 id conn seg in
+        let* seg' = deliver_in_7 m id conn seg in
         Ok (t, [ seg' ])
       | Some `Syn, _ ->
-        let* seg' = deliver_in_8 id conn seg in
+        let* seg' = deliver_in_8 m id conn seg in
         Ok (t, [ seg' ])
       | _, None -> Error (`Drop "no ACK")
       | f, Some ack ->
-        let* conn', out = deliver_in_3 now id conn seg f ack in
+        let* conn', out = deliver_in_3 m now id conn seg f ack in
         match conn' with
         | None -> Ok (drop (), [])
         | Some conn' ->
