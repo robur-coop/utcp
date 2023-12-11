@@ -6,7 +6,8 @@ module Log = (val Logs.src_log src : Logs.LOG)
 open State
 
 (* hostLTS:17138 *)
-let timer_tt_rexmtsyn now shift id conn =
+let timer_tt_rexmtsyn m now shift id conn =
+  m "timer-tt-rexmtsyn";
   match conn.tcp_state with
   | Syn_sent (* simultaneous open (deliver_in_2b) may put us into Syn_received *) ->
     if succ shift > Params.tcp_maxrxtshift then begin
@@ -42,7 +43,8 @@ let timer_tt_rexmtsyn now shift id conn =
                 Connection.pp id (pp_conn_state now) conn);
     Ok conn, None
 
-let timer_tt_rexmt now shift id conn =
+let timer_tt_rexmt m now shift id conn =
+  m "timer-tt-rexmt";
   let cb, tcp_state = conn.control_block, conn.tcp_state in
   match tcp_state with
   | Syn_sent | Fin_wait_2 | Time_wait ->
@@ -86,7 +88,8 @@ let timer_tt_rexmt now shift id conn =
       in
       Ok c', Some out
 
-let timer_tt_persist now shift id conn =
+let timer_tt_persist m now shift id conn =
+  m "timer-tt-persist";
   if succ shift >= Array.length Params.tcp_backoff then begin
     Log.err (fun m -> m "persist timer shift exceeded backoff array length");
     Ok conn, None
@@ -97,12 +100,15 @@ let timer_tt_persist now shift id conn =
     let conn', seg = Segment.tcp_output_really now id true conn' in
     Ok conn', Some seg
 
-let timer_tt_delack now id conn =
+let timer_tt_delack m now id conn =
+  m "timer-tt-delack";
   let control_block = { conn.control_block with tt_delack = None } in
   let conn = { conn with control_block } in
   Segment.tcp_output_really now id false conn
 
 let fast_timer t now =
+  let m = rule t in
+  m "fast-timer";
   let connections, out =
     CM.fold (fun id conn (acc, outs) ->
         match conn.control_block.tt_delack with
@@ -110,13 +116,15 @@ let fast_timer t now =
         | Some timer -> match Timers.timer_expired now timer with
           | None -> CM.add id conn acc, outs
           | Some () ->
-            let c', out = timer_tt_delack now id conn in
+            let c', out = timer_tt_delack m now id conn in
             CM.add id c' acc, out :: outs)
       t.connections (CM.empty, [])
   in
   { t with connections }, [], out
 
 let slow_timer t now =
+  let m = rule t in
+  m "slow-timer";
   let connections, drops, outs =
     CM.fold (fun id conn (acc, drops, outs) ->
         let maybe_out = function
@@ -132,28 +140,31 @@ let slow_timer t now =
           | Some (RexmtSyn, shift), _, _, _ ->
             Log.debug (fun m -> m "%a syn retransmit expired %a" Connection.pp id (pp_conn_state now) conn);
             if not (conn.tcp_state = Syn_sent) then Log.err (fun m -> m "not in syn_sent");
-            timer_tt_rexmtsyn now shift id conn
+            timer_tt_rexmtsyn m now shift id conn
           | Some (Rexmt, shift), _, _, _ ->
             Log.debug (fun m -> m "%a retransmit expired %a" Connection.pp id (pp_conn_state now) conn);
-            timer_tt_rexmt now shift id conn
+            timer_tt_rexmt m now shift id conn
           | Some (Persist, shift), _, _, _ ->
             Log.debug (fun m -> m "%a persist timer expired %a" Connection.pp id (pp_conn_state now) conn);
             (* it's easy: restart and tcp_output_really! *)
-            timer_tt_persist now shift id conn
+            timer_tt_persist m now shift id conn
           | None, Some (), _, _ ->
             (* timer_tt_2msl_1 *)
             Log.debug (fun m -> m "%a 2msl timer expired %a" Connection.pp id (pp_conn_state now) conn);
             if not (conn.tcp_state = Time_wait) then Log.err (fun m -> m "not in time_wait!!!!");
+            m "timer-tt-2msl";
             Error `Timer_2msl, None
           | None, None, Some (), _ ->
             (* timer_tt_conn_est_1 *)
             Log.debug (fun m -> m "%a connection established timer expired %a" Connection.pp id (pp_conn_state now) conn);
             if not (conn.tcp_state = Syn_sent) then Log.err (fun m -> m "not in syn_sent");
+            m "timer-tt-conn-est";
             Error `Timer_connection_established, Segment.drop_and_close id conn
           | None, None, None, Some () ->
             (* timer_tt_fin_wait_2_1 *)
             Log.debug (fun m -> m "%a fin_wait_2 timer expired %a" Connection.pp id (pp_conn_state now) conn);
             if not (conn.tcp_state = Fin_wait_2) then Log.err (fun m -> m "not in fin_wait_2");
+            m "timer-tt-fin-wait-2";
             Error `Timer_fin_wait_2, None
           | None, None, None, None -> Ok conn, None
         in
