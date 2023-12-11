@@ -940,12 +940,7 @@ let deliver_in_3 m now id conn seg flag ack =
           else
             (conn', [])
         in
-        let out = match outs, outs' with
-          | [], [ x ] -> [ x ]
-          | [ x ], [] -> [ x ]
-          | [], [] -> []
-          | _ -> assert false
-        in
+        let out = outs @ outs' in
         Ok (Some conn'', out))
     conn'
 
