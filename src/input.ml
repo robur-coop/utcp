@@ -1118,20 +1118,23 @@ let handle_buf t now ~src ~dst data =
       | Some s -> s.tcp_state = Established, true
     in
     let t', outs = handle_segment t now id seg in
-    let is_established, is_present, received =
+    let is_established, is_present, received, is_sndq_avail =
       match CM.find_opt id t'.connections with
-      | None -> false, false, false
+      | None -> false, false, false, false
       | Some s ->
         s.tcp_state = Established,
         true,
-        Cstruct.lenv s.rcvq > 0
+        Cstruct.lenv s.rcvq > 0,
+        Cstruct.lenv s.sndq < s.sndbufsize
     in
     let ev =
-      match was_established, is_established, received, was_present, is_present with
-      | false, true, _, _, _ -> Some (`Established id)
-      | true, false, _, _, _
-      | _, _, _, true, false -> Some (`Drop (id, received))
-      | _, _, true, _, _ -> Some (`Received id)
+      match was_established, is_established, was_present, is_present, received, is_sndq_avail with
+      | false, true, _, _, _, _ -> Some (`Established id)
+      | true, false, _, _, _, _
+      | _, _, true, false, _, _ -> Some (`Drop (id, received))
+      | _, _, _, _, true, true -> Some (`Received_and_buffer_available id)
+      | _, _, _, _, _, true -> Some (`Buffer_available id)
+      | _, _, _, _, true, _ -> Some (`Received id)
       | _ -> None
     in
     List.iter (fun (src', dst', _) ->

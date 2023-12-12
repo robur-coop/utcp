@@ -171,7 +171,12 @@ let jump () filename ip =
                   | Error `Msg msg ->
                     Logs.err (fun m -> m "failure during send: %s" msg);
                     assert false
-                  | Ok (state, out) ->
+                  | Ok (state, bytes_sent, out) ->
+                    if bytes_sent <> Cstruct.length payload then begin
+                      Logs.err (fun m -> m "partial send: %u of %u bytes"
+                                   bytes_sent (Cstruct.length payload));
+                      assert false
+                    end;
                     List.iter print_out out;
                     state
                 ) else

@@ -25,7 +25,8 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
   type t = {
     mutable tcp : Utcp.state ;
     ip : Ip.t ;
-    mutable waiting : (unit, [ `Eof | `Msg of string ]) result Lwt_condition.t Utcp.FM.t ;
+    mutable receiving : (unit, [ `Eof | `Msg of string ]) result Lwt_condition.t Utcp.FM.t ;
+    mutable sending : (unit, [ `Eof | `Msg of string ]) result Lwt_condition.t Utcp.FM.t ;
     mutable listeners : (flow -> unit Lwt.t) Port_map.t ;
   }
   and flow = t * Utcp.flow
@@ -59,9 +60,9 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       output_ign t segs >>= fun () ->
       if Cstruct.length data = 0 then (
         let cond = Lwt_condition.create () in
-        t.waiting <- Utcp.FM.add flow cond t.waiting;
+        t.receiving <- Utcp.FM.add flow cond t.receiving;
         Lwt_condition.wait cond >>= fun r ->
-        t.waiting <- Utcp.FM.remove flow t.waiting;
+        t.receiving <- Utcp.FM.remove flow t.receiving;
         match r with
         | Error `Eof ->
           Lwt.return (Ok `Eof)
@@ -93,21 +94,34 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       (* TODO better error *)
       Lwt.return (Error `Refused)
 
-  let write (t, flow) buf =
+  let rec write (t, flow) buf =
     match Utcp.send t.tcp (now ()) flow buf with
-    | Ok (tcp, segs) ->
+    | Ok (tcp, bytes_sent, segs) ->
       t.tcp <- tcp ;
-      output_ign t segs >|= fun () ->
-      Ok ()
+      output_ign t segs >>= fun () ->
+      if bytes_sent < Cstruct.length buf then
+        (* partial write *)
+        let cond = Lwt_condition.create () in
+        t.sending <- Utcp.FM.add flow cond t.sending;
+        Lwt_condition.wait cond >>= fun r ->
+        t.sending <- Utcp.FM.remove flow t.sending;
+        match r with
+        | Error `Eof ->
+          Lwt.return (Error `Closed)
+        | Error `Msg msg ->
+          Log.err (fun m -> m "%a error %s from condition while sending" Utcp.pp_flow flow msg);
+          Lwt.return (Error `Closed)
+        | Ok () ->
+          write (t, flow) (Cstruct.shift buf bytes_sent)
+      else
+        Lwt.return (Ok ())
     | Error `Msg msg ->
       Log.err (fun m -> m "%a error while write %s" Utcp.pp_flow flow msg);
-      (* TODO better error *)
-      Lwt.return (Error `Refused)
+      Lwt.return (Error `Closed)
 
   let writev flow bufs = write flow (Cstruct.concat bufs)
 
   let close (t, flow) =
-    (* TODO at some point, in FM the condition must be signalled *)
     match Utcp.close t.tcp (now ()) flow with
     | Ok (tcp, segs) ->
       t.tcp <- tcp ;
@@ -130,9 +144,9 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       Lwt.return (Error `Refused)
     | Ok () ->
       let cond = Lwt_condition.create () in
-      t.waiting <- Utcp.FM.add id cond t.waiting;
+      t.receiving <- Utcp.FM.add id cond t.receiving;
       Lwt_condition.wait cond >|= fun r ->
-      t.waiting <- Utcp.FM.remove id t.waiting;
+      t.receiving <- Utcp.FM.remove id t.receiving;
       match r with
       | Ok () -> Ok (t, id)
       | Error `Eof ->
@@ -147,8 +161,8 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
   let input t ~src ~dst data =
     let tcp, ev, segs = Utcp.handle_buf t.tcp (now ()) ~src ~dst data in
     t.tcp <- tcp;
-    let find ?f ctx id r =
-      match Utcp.FM.find_opt id t.waiting with
+    let find map ?f ctx id r =
+      match Utcp.FM.find_opt id map with
       | Some c -> Lwt_condition.signal c r
       | None -> match f with
         | Some f -> f ()
@@ -168,13 +182,19 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
                 (* NOTE we start an asynchronous task with the callback *)
                 Lwt.async (fun () -> cb (t, id))
             in
-            find ~f ctx id (Ok ())
+            find t.receiving ~f ctx id (Ok ())
           | `Drop (id, recv) ->
+            find t.sending "drop" id (Error `Eof);
             if recv then
-              find "drop" id (Ok ())
+              find t.receiving "drop" id (Ok ())
             else
-              find "drop" id (Error `Eof)
-          | `Received id -> find "received" id (Ok ()))
+              find t.receiving "drop" id (Error `Eof)
+          | `Received id -> find t.receiving "received" id (Ok ())
+          | `Buffer_available id -> find t.sending "available" id (Ok ())
+          | `Received_and_buffer_available id ->
+            find t.receiving "received" id (Ok ());
+            find t.sending "available" id (Ok ())
+        )
       ev;
     (* TODO do not ignore IP write error *)
     output_ign t segs
@@ -182,22 +202,26 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
   let connect id ip =
     Log.info (fun m -> m "starting µTCP on %S" id);
     let tcp = Utcp.empty id R.generate in
-    let t = { tcp ; ip ; waiting = Utcp.FM.empty ; listeners = Port_map.empty } in
+    let t = { tcp ; ip ; receiving = Utcp.FM.empty ; sending = Utcp.FM.empty ; listeners = Port_map.empty } in
     Lwt.async (fun () ->
         let timer () =
           let tcp, drops, outs = Utcp.timer t.tcp (now ()) in
           t.tcp <- tcp;
           List.iter (fun (id, err) ->
-              match Utcp.FM.find_opt id t.waiting with
-              | None -> Log.debug (fun m -> m "%a not found in waiting" Utcp.pp_flow id)
-              | Some c ->
-                let err = match err with
-                  | `Retransmission_exceeded -> `Msg "retransmission exceeded"
-                  | `Timer_2msl -> `Eof
-                  | `Timer_connection_established -> `Eof
-                  | `Timer_fin_wait_2 -> `Eof
-                in
-                Lwt_condition.signal c (Error err))
+              let err = match err with
+                | `Retransmission_exceeded -> `Msg "retransmission exceeded"
+                | `Timer_2msl -> `Eof
+                | `Timer_connection_established -> `Eof
+                | `Timer_fin_wait_2 -> `Eof
+              in
+              let find_and_signal map =
+                match Utcp.FM.find_opt id map with
+                | None -> Log.debug (fun m -> m "%a not found in waiting" Utcp.pp_flow id)
+                | Some c -> Lwt_condition.signal c (Error err)
+              in
+              find_and_signal t.receiving;
+              find_and_signal t.sending;
+            )
             drops ;
           (* TODO do not ignore IP write error *)
           Lwt_list.iter_p (fun data -> output_ip t data >|= ignore) outs

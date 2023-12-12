@@ -56,6 +56,8 @@ let jump () =
           | Some `Established _id -> Logs.app (fun m -> m "connection established")
           | Some `Drop _id -> Logs.app (fun m -> m "connection drop")
           | Some `Received _id -> Logs.app (fun m -> m "data received")
+          | Some `Buffer_available _id -> Logs.app (fun m -> m "buffer available")
+          | Some `Received_and_buffer_available _id -> Logs.app (fun m -> m "received and buffer available")
           | None -> ());
          s := s' ;
          handle_data ip data) (*,

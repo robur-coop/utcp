@@ -84,7 +84,7 @@ val timer : state -> Mtime.t ->
 
 val handle_buf : state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
   Cstruct.t ->
-  (state * [ `Established of flow | `Drop of flow * bool | `Received of flow ] option * output list)
+  (state * [ `Established of flow | `Drop of flow * bool | `Received of flow | `Buffer_available of flow | `Received_and_buffer_available of flow ] option * output list)
 
 val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
   state -> Mtime.t -> (state * flow * output)
@@ -99,7 +99,7 @@ val recv : state -> Mtime.t -> flow ->
   (state * Cstruct.t * output list, [ `Msg of string | `Eof ]) result
 
 val send : state -> Mtime.t -> flow -> Cstruct.t ->
-  (state * output list, [ `Msg of string ]) result
+  (state * int * output list, [ `Msg of string ]) result
 
 (**/**)
 (* only to be used for testing! *)

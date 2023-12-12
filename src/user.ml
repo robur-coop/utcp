@@ -116,11 +116,17 @@ let send t now id buf =
     let* () =
       guard (not conn.cantsndmore) (`Msg "cant write")
     in
-    (* TODO sndq should have a size limit (and if exceeded, return an error) *)
-    let sndq = buf :: conn.sndq in
+    let space = max 0 (conn.sndbufsize - Cstruct.lenv conn.sndq) in
+    let buf' =
+      if space < Cstruct.length buf then
+        Cstruct.sub buf 0 space
+      else
+        buf
+    in
+    let sndq = buf' :: conn.sndq in
     let conn' = { conn with sndq } in
     let conn', out = Segment.tcp_output_perhaps now id conn' in
-    Ok ({ t with connections = CM.add id conn' t.connections }, out)
+    Ok ({ t with connections = CM.add id conn' t.connections }, Cstruct.length buf', out)
 
 let recv t now id =
   Tracing.debug (fun m -> m "%a [%a] receive" Connection.pp id Mtime.pp now);

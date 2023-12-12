@@ -252,12 +252,17 @@ let jump () filename ip =
         | `Send ->
           let flow = Option.get !flow in
           (match Utcp.send state tm flow (Cstruct.create (fst msg.data)) with
-           | Ok (state, out) ->
+           | Ok (state, bytes_sent, out) ->
+             if bytes_sent <> fst msg.data then begin
+               Logs.err (fun m -> m "partial send: %u of %u bytes"
+                            bytes_sent (fst msg.data));
+             end;
              List.iter print_out out;
              state, true, succ idx
            | Error `Msg s ->
              Logs.err (fun m -> m "send error %s" s);
-             state, true, succ idx)
+             state, true, succ idx
+          )
         | `Close ->
           let flow = Option.get !flow in
           (match Utcp.close state tm flow with
