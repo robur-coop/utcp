@@ -473,22 +473,27 @@ let metrics () =
   let open Metrics in
   let doc = "uTCP metrics" in
   let data (connections, stats) =
-    let states =
-      CM.fold (fun _ conn ->
-          States.update conn.tcp_state (fun v -> Some (succ (Option.value ~default:0 v))))
+    let rcvq, sndq, states =
+      CM.fold (fun _ conn (rcvq, sndq, acc) ->
+          rcvq + Cstruct.lenv conn.rcvq,
+          sndq + Cstruct.lenv conn.sndq,
+          States.update conn.tcp_state (fun v -> Some (succ (Option.value ~default:0 v))) acc)
         connections
-        States.empty
+        (0, 0, States.empty)
     in
     let total = States.fold (fun _ v acc -> v + acc) states 0 in
     Data.v
       (List.map (fun tcp_state ->
            let v = Option.value ~default:0 (States.find_opt tcp_state states) in
            int (fsm_to_string tcp_state) v)
-          tcp_states @
-       [ int "active connections" total
+          tcp_states @ [
+         int "active connections" total
        ; int "total established" stats.Stats.total_established
        ; int "total server" stats.total_passive_connections
-       ; int "total client" stats.total_active_connections ])
+       ; int "total client" stats.total_active_connections
+       ; int "receive queue size" rcvq
+       ; int "send queue size" sndq
+       ])
   in
   let tag = Tags.string "stack-id" in
   Src.v ~doc ~tags:Tags.[ tag ] ~data "utcp"
