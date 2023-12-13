@@ -22,14 +22,21 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       let compare (a : int) (b : int) = compare a b
     end)
 
+  type lwt_cond_fm = (unit, [ `Eof | `Msg of string ]) result Lwt_condition.t Utcp.FM.t
+
   type t = {
     mutable tcp : Utcp.state ;
     ip : Ip.t ;
-    mutable receiving : (unit, [ `Eof | `Msg of string ]) result Lwt_condition.t Utcp.FM.t ;
-    mutable sending : (unit, [ `Eof | `Msg of string ]) result Lwt_condition.t Utcp.FM.t ;
+    mutable receiving : lwt_cond_fm ;
+    mutable sending : lwt_cond_fm ;
     mutable listeners : (flow -> unit Lwt.t) Port_map.t ;
+    metrics : (string -> Metrics.field list, lwt_cond_fm * lwt_cond_fm * (flow -> unit Lwt.t) Port_map.t -> Metrics.data) Metrics.src;
+    id : string;
   }
   and flow = t * Utcp.flow
+
+  let add_metrics t =
+    Metrics.add t.metrics (fun x -> x t.id) (fun d -> d (t.receiving, t.sending, t.listeners))
 
   let dst (_t, flow) =
     let _, (dst, dst_port) = Utcp.peers flow in
@@ -199,12 +206,28 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
     (* TODO do not ignore IP write error *)
     output_ign t segs
 
+  let metrics () =
+    let open Metrics in
+    let doc = "uTCP mirage metrics" in
+    let data (received, sending, listening) =
+      Data.v
+        [ int "received waiting" (Utcp.FM.cardinal received)
+        ; int "sending waiting" (Utcp.FM.cardinal sending)
+        ; int "listening" (Port_map.cardinal listening)
+        ]
+  in
+  let tag = Tags.string "stack-id" in
+  Src.v ~doc ~tags:Tags.[ tag ] ~data "utcp-mirage"
+
   let connect id ip =
     Log.info (fun m -> m "starting µTCP on %S" id);
     let tcp = Utcp.empty id R.generate in
-    let t = { tcp ; ip ; receiving = Utcp.FM.empty ; sending = Utcp.FM.empty ; listeners = Port_map.empty } in
+    let metrics = metrics () in
+    let t = { tcp ; ip ; receiving = Utcp.FM.empty ; sending = Utcp.FM.empty ; listeners = Port_map.empty ; metrics ; id } in
     Lwt.async (fun () ->
-        let timer () =
+        let timer n =
+          if n mod 90 = 0 then
+            add_metrics t;
           let tcp, drops, outs = Utcp.timer t.tcp (now ()) in
           t.tcp <- tcp;
           List.iter (fun (id, err) ->
@@ -228,11 +251,11 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
         and timeout () =
           Time.sleep_ns (Duration.of_ms 100)
         in
-        let rec go () =
-          Lwt.join [ timer () ; timeout () ] >>= fun () ->
-          (go [@tailcall]) ()
+        let rec go n =
+          Lwt.join [ timer n ; timeout () ] >>= fun () ->
+          (go [@tailcall]) (succ n)
         in
-        go ());
+        go 0);
     t
 
   let listen t ~port ?keepalive:_ callback =
