@@ -225,7 +225,7 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
     let metrics = metrics () in
     let t = { tcp ; ip ; receiving = Utcp.FM.empty ; sending = Utcp.FM.empty ; listeners = Port_map.empty ; metrics ; id } in
     Lwt.async (fun () ->
-        let timer n =
+        let rec timer n =
           if n mod 90 = 0 then
             add_metrics t;
           let tcp, drops, outs = Utcp.timer t.tcp (now ()) in
@@ -247,15 +247,11 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
             )
             drops ;
           (* TODO do not ignore IP write error *)
-          Lwt_list.iter_p (fun data -> output_ip t data >|= ignore) outs
-        and timeout () =
-          Time.sleep_ns (Duration.of_ms 100)
+          Lwt_list.iter_p (fun data -> output_ip t data >|= ignore) outs >>= fun () ->
+          Time.sleep_ns (Duration.of_ms 100) >>= fun () ->
+          (timer [@tailcall]) (succ n)
         in
-        let rec go n =
-          Lwt.join [ timer n ; timeout () ] >>= fun () ->
-          (go [@tailcall]) (succ n)
-        in
-        go 0);
+        timer 0);
     t
 
   let listen t ~port ?keepalive:_ callback =
