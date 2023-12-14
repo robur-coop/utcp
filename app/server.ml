@@ -36,7 +36,7 @@ let jump () =
     let tcp (*, clo, out *) =
       (* let dst = Ipaddr.(V4 (V4.of_string_exn "10.0.42.1")) in *)
       let init (*, conn, out *) =
-        let s = Utcp.empty "" Mirage_random_test.generate in
+        let s = Utcp.empty Fun.id "" Mirage_random_test.generate in
         let s' = Utcp.start_listen s 23 in
         (* Tcp.connect ~src:Ipaddr.(V4 (V4.Prefix.address cidr)) ~dst ~dst_port:1234 s' (Mtime_clock.now ()) *)
         s'
@@ -55,9 +55,7 @@ let jump () =
          (match ev with
           | Some `Established _id -> Logs.app (fun m -> m "connection established")
           | Some `Drop _id -> Logs.app (fun m -> m "connection drop")
-          | Some `Received _id -> Logs.app (fun m -> m "data received")
-          | Some `Buffer_available _id -> Logs.app (fun m -> m "buffer available")
-          | Some `Received_and_buffer_available _id -> Logs.app (fun m -> m "received and buffer available")
+          | Some `Signal (_id, _) -> Logs.app (fun m -> m "buffer")
           | None -> ());
          s := s' ;
          handle_data ip data) (*,

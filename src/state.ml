@@ -401,22 +401,25 @@ module CM = Map.Make(Connection)
   - listen (mirage-net): the ownership of packet is transferred to the callback
   - send (mirage-flow) says that buffer ownership is now at the flow
 *)
-type conn_state = {
+type 'a conn_state = {
   tcp_state : tcp_state ;
   control_block : control_block ; (* control_block should go into state, allowing smaller control blocks for initial states *)
   cantrcvmore : bool ;
   cantsndmore : bool ;
   rcvbufsize : int ;
   sndbufsize : int ;
-  sndq : Cstruct.t list ; (* reverse list of data to be sent out *)
   rcvq : Cstruct.t list ; (* reverse of the received data *)
+  sndq : Cstruct.t list ; (* reverse list of data to be sent out *)
+  rcv_notify : 'a;
+  snd_notify : 'a;
 }
 
-let conn_state ~rcvbufsize ~sndbufsize tcp_state control_block = {
+let conn_state mk_notify ~rcvbufsize ~sndbufsize tcp_state control_block = {
   tcp_state ; control_block ;
   cantrcvmore = false ; cantsndmore = false ;
-  sndq = [] ; rcvq = [] ;
-  rcvbufsize ; sndbufsize
+  rcvq = [] ; sndq = [] ;
+  rcvbufsize ; sndbufsize ;
+  rcv_notify = mk_notify () ; snd_notify = mk_notify () ;
 }
 
 let pp_conn_state now ppf c =
@@ -448,15 +451,16 @@ module Stats = struct
 end
 
 (* path mtu (its global to a stack) *)
-type t = {
+type 'a t = {
   rng : int -> Cstruct.t ;
   listeners : IS.t ;
-  connections : conn_state CM.t ;
+  connections : 'a conn_state CM.t ;
   stats : Stats.t ;
   id : string ;
   mutable ctr : int ;
-  metrics : (string -> Metrics.field list, conn_state CM.t * Stats.t -> Metrics.data) Metrics.src;
+  metrics : (string -> Metrics.field list, 'a conn_state CM.t * Stats.t -> Metrics.data) Metrics.src;
   transitions : (string -> Metrics.field list, string -> Metrics.data) Metrics.src;
+  mk_notify : unit -> 'a;
 }
 
 module States = Map.Make (struct
@@ -537,7 +541,7 @@ let pp now ppf t =
 let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 
-let empty id rng =
+let empty mk_notify id rng =
   {
     id ;
     rng ;
@@ -547,4 +551,5 @@ let empty id rng =
     ctr = 0 ;
     metrics = metrics () ;
     transitions = transitions () ;
+    mk_notify ;
   }

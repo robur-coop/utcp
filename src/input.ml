@@ -37,7 +37,7 @@ deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - not handled
 let dropwithreset (src, _, dst, _) seg =
   Option.map (fun x -> src, dst, x) (Segment.dropwithreset seg)
 
-let deliver_in_1 m stats rng now id seg =
+let deliver_in_1 mk_notify m stats rng now id seg =
   (* there's a difference from the model, namely that we don't care about
      sockets in TIME_WAIT - this is handled in handle_conn explicitly (allowing
      port reusage with strictly higher sequence numbers - RFC1122 4.2.2.13).
@@ -87,7 +87,7 @@ let deliver_in_1 m stats rng now id seg =
       last_ack_sent = ack' ;
       t_rttseg }
     in
-    conn_state ~rcvbufsize ~sndbufsize Syn_received control_block
+    conn_state mk_notify ~rcvbufsize ~sndbufsize Syn_received control_block
   in
   let reply = Segment.make_syn_ack conn.control_block id in
   Log.debug (fun m -> m "%a passive open %a" Connection.pp id (pp_conn_state now) conn);
@@ -966,7 +966,7 @@ let handle_noconn t now id seg =
   with
   | true, true ->
     (* there can't be anything in TIME_WAIT, otherwise we wouldn't end up here *)
-    let conn, reply = deliver_in_1 m t.stats t.rng now id seg in
+    let conn, reply = deliver_in_1 t.mk_notify m t.stats t.rng now id seg in
     { t with connections = CM.add id conn t.connections }, [ reply ]
   | true, false ->
     (* deliver_in_1b *)
@@ -1054,7 +1054,7 @@ let handle_conn t now id conn seg =
          state. This is modelled by closing the existing [[TIME_WAIT]] socket and creating the new
          socket from scratch.
       *)
-      let conn, reply = deliver_in_1 m t.stats t.rng now id seg in
+      let conn, reply = deliver_in_1 t.mk_notify m t.stats t.rng now id seg in
       Ok ({ t with connections = CM.add id conn t.connections }, [ reply ])
     | _ ->
       let* () =
@@ -1112,30 +1112,44 @@ let handle_buf t now ~src ~dst data =
                       (Cstruct.length seg.payload)
                       (Base64.encode_string (Cstruct.to_string data)));
     (* deliver_in_3a deliver_in_4 are done now! *)
-    let was_established, was_present =
-      match CM.find_opt id t.connections with
-      | None -> false, false
-      | Some s -> s.tcp_state = Established, true
-    in
     let t', outs = handle_segment t now id seg in
-    let is_established, is_present, received, is_sndq_avail =
-      match CM.find_opt id t'.connections with
-      | None -> false, false, false, false
-      | Some s ->
-        s.tcp_state = Established,
-        true,
-        Cstruct.lenv s.rcvq > 0,
-        Cstruct.lenv s.sndq < s.sndbufsize
-    in
     let ev =
-      match was_established, is_established, was_present, is_present, received, is_sndq_avail with
-      | false, true, _, _, _, _ -> Some (`Established id)
-      | true, false, _, _, _, _
-      | _, _, true, false, _, _ -> Some (`Drop (id, received))
-      | _, _, _, _, true, true -> Some (`Received_and_buffer_available id)
-      | _, _, _, _, _, true -> Some (`Buffer_available id)
-      | _, _, _, _, true, _ -> Some (`Received id)
-      | _ -> None
+      let was_established, was_syn_sent, was_present =
+        match CM.find_opt id t.connections with
+        | None -> false, false, false
+        | Some s -> s.tcp_state = Established, s.tcp_state = Syn_sent, true
+      in
+      let is_established, is_present, rcv_data, snd_space, rcv_n, snd_n =
+        match CM.find_opt id t'.connections with
+        | None -> false, false, false, false, None, None
+        | Some s ->
+          s.tcp_state = Established,
+          true,
+          Cstruct.lenv s.rcvq > 0,
+          Cstruct.lenv s.sndq < s.sndbufsize,
+          Some s.rcv_notify, Some s.snd_notify
+      in
+      match was_established, is_established, was_present, is_present with
+      | false, true, _, _ ->
+        (* active open, there's likely someone waiting *)
+        let cond = if was_syn_sent then rcv_n else None in
+        Some (`Established (id, cond))
+      | true, false, _, _
+      | _, _, true, false ->
+        let opt_cond, conds =
+          if rcv_data then
+            rcv_n, Option.to_list snd_n
+          else
+            None, Option.to_list rcv_n @ Option.to_list snd_n
+        in
+        Some (`Drop (id, opt_cond, conds))
+      | _ ->
+        match
+          (if rcv_data then Option.to_list rcv_n else []) @
+          (if snd_space then Option.to_list snd_n else [])
+        with
+        | [] -> None
+        | conds -> Some (`Signal (id, conds))
     in
     List.iter (fun (src', dst', _) ->
         let src, _, dst, _ = id in

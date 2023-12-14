@@ -1,4 +1,4 @@
-type state = State.t
+type 'a state = 'a State.t
 
 let empty = State.empty
 
@@ -7,8 +7,6 @@ let start_listen = State.start_listen
 let stop_listen = State.stop_listen
 
 type flow = State.Connection.t
-
-module FM = State.CM
 
 let pp_flow = State.Connection.pp
 

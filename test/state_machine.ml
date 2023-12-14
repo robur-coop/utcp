@@ -146,7 +146,7 @@ and src_port = 4321
 let quad = Obj.magic (my_ip, listen_port, your_ip, src_port)
 
 (* a TCP stack listening on port 1234 *)
-let tcp = State.empty "" static_rng
+let tcp = State.empty Fun.id "" static_rng
 let tcp_listen = State.start_listen tcp listen_port
 
 let basic_seg = {
@@ -225,7 +225,7 @@ let listen =
              options = [ Segment.MaximumSegmentSize 1460 ] }
   in
   let tcp' =
-    let conn = State.conn_state ~rcvbufsize:0 ~sndbufsize:0 Syn_received State.initial_cb in
+    let conn = State.conn_state (fun () -> ()) ~rcvbufsize:0 ~sndbufsize:0 Syn_received State.initial_cb in
     { tcp_listen with connections = State.CM.add quad conn tcp_listen.connections }
   in [
     tcp_listen, None ;
@@ -254,7 +254,7 @@ let test_listen =
   test_all " " Cstruct.empty @ test_all "+data " (Cstruct.create 20)
 
 let tcp_syn_sent =
-  let tcp', _id, _out =
+  let tcp', _id, _signal, _out =
     User.connect ~src:my_ip ~src_port:listen_port ~dst:your_ip ~dst_port:src_port tcp (Mtime.of_uint64_ns 0L)
   in
   tcp'

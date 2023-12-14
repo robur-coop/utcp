@@ -86,7 +86,7 @@ let initial_packet state ip rng_data now ~src ~dst tcp =
   if Ipaddr.compare ip src = 0 then begin
     (* we're the client - set ISS to match *)
     Cstruct.LE.set_uint32 rng_data 0 (Cstruct.BE.get_uint32 tcp 4);
-    let state, flow, out =
+    let state, flow, _cond, out =
       Utcp.connect ~src ~src_port ~dst ~dst_port state now
     in
     print_out out;
@@ -118,7 +118,7 @@ let jump () filename ip =
   let fold = pcap_reader filename in
   let rng_data = Cstruct.create 4 in
   let rng i = assert (i = 4) ; rng_data in
-  let state = Utcp.empty "pcap-replay" rng in
+  let state = Utcp.empty Fun.id "pcap-replay" rng in
   let flow = ref None in
   fold (fun (state, act) idx ts ~src ~dst tcp ->
       let state =
@@ -138,7 +138,7 @@ let jump () filename ip =
         else if Ipaddr.compare x dst = 0 then begin
           Logs.info (fun m -> m "replay packet %u" idx);
           let state, stuff, out = Utcp.handle_buf state mt ~src ~dst tcp in
-          (match stuff with Some `Established fl ->
+          (match stuff with Some (`Established (fl, _)) ->
              Logs.info (fun m -> m "flow established! (previously %s)"
                            (match !flow with Some _ -> "SOME" | None -> "none"));
              flow := Some fl | _ -> ());
@@ -171,7 +171,7 @@ let jump () filename ip =
                   | Error `Msg msg ->
                     Logs.err (fun m -> m "failure during send: %s" msg);
                     assert false
-                  | Ok (state, bytes_sent, out) ->
+                  | Ok (state, bytes_sent, _cond, out) ->
                     if bytes_sent <> Cstruct.length payload then begin
                       Logs.err (fun m -> m "partial send: %u of %u bytes"
                                    bytes_sent (Cstruct.length payload));

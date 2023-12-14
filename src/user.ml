@@ -35,7 +35,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
       t_advmss = advmss ;
       t_rttseg
     } in
-    conn_state ~rcvbufsize:rcv_wnd ~sndbufsize:Params.so_sndbuf Syn_sent control_block
+    conn_state t.mk_notify ~rcvbufsize:rcv_wnd ~sndbufsize:Params.so_sndbuf Syn_sent control_block
   in
   let _, _, seg = Segment.make_syn conn.control_block id in
   let connections =
@@ -43,7 +43,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
     CM.add id conn t.connections
   in
   Stats.incr_active t.stats;
-  { t with connections }, id, (src, dst, seg)
+  { t with connections }, id, conn.rcv_notify, (src, dst, seg)
 
 (* shutdown_1 and shutdown_3 *)
 let shutdown t now id v =
@@ -126,7 +126,7 @@ let send t now id buf =
     let sndq = buf' :: conn.sndq in
     let conn' = { conn with sndq } in
     let conn', out = Segment.tcp_output_perhaps now id conn' in
-    Ok ({ t with connections = CM.add id conn' t.connections }, Cstruct.length buf', out)
+    Ok ({ t with connections = CM.add id conn' t.connections }, Cstruct.length buf', conn'.snd_notify, out)
 
 let recv t now id =
   Tracing.debug (fun m -> m "%a [%a] receive" Connection.pp id Mtime.pp now);
@@ -140,4 +140,4 @@ let recv t now id =
     let* () = guard (not (Cstruct.length rcvq = 0 && conn.cantrcvmore)) `Eof in
     let conn' = { conn with rcvq = [] } in
     let conn', out = Segment.tcp_output_perhaps now id conn' in
-    Ok ({ t with connections = CM.add id conn' t.connections }, rcvq, out)
+    Ok ({ t with connections = CM.add id conn' t.connections }, rcvq, conn'.rcv_notify, out)

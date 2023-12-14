@@ -170,7 +170,7 @@ let slow_timer t now =
         in
         let out = maybe_out out_opt in
         match r with
-        | Error e -> acc, (id, e) :: drops, out
+        | Error e -> acc, (id, e, conn.rcv_notify, conn.snd_notify) :: drops, out
         | Ok c -> CM.add id c acc, drops, out)
       t.connections (CM.empty, [], [])
   in

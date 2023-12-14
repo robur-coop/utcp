@@ -201,7 +201,7 @@ let jump () filename ip =
   let rng_data = Cstruct.create 4 in
   let rng i = assert (i = 4) ; rng_data in
   let state =
-    let s = Utcp.empty "trace-replay" rng in
+    let s = Utcp.empty Fun.id "trace-replay" rng in
     Utcp.start_listen s 443
   in
   let flow = ref None in
@@ -225,7 +225,7 @@ let jump () filename ip =
         | `Handle_buf ->
           let data = Cstruct.of_string (Option.get (snd msg.data)) in
           let state, stuff, out = Utcp.handle_buf state tm ~src ~dst data in
-          (match stuff with Some `Established fl ->
+          (match stuff with Some (`Established (fl, _)) ->
              Logs.info (fun m -> m "flow established! (previously %s)"
                            (match !flow with Some _ -> "SOME" | None -> "none"));
              flow := Some fl | _ -> ());
@@ -240,7 +240,7 @@ let jump () filename ip =
         | `Receive ->
           let flow = Option.get !flow in
           (match Utcp.recv state tm flow with
-           | Ok (state, _data, out) ->
+           | Ok (state, _data, _cond, out) ->
              List.iter print_out out;
              state, false, succ idx
            | Error `Msg s ->
@@ -252,7 +252,7 @@ let jump () filename ip =
         | `Send ->
           let flow = Option.get !flow in
           (match Utcp.send state tm flow (Cstruct.create (fst msg.data)) with
-           | Ok (state, bytes_sent, out) ->
+           | Ok (state, bytes_sent, _cond, out) ->
              if bytes_sent <> fst msg.data then begin
                Logs.err (fun m -> m "partial send: %u of %u bytes"
                             bytes_sent (fst msg.data));
