@@ -164,14 +164,11 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
                   (* NOTE we start an asynchronous task with the callback *)
                   Lwt.async (fun () -> cb (t, id)))
              | Some cond ->
-               Log.info (fun m -> m "%a signalled (ok, est)" Utcp.pp_flow id);
                Lwt_condition.signal cond (Ok ()))
-          | `Drop (id, c_opt, cs) ->
-            Log.info (fun m -> m "%a signalled drop" Utcp.pp_flow id);
+          | `Drop (_id, c_opt, cs) ->
             List.iter (fun c -> Lwt_condition.signal c (Error `Eof)) cs;
             Option.iter (fun c -> Lwt_condition.signal c (Ok ())) c_opt
-          | `Signal (id, conds) ->
-            Log.info (fun m -> m "%a signalled (ok)" Utcp.pp_flow id);
+          | `Signal (_id, conds) ->
             List.iter (fun c -> Lwt_condition.signal c (Ok ())) conds
         )
       ev;
@@ -186,14 +183,13 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
         let rec timer n =
           let tcp, drops, outs = Utcp.timer t.tcp (now ()) in
           t.tcp <- tcp;
-          List.iter (fun (id, err, rcv, snd) ->
+          List.iter (fun (_id, err, rcv, snd) ->
               let err = Error (match err with
                   | `Retransmission_exceeded -> `Msg "retransmission exceeded"
                   | `Timer_2msl -> `Eof
                   | `Timer_connection_established -> `Eof
                   | `Timer_fin_wait_2 -> `Eof)
               in
-              Log.info (fun m -> m "%a signalled timer" Utcp.pp_flow id);
               Lwt_condition.signal rcv err;
               Lwt_condition.signal snd err;
             )
