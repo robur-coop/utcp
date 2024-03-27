@@ -33,6 +33,10 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
     let _, (dst, dst_port) = Utcp.peers flow in
     dst, dst_port
 
+  let src (_t, flow) =
+    let (src, src_port), _ = Utcp.peers flow in
+    src, src_port
+
   let output_ip t (src, dst, seg) =
     let size = Utcp.Segment.length seg in
     Log.debug (fun m -> m "output to %a: %a" Ipaddr.pp dst Utcp.Segment.pp seg);
@@ -120,6 +124,15 @@ module Make (R : Mirage_random.S) (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_
       output_ign t segs
     | Error `Msg msg ->
       Log.err (fun m -> m "%a error in close: %s" Utcp.pp_flow flow msg);
+      Lwt.return_unit
+
+  let shutdown (t, flow) mode =
+    match Utcp.shutdown t.tcp (now ()) flow mode with
+    | Ok (tcp, segs) ->
+      t.tcp <- tcp ;
+      output_ign t segs
+    | Error `Msg msg ->
+      Log.err (fun m -> m "%a error in shutdown: %s" Utcp.pp_flow flow msg);
       Lwt.return_unit
 
   let write_nodelay flow buf = write flow buf
