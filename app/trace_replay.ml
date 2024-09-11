@@ -198,8 +198,8 @@ let jump () filename ip =
   if ip = None then
     Logs.warn (fun m -> m "only decoding and printing trace, no replaying done (specify --ip=<IP> to take an endpoint)");
   let msgs = trace_reader filename in
-  let rng_data = Cstruct.create 4 in
-  let rng i = assert (i = 4) ; rng_data in
+  let rng_data = Bytes.make 4 '\000' in
+  let rng i = assert (i = 4) ; Bytes.unsafe_to_string rng_data in
   let state =
     let s = Utcp.empty Fun.id "trace-replay" rng in
     Utcp.start_listen s 443
@@ -213,7 +213,7 @@ let jump () filename ip =
       |> List.hd
     in
     let data = Option.get (snd first_out.data) in
-    Cstruct.LE.set_uint32 rng_data 0
+    Bytes.set_int32_le rng_data 0
       (Cstruct.BE.get_uint32 (Cstruct.of_string data) 4)
   in
   let _, _ , _ =

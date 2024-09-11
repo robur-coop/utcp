@@ -87,7 +87,7 @@ let deliver_in_1 mk_notify m stats rng now id seg =
       last_ack_sent = ack' ;
       t_rttseg }
     in
-    conn_state mk_notify ~rcvbufsize ~sndbufsize Syn_received control_block
+    conn_state now mk_notify ~rcvbufsize ~sndbufsize Syn_received control_block
   in
   let reply = Segment.make_syn_ack conn.control_block id in
   Log.debug (fun m -> m "%a passive open %a" Connection.pp id (pp_conn_state now) conn);

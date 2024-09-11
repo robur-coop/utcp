@@ -3,7 +3,7 @@
  (public_name server)
  (modules server)
  (libraries utcp mirage-net-unix cstruct lwt logs ethernet arp.mirage
-   tcpip.ipv4 mirage-random-test mirage-unix mirage-clock-unix lwt.unix
+   tcpip.ipv4 mirage-crypto-rng-mirage mirage-unix mirage-clock-unix lwt.unix
    cmdliner logs.fmt fmt.cli logs.cli fmt.tty mtime.clock.os)
  (optional))
 
@@ -12,7 +12,7 @@
  (public_name single)
  (modules single)
  (libraries utcp mirage-net-unix cstruct lwt logs ethernet arp.mirage
-   tcpip.ipv4 mirage-random-test mirage-unix mirage-clock-unix lwt.unix
+   tcpip.ipv4 mirage-crypto-rng mirage-unix mirage-clock-unix lwt.unix
    cmdliner logs.fmt fmt.cli logs.cli fmt.tty mtime.clock.os)
  (optional))
 
