@@ -1,6 +1,6 @@
 type 'a state
 
-val empty : (unit -> 'a) -> string -> (int -> Cstruct.t) -> 'a state
+val empty : (unit -> 'a) -> string -> (int -> string) -> 'a state
 
 val start_listen : 'a state -> int -> 'a state
 
@@ -190,25 +190,26 @@ module State : sig
     sndq : Cstruct.t list ;
     rcv_notify : 'a;
     snd_notify : 'a;
+    created : Mtime.t;
   }
-  val conn_state : (unit -> 'a) -> rcvbufsize:int -> sndbufsize:int -> tcp_state ->
+  val conn_state : Mtime.t -> (unit -> 'a) -> rcvbufsize:int -> sndbufsize:int -> tcp_state ->
     control_block -> 'a conn_state
   module IS : Set.S with type elt = int
   module CM : Map.S with type key = flow
   module Stats : sig type t end
   type 'a t = {
-    rng : int -> Cstruct.t ;
+    rng : int -> string ;
     listeners : IS.t ;
     connections : 'a conn_state CM.t ;
     stats : Stats.t ;
     id : string ;
     mutable ctr : int ;
-    metrics : (string -> Metrics.field list, 'a conn_state CM.t * Stats.t -> Metrics.data) Metrics.src;
+    metrics : (string -> Metrics.field list, Mtime.t * 'a conn_state CM.t * Stats.t -> Metrics.data) Metrics.src;
     transitions : (string -> Metrics.field list, string -> Metrics.data) Metrics.src;
     mk_notify : unit -> 'a;
   }
   val pp : Mtime.t -> 'a t Fmt.t
-  val empty : (unit -> 'a) -> string -> (int -> Cstruct.t) -> 'a t
+  val empty : (unit -> 'a) -> string -> (int -> string) -> 'a t
   val start_listen : 'a t -> int -> 'a t
   val stop_listen : 'a t -> int -> 'a t
 end

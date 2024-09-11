@@ -4,7 +4,7 @@ open Utcp
 
 (* generates the bit pattern 0b10100101 *)
 let static_rng y =
-  let b = Cstruct.create y in Cstruct.memset b 0xA5 ; b
+  Bytes.make y '\xA5' |> Bytes.unsafe_to_string
 
 let equal_rttinf a b =
   a.State.t_rttupdated = b.State.t_rttupdated &&
@@ -225,7 +225,7 @@ let listen =
              options = [ Segment.MaximumSegmentSize 1460 ] }
   in
   let tcp' =
-    let conn = State.conn_state (fun () -> ()) ~rcvbufsize:0 ~sndbufsize:0 Syn_received State.initial_cb in
+    let conn = State.conn_state Mtime.min_stamp (fun () -> ()) ~rcvbufsize:0 ~sndbufsize:0 Syn_received State.initial_cb in
     { tcp_listen with connections = State.CM.add quad conn tcp_listen.connections }
   in [
     tcp_listen, None ;

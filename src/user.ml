@@ -35,7 +35,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
       t_advmss = advmss ;
       t_rttseg
     } in
-    conn_state t.mk_notify ~rcvbufsize:rcv_wnd ~sndbufsize:Params.so_sndbuf Syn_sent control_block
+    conn_state now t.mk_notify ~rcvbufsize:rcv_wnd ~sndbufsize:Params.so_sndbuf Syn_sent control_block
   in
   let _, _, seg = Segment.make_syn conn.control_block id in
   let connections =

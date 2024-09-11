@@ -180,7 +180,7 @@ let slow_timer t now =
 let timer t now =
   t.ctr <- succ t.ctr ;
   (* every 9.5 seconds, compute metrics *)
-  if t.ctr mod 95 = 0 then add_metrics t;
+  if t.ctr mod 95 = 0 then add_metrics t now;
   if t.ctr mod 2 = 0 then fast_timer t now
   else if t.ctr mod 5 = 0 then slow_timer t now
   else t, [], []

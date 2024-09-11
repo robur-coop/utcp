@@ -14,13 +14,13 @@ depends: [
   "ipaddr" {>= "5.2.0"}
   "ipaddr-cstruct" {>= "5.2.0"}
   "logs" {>= "0.7.0"}
-  "randomconv" {>= "0.1.3"}
+  "randomconv" {>= "0.2.0"}
   "mtime" {>= "1.3.0"}
   "metrics" {>= "0.4.1"}
   "base64" {>= "3.5.1"} #only used for tracing
   #for mirage sublibrary
   "lwt" {>= "5.4.2"}
-  "mirage-random" {>= "2.0.0"}
+  "mirage-crypto-rng-mirage" {>= "1.0.0"}
   "mirage-time" {>= "2.0.1"}
   "mirage-clock" {>= "3.1.0"}
   "tcpip" {>= "8.0.1"}
@@ -30,7 +30,6 @@ depends: [
   "mirage-net-unix" {>= "2.8.0" & dev}
   "ethernet" {>= "2.2.1" & dev}
   "arp" {>= "2.3.0" & dev}
-  "mirage-random-test" {dev}
   "mirage-unix" {>= "5.0.0" & dev}
   "mirage-clock-unix" {>= "3.1.0" & dev}
   "pcap-format" {>= "0.6.0" & dev}

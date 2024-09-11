@@ -85,7 +85,7 @@ let initial_packet state ip rng_data now ~src ~dst tcp =
   in
   if Ipaddr.compare ip src = 0 then begin
     (* we're the client - set ISS to match *)
-    Cstruct.LE.set_uint32 rng_data 0 (Cstruct.BE.get_uint32 tcp 4);
+    Bytes.set_int32_le rng_data 0 (Cstruct.BE.get_uint32 tcp 4);
     let state, flow, _cond, out =
       Utcp.connect ~src ~src_port ~dst ~dst_port state now
     in
@@ -102,7 +102,7 @@ let initial_packet state ip rng_data now ~src ~dst tcp =
       assert (dst_port = Cstruct.BE.get_uint16 tcp' 0);
       assert (src_port = Cstruct.BE.get_uint16 tcp' 2);
       (* set ISS to the seq in the next segment ;) *)
-      Cstruct.LE.set_uint32 rng_data 0 (Cstruct.BE.get_uint32 tcp' 4);
+      Bytes.set_int32_le rng_data 0 (Cstruct.BE.get_uint32 tcp' 4);
       (* replay the 0 packet *)
       Logs.info (fun m -> m "replay packet 0");
       let state, _stuff, out = Utcp.handle_buf state now ~src ~dst tcp in
@@ -116,8 +116,8 @@ let jump () filename ip =
   if ip = None then
     Logs.warn (fun m -> m "only decoding and printing pcap, no replaying done (specify --ip=<IP> to take an endpoint)");
   let fold = pcap_reader filename in
-  let rng_data = Cstruct.create 4 in
-  let rng i = assert (i = 4) ; rng_data in
+  let rng_data = Bytes.make 4 '\000' in
+  let rng i = assert (i = 4) ; Bytes.unsafe_to_string rng_data in
   let state = Utcp.empty Fun.id "pcap-replay" rng in
   let flow = ref None in
   fold (fun (state, act) idx ts ~src ~dst tcp ->

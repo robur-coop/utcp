@@ -412,18 +412,25 @@ type 'a conn_state = {
   sndq : Cstruct.t list ; (* reverse list of data to be sent out *)
   rcv_notify : 'a;
   snd_notify : 'a;
+  created : Mtime.t;
 }
 
-let conn_state mk_notify ~rcvbufsize ~sndbufsize tcp_state control_block = {
+let conn_state created mk_notify ~rcvbufsize ~sndbufsize tcp_state control_block = {
   tcp_state ; control_block ;
   cantrcvmore = false ; cantsndmore = false ;
   rcvq = [] ; sndq = [] ;
   rcvbufsize ; sndbufsize ;
   rcv_notify = mk_notify () ; snd_notify = mk_notify () ;
+  created ;
 }
 
 let pp_conn_state now ppf c =
-  Fmt.pf ppf "TCP %a cb %a" pp_fsm c.tcp_state (pp_control now) c.control_block
+  let created_span = Mtime.Span.of_uint64_ns (Mtime.to_uint64_ns c.created) in
+  Fmt.pf ppf "TCP (since %a) %a cb %a"
+    Duration.pp
+    (Mtime.to_uint64_ns
+       (Option.value ~default:Mtime.min_stamp (Mtime.sub_span now created_span)))
+    pp_fsm c.tcp_state (pp_control now) c.control_block
 
 module IS = Set.Make(struct type t = int let compare = compare_int end)
 
@@ -452,13 +459,13 @@ end
 
 (* path mtu (its global to a stack) *)
 type 'a t = {
-  rng : int -> Cstruct.t ;
+  rng : int -> string ;
   listeners : IS.t ;
   connections : 'a conn_state CM.t ;
   stats : Stats.t ;
   id : string ;
   mutable ctr : int ;
-  metrics : (string -> Metrics.field list, 'a conn_state CM.t * Stats.t -> Metrics.data) Metrics.src;
+  metrics : (string -> Metrics.field list, Mtime.t * 'a conn_state CM.t * Stats.t -> Metrics.data) Metrics.src;
   transitions : (string -> Metrics.field list, string -> Metrics.data) Metrics.src;
   mk_notify : unit -> 'a;
 }
@@ -468,6 +475,9 @@ module States = Map.Make (struct
     let compare a b = compare a b
   end)
 
+let src = Logs.Src.create "tcp.state" ~doc:"TCP state"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 let metrics () =
   let tcp_states =
     [ Syn_sent ; Syn_received ; Established ; Close_wait ; Fin_wait_1 ;
@@ -476,9 +486,11 @@ let metrics () =
   in
   let open Metrics in
   let doc = "uTCP metrics" in
-  let data (connections, stats) =
+  let data (now, connections, stats) =
     let rcvq, sndq, states =
-      CM.fold (fun _ conn (rcvq, sndq, acc) ->
+      CM.fold (fun k conn (rcvq, sndq, acc) ->
+          if Mtime.(Span.to_uint64_ns (span now conn.created)) > Duration.of_min 1 then
+            Log.info (fun m -> m "%a in %a" Connection.pp k (pp_conn_state now) conn);
           rcvq + Cstruct.lenv conn.rcvq,
           sndq + Cstruct.lenv conn.sndq,
           States.update conn.tcp_state (fun v -> Some (succ (Option.value ~default:0 v))) acc)
@@ -502,8 +514,8 @@ let metrics () =
   let tag = Tags.string "stack-id" in
   Src.v ~doc ~tags:Tags.[ tag ] ~data "utcp"
 
-let add_metrics t =
-  Metrics.add t.metrics (fun x -> x t.id) (fun d -> d (t.connections, t.stats))
+let add_metrics t now =
+  Metrics.add t.metrics (fun x -> x t.id) (fun d -> d (now, t.connections, t.stats))
 
 let transitions () =
   let create () =

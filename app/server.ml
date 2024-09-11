@@ -2,7 +2,8 @@ open Lwt.Infix
 
 module Ethernet = Ethernet.Make(Netif)
 module ARP = Arp.Make(Ethernet)(Unix_os.Time)
-module IPv4 = Static_ipv4.Make(Mirage_random_test)(Mclock)(Ethernet)(ARP)
+module R = Mirage_crypto_rng_mirage.Make(Unix_os.Time)(Mclock)
+module IPv4 = Static_ipv4.Make(R)(Mclock)(Ethernet)(ARP)
 
 let log_err ~pp_error = function
   | Ok _ -> ()
@@ -26,8 +27,8 @@ let cb ~proto ~src ~dst payload =
 
 let jump () =
   Printexc.record_backtrace true;
-  Mirage_random_test.initialize ();
   Lwt_main.run (
+    R.initialize (module Mirage_crypto_rng.Fortuna) >>= fun () ->
     Netif.connect "tap2" >>= fun tap ->
     Ethernet.connect tap >>= fun eth ->
     ARP.connect eth >>= fun arp ->
@@ -36,7 +37,7 @@ let jump () =
     let tcp (*, clo, out *) =
       (* let dst = Ipaddr.(V4 (V4.of_string_exn "10.0.42.1")) in *)
       let init (*, conn, out *) =
-        let s = Utcp.empty Fun.id "" Mirage_random_test.generate in
+        let s = Utcp.empty Fun.id "" R.generate in
         let s' = Utcp.start_listen s 23 in
         (* Tcp.connect ~src:Ipaddr.(V4 (V4.Prefix.address cidr)) ~dst ~dst_port:1234 s' (Mtime_clock.now ()) *)
         s'
