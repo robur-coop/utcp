@@ -12,8 +12,9 @@
  (public_name single)
  (modules single)
  (libraries utcp mirage-net-unix cstruct lwt logs ethernet arp.mirage
-   tcpip.ipv4 mirage-crypto-rng mirage-unix mirage-clock-unix lwt.unix
-   cmdliner logs.fmt fmt.cli logs.cli fmt.tty mtime.clock.os)
+   mirage-crypto-rng-mirage tcpip.ipv4 mirage-crypto-rng mirage-unix
+   mirage-clock-unix lwt.unix cmdliner logs.fmt fmt.cli logs.cli fmt.tty
+   mtime.clock.os)
  (optional))
 
 (executable
