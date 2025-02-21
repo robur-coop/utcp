@@ -28,6 +28,7 @@ depends: [
   "mirage-flow" {>= "4.0.0"}
   #for apps
   "mirage-crypto-rng" {>= "1.0.0" & dev}
+  "mirage-crypto-rng-mirage"
   "cmdliner" {>= "1.1.0" & dev}
   "mirage-net-unix" {>= "2.8.0" & dev}
   "ethernet" {>= "2.2.1" & dev}
