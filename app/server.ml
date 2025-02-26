@@ -27,7 +27,7 @@ let cb ~proto ~src ~dst payload =
 let jump () =
   Printexc.record_backtrace true;
   Lwt_main.run (
-    Mirage_crypto_rng_mirage.initialize (module Mirage_crypto_rng.Fortuna) >>= fun () ->
+    Mirage_crypto_rng_unix.use_default ();
     Netif.connect "tap2" >>= fun tap ->
     Ethernet.connect tap >>= fun eth ->
     ARP.connect eth >>= fun arp ->

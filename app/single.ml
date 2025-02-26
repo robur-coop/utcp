@@ -31,7 +31,7 @@ let tcp_cb ~src ~dst payload =
 let jump _ src src_port dst dst_port syn fin rst push ack seq window data =
   Printexc.record_backtrace true;
   Lwt_main.run (
-    Mirage_crypto_rng_mirage.initialize (module Mirage_crypto_rng.Fortuna) >>= fun () ->
+    Mirage_crypto_rng_unix.use_default ();
     let cidr = Ipaddr.V4.Prefix.of_string_exn src
     and dst = Ipaddr.(V4 (V4.of_string_exn dst))
     in

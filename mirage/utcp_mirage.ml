@@ -3,9 +3,9 @@ open Lwt.Infix
 let src = Logs.Src.create "tcp.mirage" ~doc:"TCP mirage"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module Make (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
+module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
 
-  let now () = Mtime.of_uint64_ns (Mclock.elapsed_ns ())
+  let now () = Mtime.of_uint64_ns (Mirage_mtime.elapsed_ns ())
 
   type error = Tcpip.Tcp.error
 
@@ -209,7 +209,7 @@ module Make (Mclock : Mirage_clock.MCLOCK) (Time : Mirage_time.S) (Ip : Tcpip.Ip
             drops;
           (* TODO do not ignore IP write error *)
           Lwt_list.iter_p (fun data -> output_ip t data >|= ignore) outs >>= fun () ->
-          Time.sleep_ns (Duration.of_ms 100) >>= fun () ->
+          Mirage_sleep.ns (Duration.of_ms 100) >>= fun () ->
           (timer [@tailcall]) (succ n)
         in
         timer 0);

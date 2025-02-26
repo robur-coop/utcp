@@ -22,19 +22,17 @@ depends: [
   #for mirage sublibrary
   "lwt" {>= "5.4.2"}
   "mirage-crypto-rng-mirage" {>= "1.0.0"}
-  "mirage-time" {>= "2.0.1"}
-  "mirage-clock" {>= "3.1.0"}
-  "tcpip" {>= "8.0.1"}
+  "mirage-sleep" {>= "4.0.0"}
+  "mirage-mtime" {>= "5.0.0"}
+  "tcpip" {>= "9.0.0"}
   "mirage-flow" {>= "4.0.0"}
   #for apps
-  "mirage-crypto-rng" {>= "1.0.0" & dev}
-  "mirage-crypto-rng-mirage"
+  "mirage-crypto-rng" {>= "1.2.0" & dev}
   "cmdliner" {>= "1.1.0" & dev}
   "mirage-net-unix" {>= "2.8.0" & dev}
   "ethernet" {>= "2.2.1" & dev}
-  "arp" {>= "2.3.0" & dev}
+  "arp" {>= "4.0.0" & dev}
   "mirage-unix" {>= "5.0.0" & dev}
-  "mirage-clock-unix" {>= "3.1.0" & dev}
   "pcap-format" {>= "0.6.0" & dev}
   "alcotest" {>= "1.5.0" & with-test}
   "crowbar" {>= "0.2.1" & with-test}
