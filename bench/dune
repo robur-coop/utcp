@@ -1,0 +1,11 @@
+(executable
+ (name checksum)
+ (libraries bechamel bechamel-js utcp))
+
+(rule
+ (targets checksum.json)
+ (action (with-stdout-to %{targets} (run ./checksum.exe))))
+
+(rule
+ (targets checksum.html)
+ (action (system "%{bin:bechamel-html} < %{dep:checksum.json} > %{targets}")))

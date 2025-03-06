@@ -36,6 +36,8 @@ depends: [
   "pcap-format" {>= "0.6.0" & dev}
   "alcotest" {>= "1.5.0" & with-test}
   "crowbar" {>= "0.2.1" & with-test}
+  "bechamel" {with-test}
+  "bechamel-js" {with-test}
 ]
 build: [
   ["dune" "subst"] {dev}

@@ -23,6 +23,18 @@ external unsafe_get_uint8 : bigstring -> int -> int = "%caml_ba_unsafe_ref_1"
 external unsafe_get_uint16 : bigstring -> int -> int = "%caml_bigstring_get16u"
 external swap16 : int -> int = "%bswap16"
 external swap32 : int32 -> int32 = "%bswap_int32"
+external int32_to_int : int32 -> int = "%int32_to_int"
+
+let mask = 0xffff lsl 16 lor 0xffff
+let int32_to_int n = int32_to_int n land mask
+
+(* NOTE(dinosaure): Users may wonder why we use access with a bound-check (such
+   as [bufX.{...}]). The reason is simple: OCaml, with regard to bigarrays, can
+   unbox [int16]/[int32] if such access is desired. Furthermore, using a
+   function such as [unsafe_get_int{16,32}] would not allow OCaml to correctly
+   infer this access and to "prepare the ground" for unboxing. It should be
+   noted that bound-check is not the most expensive (and quite predictable in
+   reality), but unbox is. *)
 
 let unsafe_digest_16_le ?(off = 0) ~len:top buf =
   let buf16 = to_int16 ~off ~len:top buf in
@@ -40,13 +52,14 @@ let unsafe_digest_16_le ?(off = 0) ~len:top buf =
   if !sum > 0xffff then incr sum;
   swap16 (lnot !sum land 0xffff)
 
+(* NOTE(dinosaure): only work on 64-bit architecture. *)
 let unsafe_digest_32_le ?(off = 0) ~len:top buf =
   let buf32 = to_int32 ~off ~len:top buf in
   let len = ref top in
   let sum = ref 0 in
   let i = ref 0 in
   while !len >= 4 do
-    let[@warning "-8"] (Some v) = Int32.unsigned_to_int buf32.{!i} in
+    let v = int32_to_int buf32.{!i} in
     sum := !sum + v;
     incr i;
     len := !len - 4
@@ -60,13 +73,14 @@ let unsafe_digest_32_le ?(off = 0) ~len:top buf =
   done;
   swap16 (lnot !sum land 0xffff)
 
+(* NOTE(dinosaure): only work on 64-bit architecture. *)
 let unsafe_digest_32_be ?(off = 0) ~len:top buf =
   let buf32 = to_int32 ~off ~len:top buf in
   let len = ref top in
   let sum = ref 0 in
   let i = ref 0 in
   while !len >= 4 do
-    let[@warning "-8"] (Some v) = Int32.unsigned_to_int (swap32 buf32.{!i}) in
+    let v = int32_to_int (swap32 buf32.{!i}) in
     sum := !sum + v;
     incr i;
     len := !len - 4
