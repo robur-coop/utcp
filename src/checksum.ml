@@ -28,6 +28,14 @@ external int32_to_int : int32 -> int = "%int32_to_int"
 let mask = 0xffff lsl 16 lor 0xffff
 let int32_to_int n = int32_to_int n land mask
 
+(* NOTE(dinosaure): Users may wonder why we use access with a bound-check (such
+   as [bufX.{...}]). The reason is simple: OCaml, with regard to bigarrays, can
+   unbox [int16]/[int32] if such access is desired. Furthermore, using a
+   function such as [unsafe_get_int{16,32}] would not allow OCaml to correctly
+   infer this access and to "prepare the ground" for unboxing. It should be
+   noted that bound-check is not the most expensive (and quite predictable in
+   reality), but unbox is. *)
+
 let unsafe_digest_16_le ?(off = 0) ~len:top buf =
   let buf16 = to_int16 ~off ~len:top buf in
   let len = ref top in
