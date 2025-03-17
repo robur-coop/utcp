@@ -823,7 +823,7 @@ let di3_datastuff now the_ststuff conn seg ourfinisacked fin ack =
     Sequence.equal seg.seq cb.rcv_nxt &&
     cb.snd_wnd = win &&
     Sequence.equal cb.snd_max cb.snd_nxt &&
-    ((Sequence.greater ack cb.snd_una && Sequence.less ack cb.snd_max &&
+    ((Sequence.greater ack cb.snd_una && Sequence.less_equal ack cb.snd_max &&
       cb.snd_cwnd >= cb.snd_wnd && cb.t_dupacks < 3)
      || (Sequence.equal ack cb.snd_una && Reassembly_queue.is_empty cb.t_segq &&
          Cstruct.length seg.payload < conn.rcvbufsize - Cstruct.lenv conn.rcvq))
