@@ -178,7 +178,8 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
                   Lwt.async (fun () -> cb (t, id)))
              | Some cond ->
                Lwt_condition.signal cond (Ok ()))
-          | `Drop (_id, c_opt, cs) ->
+          | `Drop f ->
+            let _id, c_opt, cs = f () in
             List.iter (fun c -> Lwt_condition.signal c (Error `Eof)) cs;
             Option.iter (fun c -> Lwt_condition.signal c (Ok ())) c_opt
           | `Signal (_id, conds) ->

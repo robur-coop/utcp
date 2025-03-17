@@ -83,7 +83,7 @@ val timer : 'a state -> Mtime.t ->
 val handle_buf : 'a state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
   Cstruct.t ->
   ('a state * [ `Established of flow * 'a option
-              | `Drop of flow * 'a option * 'a list
+              | `Drop of unit -> flow * 'a option * 'a list
               | `Signal of flow * 'a list ] option * output list)
 
 val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
