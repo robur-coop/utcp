@@ -1142,7 +1142,7 @@ let handle_buf t now ~src ~dst data =
           else
             None, Option.to_list rcv_n @ Option.to_list snd_n
         in
-        Some (`Drop (fun () -> (id, opt_cond, conds)))
+        Some (`Drop (id, opt_cond, conds))
       | _ ->
         match
           (if rcv_data then Option.to_list rcv_n else []) @
