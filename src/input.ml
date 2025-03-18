@@ -97,7 +97,7 @@ let deliver_in_1 mk_notify m stats rng now id seg =
 let deliver_in_2 m stats now id conn seg ack =
   m "deliver-in-2";
   let cb = conn.control_block in
-  let* () = guard (Sequence.equal ack cb.snd_nxt) (`Drop "ack = snd_nxt") in
+  let* () = guard (Sequence.equal ack cb.snd_nxt) (`Drop (fun () -> "ack = snd_nxt")) in
   let tf_doing_ws, snd_scale, rcv_scale =
     match Segment.ws seg, cb.request_r_scale with
     | None, _ -> false, 0, 0
@@ -193,8 +193,8 @@ let deliver_in_2a m conn seg f =
     if Sequence.equal ack conn.control_block.snd_nxt then
       Ok ()
     else
-      Error (`Drop "ACK in-window")
-  | _ -> Error (`Drop "RA")
+      Error (`Drop (fun () -> "ACK in-window"))
+  | _ -> Error (`Drop (fun () -> "RA"))
 
 let deliver_in_3c_3d m stats now conn seg =
   m "deliver-in-3c-3d";
@@ -208,20 +208,20 @@ let deliver_in_3c_3d m stats now conn seg =
   (* - furthermore, it should be >= irs -- that's redundant with above *)
   (* if their seq is good (but their ack isn't or it is no ack), reset *)
   let* () =
-    guard (Sequence.equal seg.Segment.seq cb.rcv_nxt) (`Drop "seq = rcv_nxt")
+    guard (Sequence.equal seg.Segment.seq cb.rcv_nxt) (`Drop (fun () -> "seq = rcv_nxt"))
   in
   (* - we sent our syn, so we expect an appropriate ack for the syn! *)
   (* - we didn't send out more data, so that ack should be exact *)
   (* if their seq is not good, drop packet -- TODO allow syn *)
   match seg.Segment.flag, seg.Segment.ack with
-  | Some `Rst, _ -> Error (`Reset "received valid reset")
-  | _, None -> Error (`Drop "ACK flag")
-  | Some _, _ -> Error (`Drop "S|F")
+  | Some `Rst, _ -> Error (`Reset (fun () -> "received valid reset"))
+  | _, None -> Error (`Drop (fun () -> "ACK flag"))
+  | Some _, _ -> Error (`Drop (fun () -> "S|F"))
   | _, Some ack ->
     (* hostLTS:15828 - well, more or less ;) *)
     (* auxFns:2252 ack < snd_una || snd_max < ack -> break LAND DoS, prevent ACK storm *)
     (* TODO what is an acceptable ack? snd_nxt, if <> what to do? *)
-    let* () = guard (Sequence.equal ack cb.snd_nxt) (`Reset "ack = snd_nxt") in
+    let* () = guard (Sequence.equal ack cb.snd_nxt) (`Reset (fun () -> "ack = snd_nxt")) in
     (* not (ack <= tcp_sock.cb.snd_una \/ ack > tcp_sock.cb.snd_max) *)
     (* TODO rtt measurement likely *)
     (* expect (assume for now): no data in that segment !? *)
@@ -918,7 +918,7 @@ let deliver_in_3 m now id conn seg flag ack =
   m "deliver-in-3";
   (* we expect at most FIN PSH ACK - we drop with reset all other combinations *)
   let* () =
-    guard (flag = None || flag = Some `Fin) (`Reset "flags ACK | FIN & ACK")
+    guard (flag = None || flag = Some `Fin) (`Reset (fun () -> "flags ACK | FIN & ACK"))
   in
   let fin = flag = Some `Fin in
   (* PAWS, timers, rcv_wnd may have opened! updates fin_wait_2 timer *)
@@ -949,7 +949,7 @@ let deliver_in_7 m id conn seg =
   let cb = conn.control_block in
   if Sequence.equal cb.rcv_nxt seg.Segment.seq then
     (* we rely that dropwithreset does not RST if a RST was received *)
-    Error (`Reset "received valid reset")
+    Error (`Reset (fun () -> "received valid reset"))
   else
     Ok (Segment.make_ack cb ~fin:false id)
 
@@ -1059,10 +1059,10 @@ let handle_conn t now id conn seg =
     | _ ->
       let* () =
         guard (in_window conn.control_block seg)
-          (`Drop (Fmt.str "in_window seq %a seql %u rcv_nxt %a rcv_wnd %u"
-                    Sequence.pp seg.Segment.seq (Cstruct.length seg.payload)
-                    Sequence.pp conn.control_block.rcv_nxt conn.control_block.rcv_wnd)
-          ) in
+          (`Drop (fun () -> Fmt.str "in_window seq %a seql %u rcv_nxt %a rcv_wnd %u"
+                     Sequence.pp seg.Segment.seq (Cstruct.length seg.payload)
+                     Sequence.pp conn.control_block.rcv_nxt conn.control_block.rcv_wnd))
+      in
       (* RFC5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
       match seg.Segment.flag, seg.Segment.ack with
       | Some `Rst, _ ->
@@ -1071,7 +1071,7 @@ let handle_conn t now id conn seg =
       | Some `Syn, _ ->
         let* seg' = deliver_in_8 m id conn seg in
         Ok (t, [ seg' ])
-      | _, None -> Error (`Drop "no ACK")
+      | _, None -> Error (`Drop (fun () -> "no ACK"))
       | f, Some ack ->
         let* conn', out = deliver_in_3 m now id conn seg f ack in
         match conn' with
@@ -1087,10 +1087,10 @@ let handle_conn t now id conn seg =
   | Ok (t, a) -> t, a
   | Error (`Drop msg) ->
     Log.debug (fun m -> m "%a dropping segment in %a failed condition %s"
-                Connection.pp id pp_fsm conn.tcp_state msg);
+                Connection.pp id pp_fsm conn.tcp_state (msg ()));
     t, []
   | Error (`Reset msg) ->
-    Log.debug (fun m -> m "%a reset in %a %s" Connection.pp id pp_fsm conn.tcp_state msg);
+    Log.debug (fun m -> m "%a reset in %a %s" Connection.pp id pp_fsm conn.tcp_state (msg ()));
     drop (), Option.to_list (dropwithreset id seg)
 
 let handle_segment t now id seg =
