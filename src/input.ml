@@ -159,7 +159,7 @@ let deliver_in_2 m stats now id conn seg ack =
     tt_delack = None ;
     snd_una = Sequence.incr cb.iss ; (*: ack ; = cb.iss + 1, or +2 if full ack of SYN,FIN :*)
     snd_nxt = if conn.cantsndmore then ack else cb.snd_nxt ;
-    snd_max = if conn.cantsndmore && ack > cb.snd_max then ack else cb.snd_max ;
+    snd_max = if conn.cantsndmore && Sequence.greater ack cb.snd_max then ack else cb.snd_max ;
     snd_wl1 = Sequence.incr seg.seq ;
     snd_wl2 = ack ;
     snd_wnd = seg.window ; (* this is a SYN segment, so window scaling is ignored *)
