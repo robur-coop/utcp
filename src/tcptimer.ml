@@ -31,7 +31,7 @@ let timer_tt_rexmtsyn m now shift id conn =
         snd_recover = Sequence.incr cb.iss ;
         t_rttseg = None ;
         snd_cwnd = maxseg ;
-        snd_ssthresh = maxseg * max 2 (min cb.snd_wnd cb.snd_cwnd / (2 * maxseg)) ; (* need to adjust with cc_newreno *)
+        snd_ssthresh = maxseg * Int.max 2 (min cb.snd_wnd cb.snd_cwnd / (2 * maxseg)) ; (* need to adjust with cc_newreno *)
         t_dupacks = 0 ;
       }
       in
