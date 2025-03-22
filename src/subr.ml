@@ -49,7 +49,7 @@ let calculate_buf_sizes (* conn *) cb_t_maxseg seg_mss bw_delay_product_for_rt r
         BSD has the route MTU if avail, or [[MIN MSSDFLT (link MTU)]] otherwise, as the first argument
         of the MIN below.  That is the same calculation as we did in [[connect_1]]. We don't repeat it,
         but use the cached value in [[cb.t_maxseg]]. :*)
-    min cb_t_maxseg (max 64 (match seg_mss with None -> Params.mssdflt | Some x -> x))
+    min cb_t_maxseg (Int.max 64 (match seg_mss with None -> Params.mssdflt | Some x -> x))
   in
   let rcvbufsize' = match bw_delay_product_for_rt with None -> rcvbufsize | Some x -> x in
   let rcvbufsize'',t_maxseg'' =
@@ -67,11 +67,11 @@ let calculate_buf_sizes (* conn *) cb_t_maxseg seg_mss bw_delay_product_for_rt r
       min Params.sb_max (roundup t_maxseg' sndbufsize')
   in
   (* compute initial cwnd *)
-  let snd_cwnd = min (4 * t_maxseg'') (max (2 * t_maxseg'') 4380) in
+  let snd_cwnd = min (4 * t_maxseg'') (Int.max (2 * t_maxseg'') 4380) in
   rcvbufsize'', sndbufsize'', t_maxseg'', snd_cwnd
 
 let calculate_bsd_rcv_wnd conn =
-  max (Sequence.window conn.control_block.rcv_adv conn.control_block.rcv_nxt)
+  Int.max (Sequence.window conn.control_block.rcv_adv conn.control_block.rcv_nxt)
     (conn.rcvbufsize - Cstruct.lenv conn.rcvq)
 
 let update_rtt rtt ri =
@@ -80,8 +80,8 @@ let update_rtt rtt ri =
     if ri.tf_srtt_valid then
       let delta     = Int64.(sub (sub rtt (Duration.of_ms 1)) ri.t_srtt) in
       let vardelta  = Int64.(sub (abs delta) ri.t_rttvar) in
-      let t_srtt'   = max (Duration.of_ms 16) Int64.(add ri.t_srtt (shift_right delta 3))
-      and t_rttvar' = max (Duration.of_ms 32) Int64.(add ri.t_rttvar (shift_right vardelta 2))
+      let t_srtt'   = Int64.max (Duration.of_ms 16) Int64.(add ri.t_srtt (shift_right delta 3))
+      and t_rttvar' = Int64.max (Duration.of_ms 32) Int64.(add ri.t_rttvar (shift_right vardelta 2))
       (* BSD behaviour is never to let these go to zero, but clip at the least
          positive value.  Since SRTT is measured in 1/32 tick and RTTVAR in
          1/16 tick, these are the minimum values.  A more natural implementation
@@ -107,17 +107,17 @@ let update_rtt rtt ri =
 
 (* auxFns:864 *)
 let expand_cwnd ssthresh maxseg maxwin cwnd =
-  min maxwin (cwnd + (if cwnd > ssthresh then max 1 ((maxseg * maxseg) / cwnd) else maxseg))
+  min maxwin (cwnd + (if cwnd > ssthresh then Int.max 1 ((maxseg * maxseg) / cwnd) else maxseg))
 
 (* auxFns:657 *)
 let computed_rto backoffs shift ri =
   Int64.(mul backoffs.(shift)
-           (max ri.t_rttmin Int64.(add ri.t_srtt (shift_left ri.t_rttvar 2))))
+           (Int64.max ri.t_rttmin Int64.(add ri.t_srtt (shift_left ri.t_rttvar 2))))
 
 (* auxFns:663 *)
 let computed_rxtcur ri =
-  max ri.t_rttmin
-    (min Params.tcptv_rexmtmax
+  Int64.max ri.t_rttmin
+    (Int64.min Params.tcptv_rexmtmax
        (computed_rto
           (if ri.t_wassyn then Params.tcp_syn_backoff else Params.tcp_backoff)
           (match ri.t_lastshift with None -> 0 | Some x -> x) ri))
@@ -125,8 +125,8 @@ let computed_rxtcur ri =
 (* auxFns:692 *)
 let start_tt_rexmt_gen mode backoffs now shift wantmin ri =
   let rxtcur =
-    max (if wantmin then
-           max ri.t_rttmin
+    Int64.max (if wantmin then
+           Int64.max ri.t_rttmin
              (match ri.t_lastrtt with None -> 0L | Some v -> Int64.add v (Duration.of_ms 2))
          else ri.t_rttmin)
       (min Params.tcptv_rexmtmax (* better not be infinite! *)
@@ -142,8 +142,8 @@ let start_tt_rexmt_syn = start_tt_rexmt_gen RexmtSyn Params.tcp_syn_backoff
 let start_tt_rexmt = start_tt_rexmt_gen Rexmt Params.tcp_backoff
 
 let start_tt_persist now shift ri =
-  let cur = max Params.tcptv_persmin (* better not be infinite! *)
-      (min Params.tcptv_persmax (* better not be infinite! *)
+  let cur = Int64.max Params.tcptv_persmin (* better not be infinite! *)
+      (Int64.min Params.tcptv_persmax (* better not be infinite! *)
          (computed_rto Params.tcp_backoff shift ri))
   in
   Log.debug (fun m -> m "starting persist timer %a (backoff is %a)"

@@ -267,7 +267,7 @@ let tcp_output_required now conn =
       cb.State.snd_cwnd
   in
   (*: Calculate the amount of unused send window :*)
-  let win = min cb.State.snd_wnd snd_cwnd in
+  let win = Int.min cb.State.snd_wnd snd_cwnd in
   let snd_wnd_unused = win - (Sequence.window cb.State.snd_nxt cb.State.snd_una) in
   (*: Is it possible that a FIN may need to be sent? :*)
   let fin_required =
@@ -287,7 +287,7 @@ let tcp_output_required now conn =
   let have_data_or_fin_to_send = Sequence.less cb.snd_nxt last_sndq_data_and_fin_seq in
   (*: The amount by which the right edge of the advertised window could be moved :*)
   let window_update_delta =
-    (min (Params.tcp_maxwin lsl cb.State.rcv_scale))
+    (Int.min (Params.tcp_maxwin lsl cb.State.rcv_scale))
        (conn.rcvbufsize - Cstruct.lenv conn.rcvq) -
     Sequence.window cb.State.rcv_adv cb.State.rcv_nxt
   in
@@ -353,7 +353,7 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
     else
       cb.State.snd_cwnd
   in
-  let win0 = min cb.State.snd_wnd snd_cwnd in
+  let win0 = Int.min cb.State.snd_wnd snd_cwnd in
   let win = if window_probe && win0 = 0 then 1 else win0 in
   let snd_wnd_unused = win - (Sequence.window cb.State.snd_nxt cb.State.snd_una) in
   let fin_required =
@@ -365,15 +365,15 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
   let data_to_send, more_data_could_be_sent =
     let data' =
       Cstruct.shiftv (List.rev conn.State.sndq)
-        (max 0
-           (min (Cstruct.lenv conn.State.sndq)
+        (Int.max 0
+           (Int.min (Cstruct.lenv conn.State.sndq)
               (Sequence.window cb.State.snd_nxt cb.State.snd_una)))
         (* taking the minimum to avoid exceeding the sndq *)
     in
     let data' = Cstruct.concat data' in
-    let len_could_be_sent = max 0 snd_wnd_unused in
+    let len_could_be_sent = Int.max 0 snd_wnd_unused in
     let dlen = Cstruct.length data' in
-    Cstruct.sub data' 0 (min dlen (min len_could_be_sent cb.State.t_maxseg)),
+    Cstruct.sub data' 0 (Int.min dlen (Int.min len_could_be_sent cb.State.t_maxseg)),
     dlen > cb.t_maxseg && len_could_be_sent > cb.t_maxseg
   in
   let dlen = Cstruct.length data_to_send in
@@ -402,8 +402,8 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
     | Time_wait -> window_size
     | _ ->
       let rcv_wnd'' = Subr.calculate_bsd_rcv_wnd conn in
-      max window_size
-        (min (Params.tcp_maxwin lsl cb.State.rcv_scale)
+      Int.max window_size
+        (Int.min (Params.tcp_maxwin lsl cb.State.rcv_scale)
            (if rcv_wnd'' < conn.rcvbufsize / 4 && rcv_wnd'' < cb.State.t_maxseg
             then 0  (*: Silly window avoidance: shouldn't advertise a tiny window :*)
             else rcv_wnd''))
@@ -414,7 +414,7 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
   let seg =
     { src_port ; dst_port ; seq = snd_nxt;
       ack = Some cb.State.rcv_nxt ; flag ; push ;
-      window = min (rcv_wnd' lsr cb.rcv_scale) max_win ;
+      window = Int.min (rcv_wnd' lsr cb.rcv_scale) max_win ;
       options = [] ; payload = data_to_send
     }
   in
@@ -430,7 +430,7 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
   in
   (*: Updated values to store in the control block after the segment is output :*)
   let snd_nxt' = Sequence.(addi (addi snd_nxt dlen) (if fin then 1 else 0)) in
-  let snd_max = max cb.State.snd_max snd_nxt' in
+  let snd_max = Sequence.max cb.State.snd_max snd_nxt' in
   (*: Following a |tcp_output| code walkthrough by SB: :*)
   let tt_rexmt =
     if (State.mode_of cb.tt_rexmt = None ||
@@ -515,7 +515,7 @@ let tcp_output_perhaps now id conn =
 
 (* auxFns:1384 *)
 let make_syn_ack cb (src, src_port, dst, dst_port) =
-  let window = min cb.State.rcv_wnd max_win in
+  let window = Int.min cb.State.rcv_wnd max_win in
   let options =
     MaximumSegmentSize cb.t_advmss ::
     (Option.map (fun sc -> WindowScale sc) cb.request_r_scale |> Option.to_list)
@@ -527,7 +527,7 @@ let make_syn_ack cb (src, src_port, dst, dst_port) =
 
 (* auxFns:1333 *)
 let make_syn cb (src, src_port, dst, dst_port) =
-  let window = min cb.State.rcv_wnd max_win in
+  let window = Int.min cb.State.rcv_wnd max_win in
   let options =
     MaximumSegmentSize cb.State.t_advmss ::
     (Option.map (fun sc -> WindowScale sc) cb.request_r_scale |> Option.to_list)
@@ -539,7 +539,7 @@ let make_syn cb (src, src_port, dst, dst_port) =
 
 (* auxFns:1437 *)
 let make_ack cb ~fin (src, src_port, dst, dst_port) =
-  let window = min (cb.State.rcv_wnd lsr cb.rcv_scale) max_win in
+  let window = Int.min (cb.State.rcv_wnd lsr cb.rcv_scale) max_win in
   (* sack *)
   src, dst,
   { src_port ; dst_port ;

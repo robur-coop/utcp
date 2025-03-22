@@ -171,7 +171,7 @@ let deliver_in_2 m stats now id conn seg ack =
     rcv_nxt ;
     rcv_wnd ;
     tf_rxwin0sent = (rcv_wnd = 0) ;
-    rcv_adv = Sequence.addi rcv_nxt ((min (rcv_wnd lsr rcv_scale) Params.tcp_maxwin) lsl rcv_scale) ;
+    rcv_adv = Sequence.addi rcv_nxt ((Int.min (rcv_wnd lsr rcv_scale) Params.tcp_maxwin) lsl rcv_scale) ;
     t_maxseg ;
     last_ack_sent = rcv_nxt ;
     t_softerror ;
@@ -573,7 +573,7 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
       let snd_ssthresh =
         (*: Set to half the current flight size as per RFC2581/2582 :*)
         (* TODO hannes still true in respect of ABC? *)
-        max 2 ((min cb.snd_wnd cb.snd_cwnd) / 2 / cb.t_maxseg) * cb.t_maxseg
+        Int.max 2 ((Int.min cb.snd_wnd cb.snd_cwnd) / 2 / cb.t_maxseg) * cb.t_maxseg
       in
       let control_block = {
         cb with t_dupacks = t_dupacks' ;
@@ -636,7 +636,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
      urgent data in the segment. :*)
   let trim_amt_left =
     if Sequence.greater cb.rcv_nxt seg.Segment.seq then
-      min (Sequence.window cb.rcv_nxt seg.seq) (Cstruct.length seg.payload)
+      Int.min (Sequence.window cb.rcv_nxt seg.seq) (Cstruct.length seg.payload)
     else
       0
   in
@@ -650,7 +650,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
      here because there is still urgent data to be received, but now in a future
      segment. :*)
   let data_trimmed_left_right =
-    Cstruct.sub data_trimmed_left 0 (min cb.rcv_wnd (Cstruct.length data_trimmed_left))
+    Cstruct.sub data_trimmed_left 0 (Int.min cb.rcv_wnd (Cstruct.length data_trimmed_left))
   in
   let fin_trimmed =
     if Cstruct.equal data_trimmed_left_right data_trimmed_left then
