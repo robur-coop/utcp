@@ -19,9 +19,9 @@ let of_int32 a = a
 let to_int32 a = a
 
 let less a b = Int32.sub a b < 0l
-let less_equal a b = Int32.sub a b <= 0l
+let less_equal a b = Int32.(unsigned_compare (sub a b) 0l) <= 0
 let greater a b = Int32.sub a b > 0l
-let greater_equal a b = Int32.sub a b >= 0l
+let greater_equal a b = Int32.(unsigned_compare (sub a b) 0l) >= 0
 let equal a b = Int32.compare a b = 0
 
 let min a b = if less a b then a else b
