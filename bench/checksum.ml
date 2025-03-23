@@ -6,11 +6,20 @@ let payload =
   let ba = Bigarray.(Array1.create char c_layout ln) in
   Bigarray.Array1.fill ba '\xff'; ba
 
-let checksum = Staged.stage @@ fun () ->
+let checksum = Test.make ~name:"0xff" @@ Staged.stage @@ fun () ->
   ignore (Utcp.Checksum.digest payload)
 
-let test =
-  Test.make ~name:"checksum" checksum
+let real = Cstruct.of_hex
+  {|00 50 d0 c5 90 3b 6f b9 31 8e 90 da 70 12 ff ff
+    83 98 00 00 02 04 05 b4 03 03 06 00|}
+
+let src = Ipaddr.(V4 (V4.of_string_exn "10.0.42.2"))
+and dst = Ipaddr.(V4 (V4.of_string_exn "10.0.42.1"))
+
+let segment = Test.make ~name:"segment" @@ Staged.stage @@ fun () ->
+  ignore (Utcp.Segment.(checksum ~src ~dst real))
+
+let test = Test.make_grouped ~name:"checksum" [ checksum; segment ]
 
 let benchmark () =
   let ols = Analyze.ols ~bootstrap:0 ~r_square:true ~predictors:Measure.[| run |] in
