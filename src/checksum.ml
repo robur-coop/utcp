@@ -36,7 +36,7 @@ let int32_to_int n = int32_to_int n land mask
    noted that bound-check is not the most expensive (and quite predictable in
    reality), but unbox is. *)
 
-let[@inline always] unsafe_feed_16_le ?(off = 0) ~len:top sum buf =
+let[@inline always] unsafe_feed_16_le ~off ~len:top sum buf =
   let buf16 = to_int16 ~off ~len:top buf in
   let len = ref top in
   let sum = ref sum in
@@ -52,7 +52,7 @@ let[@inline always] unsafe_feed_16_le ?(off = 0) ~len:top sum buf =
   !sum
 
 (* NOTE(dinosaure): only work on 64-bit architecture. *)
-let[@inline always] unsafe_feed_32_le ?(off = 0) ~len:top sum buf =
+let[@inline always] unsafe_feed_32_le ~off ~len:top sum buf =
   let buf32 = to_int32 ~off ~len:top buf in
   let len = ref top in
   let sum = ref sum in
@@ -70,7 +70,7 @@ let[@inline always] unsafe_feed_32_le ?(off = 0) ~len:top sum buf =
   !sum
 
 (* NOTE(dinosaure): only work on 64-bit architecture. *)
-let[@inline always] unsafe_feed_32_be ?(off = 0) ~len:top sum buf =
+let[@inline always] unsafe_feed_32_be ~off ~len:top sum buf =
   let buf32 = to_int32 ~off ~len:top buf in
   let len = ref top in
   let sum = ref sum in
@@ -107,8 +107,7 @@ let unsafe_digest ~off ~len buf =
   let sum = (unsafe_feed[@inlined]) ~off ~len 0 buf in
   (finally[@inlined]) sum
 
-let digest ?(off = 0) ?len buf =
-  let len = match len with Some len -> len | None -> length buf - off in
+let digest ~off ~len buf =
   if len < 0 || off < 0 || off > length buf - len then
     invalid_arg "Checksum.digest";
   unsafe_digest ~off ~len buf
@@ -119,7 +118,7 @@ let feed_cstruct sum { Cstruct.buffer; off; len } = unsafe_feed ~off ~len sum bu
 external get_uint16_ne : string -> int -> int = "%caml_string_get16u"
 external get_uint8 : string -> int -> int = "%string_unsafe_get"
 
-let unsafe_feed_string_16_le ?(off = 0) ~len:top sum buf =
+let unsafe_feed_string_16_le ~off ~len:top sum buf =
   let len = ref top in
   let sum = ref sum in
   let i = ref 0 in
@@ -131,7 +130,7 @@ let unsafe_feed_string_16_le ?(off = 0) ~len:top sum buf =
   if !len = 1 then sum := !sum + get_uint8 buf (off + top - 1);
   !sum
 
-let unsafe_feed_string_16_be ?(off = 0) ~len:top sum buf =
+let unsafe_feed_string_16_be ~off ~len:top sum buf =
   let len = ref top in
   let sum = ref sum in
   let i = ref 0 in
@@ -143,10 +142,7 @@ let unsafe_feed_string_16_be ?(off = 0) ~len:top sum buf =
   if !len = 1 then sum := !sum + get_uint8 buf (off + top - 1);
   !sum
 
-let feed_string ?(off= 0) ?len sum str =
-  let len = match len with
-    | Some len -> len
-    | None -> String.length str - off in
+let feed_string ~off ~len sum str =
   if off < 0 || len < 0 || off > String.length str - len then
     invalid_arg "Checksum.digest_string";
   if Sys.big_endian then
@@ -154,10 +150,7 @@ let feed_string ?(off= 0) ?len sum str =
   else
     unsafe_feed_string_16_le ~off ~len sum str
 
-let digest_string ?(off= 0) ?len str =
-  let len = match len with
-    | Some len -> len
-    | None -> String.length str - off in
+let digest_string ~off ~len str =
   if off < 0 || len < 0 || off > String.length str - len then
     invalid_arg "Checksum.digest_string";
   let sum =
