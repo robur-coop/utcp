@@ -569,7 +569,7 @@ let checksum ~src ~dst cs =
       Bytes.blit_string (Ipaddr.V6.to_octets dst) 0 buf 16 16;
       Bytes.set_uint16_be buf 34 len;
       Bytes.set_uint8 buf 39 protocol;
-      let sum = Checksum.feed_string ~off:0 ~len:12 0 (Bytes.unsafe_to_string buf) in
+      let sum = Checksum.feed_string ~off:0 ~len:40 0 (Bytes.unsafe_to_string buf) in
       Cstruct.BE.set_uint16 cs 16 0;
       let sum = Checksum.feed_cstruct sum cs in
       Checksum.finally sum
