@@ -109,10 +109,8 @@ let unsafe_digest ~off ~len buf =
 
 let digest ?(off = 0) ?len buf =
   let len = match len with Some len -> len | None -> length buf - off in
-  if len < 0
-  || off < 0
-  || off > length buf - len
-  then invalid_arg "Cheksum.digest";
+  if len < 0 || off < 0 || off > length buf - len then
+    invalid_arg "Checksum.digest";
   unsafe_digest ~off ~len buf
 
 let digest_cstruct { Cstruct.buffer; off; len } = unsafe_digest ~off ~len buffer
