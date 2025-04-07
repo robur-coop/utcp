@@ -174,6 +174,7 @@ let digest_strings sstr =
     | true -> fun sum str ->
         unsafe_feed_string_16_be ~off:0 ~len:(String.length str) sum str
     | false -> fun sum str ->
-        unsafe_feed_string_16_le ~off:0 ~len:(String.length str) sum str in
+        unsafe_feed_string_16_le ~off:0 ~len:(String.length str) sum str
+  in
   let sum = List.fold_left fn 0 sstr in
   finally sum
