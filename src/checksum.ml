@@ -159,14 +159,14 @@ let digest_string ?(off= 0) ?len str =
   let len = match len with
     | Some len -> len
     | None -> String.length str - off in
-  if off < 0
-  || len < 0
-  || off > String.length str - len
-  then invalid_arg "Checksum.digest_string";
+  if off < 0 || len < 0 || off > String.length str - len then
+    invalid_arg "Checksum.digest_string";
   let sum =
-    if Sys.big_endian
-    then unsafe_feed_string_16_be ~off ~len 0 str
-    else unsafe_feed_string_16_le ~off ~len 0 str in
+    if Sys.big_endian then
+      unsafe_feed_string_16_be ~off ~len 0 str
+    else
+      unsafe_feed_string_16_le ~off ~len 0 str
+  in
   finally sum
 
 let digest_strings sstr =
