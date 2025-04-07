@@ -1,8 +1,6 @@
 type bigstring =
   (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
 
-let length x = Bigarray.Array1.dim x [@@inline]
-
 let to_int32 ~off ~len :
     bigstring ->
     (int32, Bigarray.int32_elt, Bigarray.c_layout) Bigarray.Array1.t =
@@ -103,17 +101,8 @@ let[@inline always] unsafe_feed ~off ~len sum buf =
   | 32, false -> unsafe_feed_16_le ~off ~len sum buf
   | n, be -> Fmt.invalid_arg "Unsupported platform (%d-bit, big-endian: %b)" n be
 
-let unsafe_digest ~off ~len buf =
-  let sum = (unsafe_feed[@inlined]) ~off ~len 0 buf in
-  (finally[@inlined]) sum
-
-let digest ~off ~len buf =
-  if len < 0 || off < 0 || off > length buf - len then
-    invalid_arg "Checksum.digest";
-  unsafe_digest ~off ~len buf
-
-let digest_cstruct { Cstruct.buffer; off; len } = unsafe_digest ~off ~len buffer
-let feed_cstruct sum { Cstruct.buffer; off; len } = unsafe_feed ~off ~len sum buffer
+let feed_cstruct sum { Cstruct.buffer; off; len } =
+  unsafe_feed ~off ~len sum buffer
 
 external get_uint16_ne : string -> int -> int = "%caml_string_get16u"
 external get_uint8 : string -> int -> int = "%string_unsafe_get"
@@ -144,29 +133,8 @@ let unsafe_feed_string_16_be ~off ~len:top sum buf =
 
 let feed_string ~off ~len sum str =
   if off < 0 || len < 0 || off > String.length str - len then
-    invalid_arg "Checksum.digest_string";
+    invalid_arg "Checksum.feed_string";
   if Sys.big_endian then
     unsafe_feed_string_16_be ~off ~len sum str
   else
     unsafe_feed_string_16_le ~off ~len sum str
-
-let digest_string ~off ~len str =
-  if off < 0 || len < 0 || off > String.length str - len then
-    invalid_arg "Checksum.digest_string";
-  let sum =
-    if Sys.big_endian then
-      unsafe_feed_string_16_be ~off ~len 0 str
-    else
-      unsafe_feed_string_16_le ~off ~len 0 str
-  in
-  finally sum
-
-let digest_strings sstr =
-  let fn = match Sys.big_endian with
-    | true -> fun sum str ->
-        unsafe_feed_string_16_be ~off:0 ~len:(String.length str) sum str
-    | false -> fun sum str ->
-        unsafe_feed_string_16_le ~off:0 ~len:(String.length str) sum str
-  in
-  let sum = List.fold_left fn 0 sstr in
-  finally sum
