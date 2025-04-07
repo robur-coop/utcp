@@ -566,7 +566,7 @@ let checksum ~src ~dst cs =
   | Ipaddr.V6 src, Ipaddr.V6 dst ->
       let buf = Bytes.make 40 '\000' in
       Bytes.blit_string (Ipaddr.V6.to_octets src) 0 buf 0 16;
-      Bytes.blit_string (Ipaddr.V6.to_octets dst) 0 buf 16 32;
+      Bytes.blit_string (Ipaddr.V6.to_octets dst) 0 buf 16 16;
       Bytes.set_uint16_be buf 34 len;
       Bytes.set_uint8 buf 39 protocol;
       let sum = Checksum.feed_string ~off:0 ~len:12 0 (Bytes.unsafe_to_string buf) in
