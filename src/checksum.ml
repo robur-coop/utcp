@@ -147,13 +147,12 @@ let feed_string ?(off= 0) ?len sum str =
   let len = match len with
     | Some len -> len
     | None -> String.length str - off in
-  if off < 0
-  || len < 0
-  || off > String.length str - len
-  then invalid_arg "Checksum.digest_string";
-  if Sys.big_endian
-  then unsafe_feed_string_16_be ~off ~len sum str
-  else unsafe_feed_string_16_le ~off ~len sum str
+  if off < 0 || len < 0 || off > String.length str - len then
+    invalid_arg "Checksum.digest_string";
+  if Sys.big_endian then
+    unsafe_feed_string_16_be ~off ~len sum str
+  else
+    unsafe_feed_string_16_le ~off ~len sum str
 
 let digest_string ?(off= 0) ?len str =
   let len = match len with
