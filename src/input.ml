@@ -873,7 +873,7 @@ let di3_datastuff now the_ststuff conn seg ourfinisacked fin ack =
   else
     di3_datastuff_really now the_ststuff conn' seg bsd_fast_path ourfinisacked fin
 
-let di3_ststuff now conn rcvd_fin ourfinisacked =
+let di3_ststuff id now conn rcvd_fin ourfinisacked =
   let conn' = if rcvd_fin then { conn with cantrcvmore = true } else conn in
   let enter_time_wait =
     let control_block = {
@@ -910,7 +910,10 @@ let di3_ststuff now conn rcvd_fin ourfinisacked =
   | Closing, _ when ourfinisacked -> enter_time_wait
   | Closing, _ -> conn'
   | Last_ack, false -> conn'
-  | Last_ack, true -> assert false
+  | Last_ack, true ->
+    Log.info (fun m -> m "Last_ack and we received a fin on %a"
+                 Connection.pp id);
+    assert false
   | Time_wait, _ -> enter_time_wait
   | _ -> assert false
 
@@ -936,7 +939,7 @@ let deliver_in_3 m now id conn seg flag ack =
     ~some:(fun conn' ->
         let conn'', outs' =
           if cont then
-            di3_datastuff now di3_ststuff conn' seg ourfinisacked fin ack
+            di3_datastuff now (di3_ststuff id) conn' seg ourfinisacked fin ack
           else
             (conn', [])
         in
