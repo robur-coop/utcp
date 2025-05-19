@@ -75,6 +75,9 @@ let decode_option data =
     in
     let l = Cstruct.get_uint8 data 1 in
     let* () = guard (Cstruct.length data >= l) (`Msg "option too short") in
+    let* () = guard (l >= 2)
+        (`Msg ("option length must be >= 2, got " ^ string_of_int l))
+    in
     match x with
     | 2 ->
       let* () =
