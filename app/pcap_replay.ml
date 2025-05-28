@@ -168,6 +168,9 @@ let jump () filename ip =
                 if Cstruct.length payload > 0 then (
                   Logs.info (fun m -> m "sending with %u bytes" (Cstruct.length payload));
                   match Utcp.send state mt flow payload with
+                  | Error `Not_found ->
+                    Logs.err (fun m -> m "failure during send: not found");
+                    assert false
                   | Error `Msg msg ->
                     Logs.err (fun m -> m "failure during send: %s" msg);
                     assert false
@@ -185,12 +188,15 @@ let jump () filename ip =
               if fin then
                 (Logs.info (fun m -> m "close");
                  match Utcp.close state mt flow with
-                | Error `Msg msg ->
-                  Logs.err (fun m -> m "failure during close: %s" msg);
-                  assert false
-                | Ok (state, out) ->
-                  List.iter print_out out;
-                  state)
+                 | Error `Not_found ->
+                   Logs.err (fun m -> m "failure during close: not found");
+                   assert false
+                 | Error `Msg msg ->
+                   Logs.err (fun m -> m "failure during close: %s" msg);
+                   assert false
+                 | Ok (state, out) ->
+                   List.iter print_out out;
+                   state)
               else
                 state
             else state

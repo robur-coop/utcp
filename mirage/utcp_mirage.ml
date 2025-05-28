@@ -84,6 +84,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
             Log.err (fun m -> m "%a error while read (second recv) %s" Utcp.pp_flow flow msg);
             (* TODO better error *)
             Lwt.return (Error `Refused)
+          | Error `Not_found -> Lwt.return (Error `Refused)
       ) else (
         Lwt.return (Ok (`Data data)))
     | Error `Eof ->
@@ -92,6 +93,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
       Log.err (fun m -> m "%a error while read %s" Utcp.pp_flow flow msg);
       (* TODO better error *)
       Lwt.return (Error `Refused)
+    | Error `Not_found -> Lwt.return (Error `Refused)
 
   let rec write (t, flow) buf =
     match Utcp.send t.tcp (now ()) flow buf with
@@ -114,6 +116,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
     | Error `Msg msg ->
       Log.err (fun m -> m "%a error while write %s" Utcp.pp_flow flow msg);
       Lwt.return (Error `Closed)
+    | Error `Not_found -> Lwt.return (Error `Refused)
 
   let writev flow bufs = write flow (Cstruct.concat bufs)
 
@@ -125,6 +128,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
     | Error `Msg msg ->
       Log.err (fun m -> m "%a error in close: %s" Utcp.pp_flow flow msg);
       Lwt.return_unit
+    | Error `Not_found -> Lwt.return_unit
 
   let shutdown (t, flow) mode =
     match Utcp.shutdown t.tcp (now ()) flow mode with
@@ -134,6 +138,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
     | Error `Msg msg ->
       Log.err (fun m -> m "%a error in shutdown: %s" Utcp.pp_flow flow msg);
       Lwt.return_unit
+    | Error `Not_found -> Lwt.return_unit
 
   let write_nodelay flow buf = write flow buf
 

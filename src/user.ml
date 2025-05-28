@@ -55,7 +55,7 @@ let shutdown t now id v =
       in
       m "%a [%a] shutdown_%s" Connection.pp id Mtime.pp now side);
   match CM.find_opt id t.connections with
-  | None -> Error (`Msg "no connection")
+  | None -> Error `Not_found
   | Some conn ->
     if conn.tcp_state = Established then
       let write = match v with `write | `read_write -> true | `read -> false
@@ -84,7 +84,7 @@ let shutdown t now id v =
 let close t now id =
   Tracing.debug (fun m -> m "%a [%a] close" Connection.pp id Mtime.pp now);
   match CM.find_opt id t.connections with
-  | None -> Error (`Msg "no connection")
+  | None -> Error `Not_found
   | Some conn ->
     (* see above, should deal with all states of conn *)
     let* () =
@@ -108,7 +108,7 @@ let send t now id buf =
                    (Cstruct.length buf)
                    (Base64.encode_string (Cstruct.to_string buf)));
   match CM.find_opt id t.connections with
-  | None -> Error (`Msg "no connection")
+  | None -> Error `Not_found
   | Some conn ->
     let* () =
       guard (behind_established conn.tcp_state) (`Msg "not yet established")
@@ -131,7 +131,7 @@ let send t now id buf =
 let recv t now id =
   Tracing.debug (fun m -> m "%a [%a] receive" Connection.pp id Mtime.pp now);
   match CM.find_opt id t.connections with
-  | None -> Error (`Msg "no connection")
+  | None -> Error `Not_found
   | Some conn ->
     let* () =
       guard (behind_established conn.tcp_state) (`Msg "not yet connected")

@@ -246,6 +246,9 @@ let jump () filename ip =
            | Error `Msg s ->
              Logs.err (fun m -> m "recv error %s" s);
              state, false, succ idx
+           | Error `Not_found ->
+             Logs.err (fun m -> m "recv error not found");
+             state, false, succ idx
            | Error `Eof ->
              Logs.err (fun m -> m "recv eof");
              state, false, succ idx)
@@ -262,6 +265,9 @@ let jump () filename ip =
            | Error `Msg s ->
              Logs.err (fun m -> m "send error %s" s);
              state, true, succ idx
+           | Error `Not_found ->
+             Logs.err (fun m -> m "send error not found");
+             state, true, succ idx
           )
         | `Close ->
           let flow = Option.get !flow in
@@ -271,6 +277,9 @@ let jump () filename ip =
              state, true, succ idx
            | Error `Msg s ->
              Logs.err (fun m -> m "close error %s" s);
+             state, true, succ idx
+           | Error `Not_found ->
+             Logs.err (fun m -> m "close error not found");
              state, true, succ idx)
         | _ -> assert false)
       (state, false, 0) msgs

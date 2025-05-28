@@ -7,7 +7,7 @@ let payload =
   Bigarray.Array1.fill ba '\xff'; ba
 
 let checksum = Test.make ~name:"0xff" @@ Staged.stage @@ fun () ->
-  ignore (Utcp.Checksum.digest payload)
+  ignore (Utcp.Checksum.digest ~off:0 ~len:3000 payload)
 
 let real = Cstruct.of_hex
   {|00 50 d0 c5 90 3b 6f b9 31 8e 90 da 70 12 ff ff

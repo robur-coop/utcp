@@ -90,16 +90,16 @@ val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
   'a state -> Mtime.t -> ('a state * flow * 'a * output)
 
 val close : 'a state -> Mtime.t -> flow ->
-  ('a state * output list, [ `Msg of string ]) result
+  ('a state * output list, [ `Not_found | `Msg of string ]) result
 
 val shutdown : 'a state -> Mtime.t -> flow -> [ `read | `write | `read_write ] ->
-  ('a state * output list, [ `Msg of string ]) result
+  ('a state * output list, [ `Not_found | `Msg of string ]) result
 
 val recv : 'a state -> Mtime.t -> flow ->
-  ('a state * Cstruct.t * 'a * output list, [ `Msg of string | `Eof ]) result
+  ('a state * Cstruct.t * 'a * output list, [ `Not_found | `Msg of string | `Eof ]) result
 
 val send : 'a state -> Mtime.t -> flow -> Cstruct.t ->
-  ('a state * int * 'a * output list, [ `Msg of string ]) result
+  ('a state * int * 'a * output list, [ `Not_found | `Msg of string ]) result
 
 (**/**)
 (* only to be used for testing! *)
