@@ -1,0 +1,24 @@
+opam-version: "2.0"
+maintainer: "Robur <team@robur.coop>"
+authors: ["Robur <team@robur.coop>"]
+homepage: "https://github.com/robur-coop/utcp"
+dev-repo: "git+https://github.com/robur-coop/utcp.git"
+bug-reports: "https://github.com/robur-coop/utcp/issues"
+available: [ arch != "arm32" & arch != "x86_32" ] # see #35
+
+depends: [
+  "ocaml" {>= "5.0.0"}
+  "utcp" {= version}
+  "dune" {>= "2.7.0"}
+  "bstr"
+  "bin"
+  "miou-solo5"
+  "hxd"
+]
+build: [
+  ["dune" "subst"] {dev}
+  ["dune" "build" "-p" name "-j" jobs]
+  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
+]
+
+synopsis: "An implementation of TCP (Transmission Control Protocol) in OCaml for Miou & Solo5"
