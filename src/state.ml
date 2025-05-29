@@ -103,7 +103,7 @@ module Reassembly_queue = struct
             if Sequence.less_equal e.seq seq_end then
               let overlap = Sequence.sub seq_end e.seq in
               if overlap = 0 then
-                (* to_cut = 0, we can just merge them *)
+                (* overlap = 0, we can just merge them *)
                 let elt = { elt with fin = e.fin || elt.fin ; data = e.data @ elt.data } in
                 Some (elt, Sequence.addi elt.seq (Cstruct.lenv elt.data)), elt :: acc'
               else
