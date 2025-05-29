@@ -91,7 +91,7 @@ module Reassembly_queue = struct
 
   (* insert segment, potentially coalescing existing ones *)
   let insert_seg t (seq, fin, data) =
-    (* they may overlap, the oldest seg wins *)
+    (* they may overlap, the newest seg wins *)
     (* (1) figure out the place whereafter to insert the seg *)
     (* (2) peek whether the next seg can be already coalesced *)
     let inserted, segq =
@@ -123,39 +123,75 @@ module Reassembly_queue = struct
             (* there are three cases:
                - (a) the new seq is before the existing e.seq -> prepend
                      (and figure out whether to merge with e)
-                     seq < e.seq
+                     seq <= e.seq
                - (b) the new seq is within e.seq + len e -> append (partially)
                      seq <= e.seq + len
                - (c) the new seq is way behind e.seq + len e -> move along
                      seq > e.seq + len
             *)
-            if Sequence.less seq e.seq then
+            if Sequence.less_equal seq e.seq then
               (* case (a) *)
               let seq_e = Sequence.addi seq (Cstruct.length data) in
-              if Sequence.less_equal e.seq seq_e then
-                (* we've to merge e into seq *)
-                let skip_data = Sequence.sub seq_e e.seq in
-                if Cstruct.length data >= skip_data then
-                  let data = Cstruct.shift data skip_data in
+              (* case (1): a new segment that is way before the existing one:
+                 seq <= e.seq && seq_e <= e.seq -> e must be retained
+                 case (2): a new segment that is partially before the existing:
+                 seq <= e.seq && seq_e > e.seq -> e may be partially retained:
+                  (i) seq_e >= e.seq_e -> drop e
+                  (ii) seq_e < e.seq_e -> retain the last bytes of e
+              *)
+              if Sequence.less_equal seq_e e.seq then
+                if Sequence.equal seq_e e.seq then
                   let e = { seq ; fin = fin || e.fin ; data = e.data @ [ data ] } in
                   Some (e, Sequence.addi seq (Cstruct.lenv e.data)), e :: acc
                 else
-                  None, e :: acc
+                  let e' = { seq ; fin ; data = [ data ] } in
+                  Some (e', Sequence.addi seq (Cstruct.length data)), e :: e' :: acc
               else
-                let e' = { seq ; fin ; data = [ data ] } in
-                Some (e', seq_e), e :: e' :: acc
-            else
-              let e_end = Sequence.addi e.seq (Cstruct.lenv e.data) in
-              if Sequence.less_equal seq e_end then
-                (* case (b) we append to the thing *)
-                let skip_data = Sequence.sub e_end seq in
-                if Cstruct.length data >= skip_data then
-                  let data = Cstruct.shift data skip_data in
-                  let e = { e with fin = fin || e.fin ; data = data :: e.data } in
-                  Some (e, Sequence.addi e_end (Cstruct.length data)), e :: acc
+                let e_seq_e = Sequence.addi e.seq (Cstruct.lenv e.data) in
+                if Sequence.greater_equal seq_e e_seq_e then
+                  let e' = { seq ; fin ; data = [ data ] } in
+                  Some (e', seq_e), e' :: acc
                 else
-                  (* we just throw it away *)
-                  Some (e, e_end), e :: acc
+                  (* we've to retain some parts of seq *)
+                  let post =
+                    let retain_data = Sequence.sub e_seq_e seq_e in
+                    let skip_data = Cstruct.lenv e.data - retain_data in
+                    Cstruct.shiftv (List.rev e.data) skip_data
+                  in
+                  let e = { seq ; fin = fin || e.fin ; data = List.rev (data :: post) } in
+                  Some (e, Sequence.addi seq (Cstruct.lenv e.data)), e :: acc
+            else
+              let e_seq_e = Sequence.addi e.seq (Cstruct.lenv e.data) in
+              if Sequence.less_equal seq e_seq_e then
+                (* case (b) we append to the thing *)
+                if Sequence.equal seq e_seq_e then
+                  let e = { e with fin = fin || e.fin ; data = data :: e.data } in
+                  Some (e, Sequence.addi e_seq_e (Cstruct.length data)), e :: acc
+                else
+                  let overlap = Sequence.sub e_seq_e seq in
+                  let pre =
+                    let rec cut_some amount = function
+                      | [] -> []
+                      | hd :: tl ->
+                        if Cstruct.length hd < amount then
+                          cut_some (amount - Cstruct.length hd) tl
+                        else
+                          Cstruct.sub hd amount (Cstruct.length hd - amount) :: tl
+                    in
+                    cut_some overlap e.data
+                  in
+                  let seq_e = Sequence.addi seq (Cstruct.length data) in
+                  let end_ = Sequence.max e_seq_e seq_e in
+                  let post =
+                    if Sequence.greater e_seq_e seq_e then
+                      let retain_data = Sequence.sub e_seq_e seq_e in
+                      let skip_data = Cstruct.lenv e.data - retain_data in
+                      Cstruct.shiftv (List.rev e.data) skip_data
+                    else
+                      []
+                  in
+                  let e = { e with fin = fin || e.fin ; data = post @ data :: pre } in
+                  Some (e, end_), e :: acc
               else
                 (None, e :: acc))
         (None, []) t
