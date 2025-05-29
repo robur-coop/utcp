@@ -101,20 +101,17 @@ module Reassembly_queue = struct
             (* 2 - the current "e" may be merged into the head of acc *)
             let acc' = match acc with [] -> [] | _hd :: tl -> tl in
             if Sequence.less_equal e.seq seq_end then
-              let to_cut = Sequence.sub seq_end e.seq in
-              if to_cut = 0 then
+              let overlap = Sequence.sub seq_end e.seq in
+              if overlap = 0 then
                 (* to_cut = 0, we can just merge them *)
                 let elt = { elt with fin = e.fin || elt.fin ; data = e.data @ elt.data } in
                 Some (elt, Sequence.addi elt.seq (Cstruct.lenv elt.data)), elt :: acc'
               else
-                (* we need to cut some bytes from the current hd *)
-                match elt.data with
-                | head :: tl ->
-                  let hd = Cstruct.sub head 0 (Cstruct.length head - to_cut) in
-                  let data = e.data @ hd :: tl in
-                  let elt = { elt with fin = e.fin || elt.fin ; data } in
-                  Some (elt, Sequence.addi elt.seq (Cstruct.lenv data)), elt :: acc'
-                | [] -> (inserted, e :: acc)
+                (* we need to cut some bytes from e *)
+                let data = List.rev (Cstruct.shiftv (List.rev e.data) overlap) in
+                let data = data @ elt.data in
+                let elt = { elt with fin = e.fin || elt.fin ; data } in
+                Some (elt, Sequence.addi elt.seq (Cstruct.lenv data)), elt :: acc'
             else
               (* there's still a hole, nothing to merge *)
               (inserted, e :: acc)

@@ -245,6 +245,42 @@ let overlap_3 () =
   | Some (s, _) -> Alcotest.(check string "data is good" "CCCCCCCCCCBBBBBBAAAAAAAA"
                                (Cstruct.to_string s))
 
+let overlap_4 () =
+  let r = insert_seg empty (Sequence.of_int32 16l, false, Cstruct.of_string "AAAAAAAA") in
+  let r = insert_seg r (Sequence.of_int32 8l, false, Cstruct.of_string "BBBBBB") in
+  let r = insert_seg r (Sequence.of_int32 6l, false, Cstruct.of_string "CCCCCCCCCCCCCCCC") in
+  let r = insert_seg r (Sequence.of_int32 0l, false, Cstruct.of_string "DDDDDDDD") in
+  let r', s = maybe_take r Sequence.zero in
+  Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
+  match s with
+  | None -> Alcotest.fail "should be some data"
+  | Some (s, _) -> Alcotest.(check string "data is good" "DDDDDDDDCCCCCCCCCCCCCCAA"
+                               (Cstruct.to_string s))
+
+let overlap_5 () =
+  let r = insert_seg empty (Sequence.of_int32 0l, false, Cstruct.of_string "AAAAAAAAAAAAAAAA") in
+  let r = insert_seg r (Sequence.of_int32 4l, false, Cstruct.of_string "BBBBBB") in
+  let r = insert_seg r (Sequence.of_int32 10l, false, Cstruct.of_string "CCCCCC") in
+  let r = insert_seg r (Sequence.of_int32 12l, false, Cstruct.of_string "DDDDDD") in
+  let r = insert_seg r (Sequence.of_int32 14l, false, Cstruct.of_string "EE") in
+  let r', s = maybe_take r Sequence.zero in
+  Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
+  match s with
+  | None -> Alcotest.fail "should be some data"
+  | Some (s, _) -> Alcotest.(check string "data is good" "AAAABBBBBBCCDDEEDD"
+                               (Cstruct.to_string s))
+
+let overlap_6 () =
+  let r = insert_seg empty (Sequence.of_int32 0l, false, Cstruct.of_string "AAAAAAAA") in
+  let r = insert_seg r (Sequence.of_int32 10l, false, Cstruct.of_string "BBBBBB") in
+  let r = insert_seg r (Sequence.of_int32 8l, false, Cstruct.of_string "DDDD") in
+  let r', s = maybe_take r Sequence.zero in
+  Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
+  match s with
+  | None -> Alcotest.fail "should be some data"
+  | Some (s, _) -> Alcotest.(check string "data is good" "AAAAAAAADDDDBBBB"
+                               (Cstruct.to_string s))
+
 let regr_187 () =
   let r = insert_seg empty (Sequence.of_int32 16l, false, Cstruct.of_string "000002om") in
   let r = insert_seg r (Sequence.of_int32 8l, false, Cstruct.of_string "001001nn001002nm001003nl") in
@@ -286,6 +322,9 @@ let tests = [
   "overlap 1", `Quick, overlap_1 ;
   "overlap 2", `Quick, overlap_2 ;
   "overlap 3", `Quick, overlap_3 ;
+  "overlap 4", `Quick, overlap_4 ;
+  "overlap 5", `Quick, overlap_5 ;
+  "overlap 6", `Quick, overlap_6 ;
   "regression 187", `Quick, regr_187 ;
   "regression 188", `Quick, regr_188 ;
 ]
