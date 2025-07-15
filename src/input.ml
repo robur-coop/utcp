@@ -653,7 +653,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
     Cstruct.sub data_trimmed_left 0 (Int.min cb.rcv_wnd (Cstruct.length data_trimmed_left))
   in
   let fin_trimmed =
-    if Cstruct.equal data_trimmed_left_right data_trimmed_left then
+    if Cstruct.length data_trimmed_left_right == Cstruct.length data_trimmed_left then
       fin
     else
       false
