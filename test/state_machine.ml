@@ -107,16 +107,16 @@ let equal_conn_state_full a b =
   a.cantsndmore = b.cantsndmore &&
   a.rcvbufsize = b.rcvbufsize &&
   a.sndbufsize = b.sndbufsize &&
-  leq Cstruct.equal a.sndq b.sndq &&
-  leq Cstruct.equal a.rcvq b.rcvq &&
+  Rope.equal a.sndq b.sndq &&
+  Rope.equal a.rcvq b.rcvq &&
   equal_control_block a.control_block b.control_block
 
 let equal_conn_state a b =
   equal_tcp_state a.State.tcp_state b.State.tcp_state &&
   a.cantrcvmore = b.cantrcvmore &&
   a.cantsndmore = b.cantsndmore &&
-  leq Cstruct.equal a.sndq b.sndq &&
-  leq Cstruct.equal a.rcvq b.rcvq
+  Rope.equal a.sndq b.sndq &&
+  Rope.equal a.rcvq b.rcvq
 
 let equal_tcp_full a b =
   State.IS.equal a.State.listeners b.State.listeners &&
@@ -152,7 +152,7 @@ let tcp_listen = State.start_listen tcp listen_port
 let basic_seg = {
   Segment.src_port ; dst_port = listen_port ; seq = Sequence.zero ;
   ack = None ; flag = None ; push = false ; window = 0 ;
-  options = [] ; payload = Cstruct.empty
+  options = [] ; payload = String.empty
 }
 
 let initial_seq = Sequence.of_int32 42l
@@ -163,7 +163,7 @@ and rng_seq = Sequence.of_int32 0xA5A5A5A5l
 let test_segs ack payload =
   let seg = { basic_seg with seq = initial_seq }
   and str =
-    let l = Cstruct.length payload in
+    let l = String.length payload in
     if l = 0 then "" else "+" ^ string_of_int l ^ " bytes data"
   in [
     "NONE" ^ str, { seg with payload } ;
@@ -208,9 +208,9 @@ let test_closed =
       (test_segs initial_ack p)
       (List.mapi (fun i v ->
            i, match v with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
-          (no_state (Cstruct.length p)))
+          (no_state (String.length p)))
   in
-  test_all " " Cstruct.empty @ test_all "+data " (Cstruct.create 20)
+  test_all " " String.empty @ test_all "+data " (String.make 20 '\000')
 
 let listen =
   let rst = {
@@ -251,7 +251,7 @@ let test_listen =
            i, s, match v with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
           listen)
   in
-  test_all " " Cstruct.empty @ test_all "+data " (Cstruct.create 20)
+  test_all " " String.empty @ test_all "+data " (String.make 20 '\000')
 
 let tcp_syn_sent =
   let tcp', _id, _signal, _out =
@@ -305,12 +305,12 @@ let test_syn_sent =
            i, s, match v with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
           res)
   in
-  test_all " " (Sequence.incr rng_seq) Cstruct.empty syn_sent_ack_iss @
-  test_all "+iss " rng_seq Cstruct.empty syn_sent_ack_bad @
-  test_all "+iss+2 " (Sequence.addi rng_seq 2) Cstruct.empty syn_sent_ack_bad @
-  test_all "+data " (Sequence.incr rng_seq) (Cstruct.create 20) syn_sent_ack_iss @
-  test_all "+data+iss " rng_seq (Cstruct.create 20) syn_sent_ack_bad @
-  test_all "+data+iss+2 " (Sequence.addi rng_seq 2) (Cstruct.create 20) syn_sent_ack_bad
+  test_all " " (Sequence.incr rng_seq) String.empty syn_sent_ack_iss @
+  test_all "+iss " rng_seq String.empty syn_sent_ack_bad @
+  test_all "+iss+2 " (Sequence.addi rng_seq 2) String.empty syn_sent_ack_bad @
+  test_all "+data " (Sequence.incr rng_seq) (String.make 20 '\000') syn_sent_ack_iss @
+  test_all "+data+iss " rng_seq (String.make 20 '\000') syn_sent_ack_bad @
+  test_all "+data+iss+2 " (Sequence.addi rng_seq 2) (String.make 20 '\000') syn_sent_ack_bad
 
 let tcp_syn_rcvd =
   let syn = { basic_seg with
@@ -353,7 +353,7 @@ let test_syn_rcvd =
            i, s, match v with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
           syn_received)
   in
-  test_all " " (Sequence.incr rng_seq) Cstruct.empty
+  test_all " " (Sequence.incr rng_seq) String.empty
 
 let tests =
   test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd

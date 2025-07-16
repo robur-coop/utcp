@@ -1,4 +1,4 @@
-(library
- (name utcp_mirage)
- (public_name utcp.mirage)
- (libraries utcp lwt tcpip mirage-mtime mirage-crypto-rng mirage-sleep))
+; (library
+;  (name utcp_mirage)
+;  (public_name utcp.mirage)
+;  (libraries utcp lwt tcpip mirage-mtime mirage-crypto-rng mirage-sleep))

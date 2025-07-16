@@ -12,7 +12,7 @@ let timer_tt_rexmtsyn m now shift id conn =
   | Syn_sent (* simultaneous open (deliver_in_2b) may put us into Syn_received *) ->
     if succ shift > Params.tcp_maxrxtshift then begin
       Log.debug (fun m -> m "%a syn retransmission reached maxrxtshift, dropping" Connection.pp id);
-      let rst = Segment.drop_and_close (Connection.prj id) conn in
+      let rst = Segment.drop_and_close id conn in
       Error `Retransmission_exceeded, rst
     end else
       let cb = conn.control_block in
@@ -37,7 +37,7 @@ let timer_tt_rexmtsyn m now shift id conn =
       in
       let conn' = { conn with control_block } in
       Log.debug (fun m -> m "%a retransmitting syn %a" Connection.pp id (pp_conn_state now) conn');
-      Ok conn', Some (Segment.make_syn control_block (Connection.prj id))
+      Ok conn', Some (Segment.make_syn control_block id)
   | _ ->
     Log.warn (fun m -> m "%a rexmtsyn timer, not in syn_sent state %a"
                 Connection.pp id (pp_conn_state now) conn);
@@ -55,7 +55,7 @@ let timer_tt_rexmt m now shift id conn =
     let maxshift = match tcp_state with Syn_received -> Params.tcp_synackmaxrxtshift | _ -> Params.tcp_maxrxtshift in
     if succ shift > maxshift then begin
       Log.debug (fun m -> m "%a retransmission reached maxrxtshift, dropping" Connection.pp id);
-      let rst = Segment.drop_and_close (Connection.prj id) conn in
+      let rst = Segment.drop_and_close id conn in
       Error `Retransmission_exceeded, rst
     end else
       let snd_cwnd_prev, snd_ssthresh_prev = (* , t_badrxtwin *)
@@ -83,8 +83,8 @@ let timer_tt_rexmt m now shift id conn =
       } in
       let conn' = { conn with control_block } in
       let c', out = match tcp_state with
-        | Syn_received -> conn', Segment.make_syn_ack control_block (Connection.prj id)
-        | _ -> Segment.tcp_output_really now (Connection.prj id) false conn'
+        | Syn_received -> conn', Segment.make_syn_ack control_block id
+        | _ -> Segment.tcp_output_really now id false conn'
       in
       Ok c', Some out
 
@@ -116,7 +116,7 @@ let fast_timer t now =
         | Some timer -> match Timers.timer_expired now timer with
           | None -> CM.add id conn acc, outs
           | Some () ->
-            let c', out = timer_tt_delack m now (Connection.prj id) conn in
+            let c', out = timer_tt_delack m now id conn in
             CM.add id c' acc, out :: outs)
       t.connections (CM.empty, [])
   in
@@ -147,7 +147,7 @@ let slow_timer t now =
           | Some (Persist, shift), _, _, _ ->
             Log.debug (fun m -> m "%a persist timer expired %a" Connection.pp id (pp_conn_state now) conn);
             (* it's easy: restart and tcp_output_really! *)
-            timer_tt_persist m now shift (Connection.prj id) conn
+            timer_tt_persist m now shift id conn
           | None, Some (), _, _ ->
             (* timer_tt_2msl_1 *)
             Log.debug (fun m -> m "%a 2msl timer expired %a" Connection.pp id (pp_conn_state now) conn);
@@ -159,7 +159,7 @@ let slow_timer t now =
             Log.debug (fun m -> m "%a connection established timer expired %a" Connection.pp id (pp_conn_state now) conn);
             if not (conn.tcp_state = Syn_sent) then Log.err (fun m -> m "not in syn_sent");
             m "timer-tt-conn-est";
-            Error `Timer_connection_established, Segment.drop_and_close (Connection.prj id) conn
+            Error `Timer_connection_established, Segment.drop_and_close id conn
           | None, None, None, Some () ->
             (* timer_tt_fin_wait_2_1 *)
             Log.debug (fun m -> m "%a fin_wait_2 timer expired %a" Connection.pp id (pp_conn_state now) conn);

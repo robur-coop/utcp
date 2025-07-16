@@ -60,7 +60,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
     | Ok (tcp, data, cond, segs) ->
       t.tcp <- tcp ;
       output_ign t segs >>= fun () ->
-      if Cstruct.length data = 0 then (
+      if String.length data = 0 then (
         Lwt_condition.wait cond >>= fun r ->
         match r with
         | Error `Eof ->
@@ -74,7 +74,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
           | Ok (tcp, data, _cond, segs) ->
             t.tcp <- tcp ;
             output_ign t segs >>= fun () ->
-            if Cstruct.length data = 0 then
+            if String.length data = 0 then
               Lwt.return (Ok `Eof) (* can this happen? *)
             else
               Lwt.return (Ok (`Data data))
@@ -95,12 +95,14 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
       Lwt.return (Error `Refused)
     | Error `Not_found -> Lwt.return (Error `Refused)
 
+  let poor_shift str len = String.sub str len (String.length str - len)
+
   let rec write (t, flow) buf =
     match Utcp.send t.tcp (now ()) flow buf with
     | Ok (tcp, bytes_sent, cond, segs) ->
       t.tcp <- tcp ;
       output_ign t segs >>= fun () ->
-      if bytes_sent < Cstruct.length buf then
+      if bytes_sent < String.length buf then
         (* partial write *)
         Lwt_condition.wait cond >>= fun r ->
         match r with
@@ -110,7 +112,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
           Log.err (fun m -> m "%a error %s from condition while sending" Utcp.pp_flow flow msg);
           Lwt.return (Error `Closed)
         | Ok () ->
-          write (t, flow) (Cstruct.shift buf bytes_sent)
+          write (t, flow) (poor_shift buf bytes_sent)
       else
         Lwt.return (Ok ())
     | Error `Msg msg ->
@@ -118,7 +120,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
       Lwt.return (Error `Closed)
     | Error `Not_found -> Lwt.return (Error `Refused)
 
-  let writev flow bufs = write flow (Cstruct.concat bufs)
+  let writev flow bufs = write flow (String.concat "" bufs)
 
   let close (t, flow) =
     match Utcp.close t.tcp (now ()) flow with
@@ -142,7 +144,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
 
   let write_nodelay flow buf = write flow buf
 
-  let writev_nodelay flow bufs = write flow (Cstruct.concat bufs)
+  let writev_nodelay flow bufs = write flow (String.concat "" bufs)
 
   let create_connection ?keepalive:_ t (dst, dst_port) =
     let src = Ip.src t.ip ~dst in

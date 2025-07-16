@@ -9,10 +9,8 @@ let stop_listen = State.stop_listen
 type flow = State.Connection.t
 
 let pp_flow = State.Connection.pp
-let unsafe_flow = State.Connection.v
 
-let peers conn =
-  let (src, src_port, dst, dst_port) = State.Connection.prj conn in
+let peers (src, src_port, dst, dst_port) =
   (src, src_port), (dst, dst_port)
 
 type output = Ipaddr.t * Ipaddr.t * Segment.t

@@ -14,7 +14,6 @@ let connect ~src ?src_port ~dst ~dst_port t now =
     | Some p -> p
   in
   let id = src, src_port, dst, dst_port in
-  let id = Connection.v id in
   Tracing.debug (fun m -> m "%a [%a] connect" Connection.pp id Mtime.pp now);
   let conn =
     let iss = Sequence.of_int32 (Randomconv.int32 t.rng) in
@@ -74,7 +73,7 @@ let shutdown t now id v =
         if conn.cantsndmore || v = `read then
           conn', []
         else
-          Segment.tcp_output_perhaps now (Connection.prj id) conn'
+          Segment.tcp_output_perhaps now id conn'
       in
       Ok ({ t with connections = CM.add id conn' t.connections }, out)
     else
@@ -100,14 +99,17 @@ let close t now id =
       if conn.cantsndmore then
         conn', []
       else
-        Segment.tcp_output_perhaps now (Connection.prj id) conn'
+        Segment.tcp_output_perhaps now id conn'
     in
     Ok ({ t with connections = CM.add id conn' t.connections }, out)
 
-let send t now id buf =
+let send t now id ?(off= 0) ?len str =
+  let len = match len with
+    | Some len -> len
+    | None -> String.length str - off in
   Tracing.debug (fun m -> m "%a [%a] send %u %s" Connection.pp id Mtime.pp now
-                   (String.length buf)
-                   (Base64.encode_string buf));
+                   len
+                   (Base64.encode_string str));
   match CM.find_opt id t.connections with
   | None -> Error `Not_found
   | Some conn ->
@@ -118,16 +120,11 @@ let send t now id buf =
       guard (not conn.cantsndmore) (`Msg "cant write")
     in
     let space = max 0 (conn.sndbufsize - Rope.length conn.sndq) in
-    let buf' =
-      if space < String.length buf then
-        String.sub buf 0 space
-      else
-        buf
-    in
-    let sndq = Rope.append conn.sndq buf' in
+    let off, len = if space < len then off, space else off, len in
+    let sndq = Rope.append conn.sndq ~off ~len str in
     let conn' = { conn with sndq } in
-    let conn', out = Segment.tcp_output_perhaps now (Connection.prj id) conn' in
-    Ok ({ t with connections = CM.add id conn' t.connections }, String.length buf', conn'.snd_notify, out)
+    let conn', out = Segment.tcp_output_perhaps now id conn' in
+    Ok ({ t with connections = CM.add id conn' t.connections }, len, conn'.snd_notify, out)
 
 let recv t now id =
   Tracing.debug (fun m -> m "%a [%a] receive" Connection.pp id Mtime.pp now);
@@ -140,5 +137,5 @@ let recv t now id =
     let rcvq = Rope.to_string conn.rcvq in
     let* () = guard (not (String.length rcvq = 0 && conn.cantrcvmore)) `Eof in
     let conn' = { conn with rcvq = Rope.empty } in
-    let conn', out = Segment.tcp_output_perhaps now (Connection.prj id) conn' in
+    let conn', out = Segment.tcp_output_perhaps now id conn' in
     Ok ({ t with connections = CM.add id conn' t.connections }, rcvq, conn'.rcv_notify, out)

@@ -1,34 +1,34 @@
-(executable
- (name server)
- (public_name server)
- (modules server)
- (libraries utcp mirage-net-unix cstruct lwt logs ethernet arp.mirage
-   tcpip.ipv4 mirage-crypto-rng.unix mirage-unix lwt.unix
-   cmdliner logs.fmt fmt.cli logs.cli fmt.tty mtime.clock.os)
- (optional))
+; (executable
+;  (name server)
+;  (public_name server)
+;  (modules server)
+;  (libraries utcp mirage-net-unix cstruct lwt logs ethernet arp.mirage
+;    tcpip.ipv4 mirage-crypto-rng.unix mirage-unix lwt.unix
+;    cmdliner logs.fmt fmt.cli logs.cli fmt.tty mtime.clock.os)
+;  (optional))
 
-(executable
- (name single)
- (public_name single)
- (modules single)
- (libraries utcp mirage-net-unix cstruct lwt logs ethernet arp.mirage
-   mirage-crypto-rng.unix tcpip.ipv4 mirage-crypto-rng mirage-unix
-   lwt.unix cmdliner logs.fmt fmt.cli logs.cli fmt.tty
-   mtime.clock.os)
- (optional))
+; (executable
+;  (name single)
+;  (public_name single)
+;  (modules single)
+;  (libraries utcp mirage-net-unix cstruct lwt logs ethernet arp.mirage
+;    mirage-crypto-rng.unix tcpip.ipv4 mirage-crypto-rng mirage-unix
+;    lwt.unix cmdliner logs.fmt fmt.cli logs.cli fmt.tty
+;    mtime.clock.os)
+;  (optional))
 
-(executable
- (name pcap_replay)
- (public_name pcap)
- (modules pcap_replay)
- (libraries utcp cstruct pcap-format ipaddr mtime logs ipaddr-cstruct cmdliner
-   logs.fmt fmt.cli logs.cli fmt.tty)
- (optional))
+; (executable
+;  (name pcap_replay)
+;  (public_name pcap)
+;  (modules pcap_replay)
+;  (libraries utcp cstruct pcap-format ipaddr mtime logs ipaddr-cstruct cmdliner
+;    logs.fmt fmt.cli logs.cli fmt.tty)
+;  (optional))
 
-(executable
- (name trace_replay)
- (public_name trace)
- (modules trace_replay)
- (libraries utcp base64 cstruct ipaddr mtime logs ipaddr-cstruct cmdliner
-   logs.fmt fmt.cli logs.cli fmt.tty)
- (optional))
+; (executable
+;  (name trace_replay)
+;  (public_name trace)
+;  (modules trace_replay)
+;  (libraries utcp base64 cstruct ipaddr mtime logs ipaddr-cstruct cmdliner
+;    logs.fmt fmt.cli logs.cli fmt.tty)
+;  (optional))
