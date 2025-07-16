@@ -150,6 +150,9 @@ let feed_string ~off ~len sum str =
   else
     unsafe_feed_string_16_le ~off ~len sum str
 
+let feed_bytes sum buf =
+  feed_string ~off:0 ~len:(Bytes.length buf) sum (Bytes.unsafe_to_string buf)
+
 let digest_string ~off ~len str =
   if off < 0 || len < 0 || off > String.length str - len then
     invalid_arg "Checksum.digest_string";

@@ -5,6 +5,7 @@ val digest : off:int -> len:int -> bigstring -> int
 val digest_cstruct : Cstruct.t -> int
 val feed_cstruct : int -> Cstruct.t -> int
 val feed_string : off:int -> len:int -> int -> string -> int
+val feed_bytes : int -> bytes -> int
 val digest_string : off:int -> len:int -> string -> int
 val digest_strings : string list -> int
 val finally : int -> int

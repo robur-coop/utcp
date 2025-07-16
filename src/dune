@@ -1,5 +1,5 @@
 (library
  (name utcp)
  (public_name utcp)
- (libraries cstruct fmt ipaddr ipaddr-cstruct logs randomconv duration mtime metrics base64)
+ (libraries fmt ipaddr ipaddr-cstruct logs randomconv duration mtime metrics base64)
  (instrumentation (backend bisect_ppx)))

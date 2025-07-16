@@ -39,6 +39,8 @@ module Sequence : sig
   val pp : t Fmt.t
 end
 
+module Rope = Rope
+
 module Segment : sig
   type tcp_option =
     | MaximumSegmentSize of int
@@ -54,7 +56,7 @@ module Segment : sig
     push : bool ;
     window : int ;
     options : tcp_option list ;
-    payload : Cstruct.t ;
+    payload : string ;
   }
 
   val pp : t Fmt.t
@@ -71,6 +73,7 @@ module Segment : sig
   val encode_and_checksum_into : Mtime.t -> Cstruct.t -> src:Ipaddr.t -> dst:Ipaddr.t -> t -> unit
 
   val checksum : src:Ipaddr.t -> dst:Ipaddr.t -> Cstruct.t -> int
+  val checksum_bytes : src:Ipaddr.t -> dst:Ipaddr.t -> bytes -> int
 
   val encode : t -> Cstruct.t
 end
@@ -96,9 +99,9 @@ val shutdown : 'a state -> Mtime.t -> flow -> [ `read | `write | `read_write ] -
   ('a state * output list, [ `Not_found | `Msg of string ]) result
 
 val recv : 'a state -> Mtime.t -> flow ->
-  ('a state * Cstruct.t * 'a * output list, [ `Not_found | `Msg of string | `Eof ]) result
+  ('a state * string * 'a * output list, [ `Not_found | `Msg of string | `Eof ]) result
 
-val send : 'a state -> Mtime.t -> flow -> Cstruct.t ->
+val send : 'a state -> Mtime.t -> flow -> string ->
   ('a state * int * 'a * output list, [ `Not_found | `Msg of string ]) result
 
 (**/**)
@@ -134,8 +137,8 @@ module State : sig
     val empty : t
     val is_empty : t -> bool
     val length : t -> int
-    val insert_seg : t -> (Sequence.t * bool * Cstruct.t) -> t
-    val maybe_take : t -> Sequence.t -> (t * (Cstruct.t * bool) option)
+    val insert_seg : t -> (Sequence.t * bool * string) -> t
+    val maybe_take : t -> Sequence.t -> (t * (string * bool) option)
     val pp : t Fmt.t
   end
   type control_block = {
@@ -186,8 +189,8 @@ module State : sig
     cantsndmore : bool ;
     rcvbufsize : int ;
     sndbufsize : int ;
-    rcvq : Cstruct.t list ;
-    sndq : Cstruct.t list ;
+    rcvq : Rope.t ;
+    sndq : Rope.t ;
     rcv_notify : 'a;
     snd_notify : 'a;
     created : Mtime.t;
@@ -226,3 +229,4 @@ end
 
 module Checksum = Checksum
 (**/**)
+val unsafe_flow : Ipaddr.t * int * Ipaddr.t * int -> flow
