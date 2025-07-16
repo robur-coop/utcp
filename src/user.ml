@@ -14,6 +14,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
     | Some p -> p
   in
   let id = src, src_port, dst, dst_port in
+  let id = Connection.v id in
   Tracing.debug (fun m -> m "%a [%a] connect" Connection.pp id Mtime.pp now);
   let conn =
     let iss = Sequence.of_int32 (Randomconv.int32 t.rng) in
@@ -37,7 +38,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
     } in
     conn_state now t.mk_notify ~rcvbufsize:rcv_wnd ~sndbufsize:Params.so_sndbuf Syn_sent control_block
   in
-  let _, _, seg = Segment.make_syn conn.control_block id in
+  let _, _, seg = Segment.make_syn conn.control_block (src, src_port, dst, dst_port) in
   let connections =
     Log.debug (fun m -> m "%a active open %a" Connection.pp id (pp_conn_state now) conn);
     CM.add id conn t.connections
@@ -73,7 +74,7 @@ let shutdown t now id v =
         if conn.cantsndmore || v = `read then
           conn', []
         else
-          Segment.tcp_output_perhaps now id conn'
+          Segment.tcp_output_perhaps now (Connection.prj id) conn'
       in
       Ok ({ t with connections = CM.add id conn' t.connections }, out)
     else
@@ -99,7 +100,7 @@ let close t now id =
       if conn.cantsndmore then
         conn', []
       else
-        Segment.tcp_output_perhaps now id conn'
+        Segment.tcp_output_perhaps now (Connection.prj id) conn'
     in
     Ok ({ t with connections = CM.add id conn' t.connections }, out)
 
@@ -125,7 +126,7 @@ let send t now id buf =
     in
     let sndq = buf' :: conn.sndq in
     let conn' = { conn with sndq } in
-    let conn', out = Segment.tcp_output_perhaps now id conn' in
+    let conn', out = Segment.tcp_output_perhaps now (Connection.prj id) conn' in
     Ok ({ t with connections = CM.add id conn' t.connections }, Cstruct.length buf', conn'.snd_notify, out)
 
 let recv t now id =
@@ -139,5 +140,5 @@ let recv t now id =
     let rcvq = Cstruct.concat (List.rev conn.rcvq) in
     let* () = guard (not (Cstruct.length rcvq = 0 && conn.cantrcvmore)) `Eof in
     let conn' = { conn with rcvq = [] } in
-    let conn', out = Segment.tcp_output_perhaps now id conn' in
+    let conn', out = Segment.tcp_output_perhaps now (Connection.prj id) conn' in
     Ok ({ t with connections = CM.add id conn' t.connections }, rcvq, conn'.rcv_notify, out)

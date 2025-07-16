@@ -209,7 +209,7 @@ let ws t =
 
 (* we always take our IP as source, thus of_segment -- to be used for a
    received segment -- needs to swap *)
-let to_id ~src ~dst t = (dst, t.dst_port, src, t.src_port)
+let to_id ~src ~dst t = State.Connection.v (dst, t.dst_port, src, t.src_port)
 
 let pp ppf t =
   Fmt.pf ppf "%a%s@ seq %a@ ack %a@ window %d@ opts %a, %d bytes data"
@@ -609,8 +609,9 @@ let encode_and_checksum_into now buf ~src ~dst t =
   encode_into buf t;
   let checksum = checksum ~src ~dst buf in
   Cstruct.BE.set_uint16 buf 16 checksum;
+  let id = State.Connection.v (src, t.src_port, dst, t.dst_port) in
   State.Tracing.debug (fun m -> m "%a [%a] out %u %s"
-                          State.Connection.pp (src, t.src_port, dst, t.dst_port)
+                          State.Connection.pp id 
                           Mtime.pp now (Cstruct.length t.payload)
                           (Base64.encode_string (Cstruct.to_string buf)))
 

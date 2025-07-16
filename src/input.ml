@@ -90,7 +90,7 @@ let deliver_in_1 mk_notify m stats rng now id seg =
     conn_state now mk_notify ~rcvbufsize ~sndbufsize Syn_received control_block
   in
   let reply = Segment.make_syn_ack conn.control_block id in
-  Log.debug (fun m -> m "%a passive open %a" Connection.pp id (pp_conn_state now) conn);
+  Log.debug (fun m -> m "%a passive open %a" Connection.pp_debug id (pp_conn_state now) conn);
   Stats.incr_passive stats;
   conn, reply
 
@@ -912,7 +912,7 @@ let di3_ststuff id now conn rcvd_fin ourfinisacked =
   | Last_ack, false -> conn'
   | Last_ack, true ->
     Log.info (fun m -> m "Last_ack and we received a fin on %a"
-                 Connection.pp id);
+                 Connection.pp_debug id);
     assert false
   | Time_wait, _ -> enter_time_wait
   | _ -> assert false
@@ -969,19 +969,19 @@ let handle_noconn t now id seg =
   with
   | true, true ->
     (* there can't be anything in TIME_WAIT, otherwise we wouldn't end up here *)
-    let conn, reply = deliver_in_1 t.mk_notify m t.stats t.rng now id seg in
+    let conn, reply = deliver_in_1 t.mk_notify m t.stats t.rng now (Connection.prj id) seg in
     { t with connections = CM.add id conn t.connections }, [ reply ]
   | true, false ->
     (* deliver_in_1b *)
     m "deliver-in-1b";
-    let out = Option.map (fun _ack -> dropwithreset id seg) seg.Segment.ack in
+    let out = Option.map (fun _ack -> dropwithreset (Connection.prj id) seg) seg.Segment.ack in
     t, Option.to_list (Option.join out)
   | false, syn ->
     m "deliver-in-5-6";
     Log.debug (fun m -> m "%a dropping segment with reset (SYN %B) %a"
                   Connection.pp id syn Segment.pp seg);
     (* deliver_in_5 / deliver_in_6 *)
-    t, Option.to_list (dropwithreset id seg)
+    t, Option.to_list (dropwithreset (Connection.prj id) seg)
 
 let handle_conn t now id conn seg =
   let m = rule t in
@@ -997,7 +997,7 @@ let handle_conn t now id conn seg =
     | Syn_sent ->
       begin match seg.Segment.ack, seg.Segment.flag with
         | Some ack, Some `Syn ->
-          let* c', o = deliver_in_2 m t.stats now id conn seg ack in
+          let* c', o = deliver_in_2 m t.stats now (Connection.prj id) conn seg ack in
           Ok (add c', [ o ])
         | None, Some `Syn ->
           (* simultaneous open: accept anything, send syn+ack *)
@@ -1057,7 +1057,7 @@ let handle_conn t now id conn seg =
          state. This is modelled by closing the existing [[TIME_WAIT]] socket and creating the new
          socket from scratch.
       *)
-      let conn, reply = deliver_in_1 t.mk_notify m t.stats t.rng now id seg in
+      let conn, reply = deliver_in_1 t.mk_notify m t.stats t.rng now (Connection.prj id) seg in
       Ok ({ t with connections = CM.add id conn t.connections }, [ reply ])
     | _ ->
       let* () =
@@ -1069,19 +1069,19 @@ let handle_conn t now id conn seg =
       (* RFC5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
       match seg.Segment.flag, seg.Segment.ack with
       | Some `Rst, _ ->
-        let* seg' = deliver_in_7 m id conn seg in
+        let* seg' = deliver_in_7 m (Connection.prj id) conn seg in
         Ok (t, [ seg' ])
       | Some `Syn, _ ->
-        let* seg' = deliver_in_8 m id conn seg in
+        let* seg' = deliver_in_8 m (Connection.prj id) conn seg in
         Ok (t, [ seg' ])
       | _, None -> Error (`Drop (fun () -> "no ACK"))
       | f, Some ack ->
-        let* conn', out = deliver_in_3 m now id conn seg f ack in
+        let* conn', out = deliver_in_3 m now (Connection.prj id) conn seg f ack in
         match conn' with
         | None -> Ok (drop (), [])
         | Some conn' ->
           let conn'', out' = match out with
-            | [] -> Segment.tcp_output_perhaps now id conn'
+            | [] -> Segment.tcp_output_perhaps now (Connection.prj id) conn'
             | x -> conn', x
           in
           Ok (add conn'', out')
@@ -1094,7 +1094,7 @@ let handle_conn t now id conn seg =
     t, []
   | Error (`Reset msg) ->
     Log.debug (fun m -> m "%a reset in %a %s" Connection.pp id pp_fsm conn.tcp_state (msg ()));
-    drop (), Option.to_list (dropwithreset id seg)
+    drop (), Option.to_list (dropwithreset (Connection.prj id) seg)
 
 let handle_segment t now id seg =
   Log.debug (fun m -> m "%a TCP %a" Connection.pp id Segment.pp seg) ;
@@ -1155,7 +1155,7 @@ let handle_buf t now ~src ~dst data =
         | conds -> Some (`Signal (id, conds))
     in
     List.iter (fun (src', dst', _) ->
-        let src, _, dst, _ = id in
+        let src, _, dst, _ = Connection.prj id in
         if Ipaddr.compare src' src <> 0 then
           Log.debug (fun m -> m "bad IP reply src' %a vs src %a"
                         Ipaddr.pp src' Ipaddr.pp src);
