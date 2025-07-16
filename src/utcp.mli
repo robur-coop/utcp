@@ -226,3 +226,4 @@ end
 
 module Checksum = Checksum
 (**/**)
+val unsafe_flow : Ipaddr.t * int * Ipaddr.t * int -> flow

@@ -143,7 +143,7 @@ and your_ip = Ipaddr.(V4 (V4.of_string_exn "1.2.3.5"))
 and listen_port = 1234
 and src_port = 4321
 
-let quad = Obj.magic (my_ip, listen_port, your_ip, src_port)
+let quad = Utcp.unsafe_flow (my_ip, listen_port, your_ip, src_port)
 
 (* a TCP stack listening on port 1234 *)
 let tcp = State.empty Fun.id "" static_rng

@@ -410,17 +410,45 @@ let pp_control now ppf c =
 let compare_int (a : int) (b : int) = compare a b
 
 module Connection = struct
-  type t = Ipaddr.t * int * Ipaddr.t * int
+  type t =
+    { to_compare : string
+    ; key : Ipaddr.t * int * Ipaddr.t * int }
 
-  let pp ppf (src, srcp, dst, dstp) =
+  let inj_ipaddr value ~off buf =
+    match value with
+    | Ipaddr.V4 v4 ->
+        Bytes.set_uint8 buf off 1;
+        Ipaddr.V4.write_octets_exn ~off:(off + 1) v4 buf
+    | Ipaddr.V6 v6 ->
+        Bytes.set_uint8 buf off 2;
+        Ipaddr.V6.write_octets_exn ~off:(off + 1) v6 buf
+
+  let prj_ipaddr str ~off =
+    match str.[0] with
+    | '\001' -> Ipaddr.V4 (Ipaddr.V4.of_octets_exn ~off:(off + 1) str)
+    | '\002' -> Ipaddr.V6 (Ipaddr.V6.of_octets_exn ~off:(off + 1) str)
+    | _ -> assert false
+
+  let inj (src, srcp, dst, dstp) =
+    let len = (16 * 2) + 2 + (2 * 2) in
+    let buf = Bytes.make len '\000' in
+    inj_ipaddr src ~off:0 buf;
+    Bytes.set_uint16_be buf 17 srcp;
+    inj_ipaddr dst ~off:19 buf;
+    Bytes.set_uint16_be buf 36 dstp;
+    Bytes.unsafe_to_string buf
+
+  let v key = { to_compare= inj key; key }
+  let prj t = t.key
+
+  let pp ppf t =
+    let (src, srcp, dst, dstp) = t.key in
     Fmt.pf ppf "%a:%d -> %a:%d" Ipaddr.pp src srcp Ipaddr.pp dst dstp
 
-  let andThen a b = if a = 0 then b else a
-  let compare ((src, srcp, dst, dstp) : t) ((src', srcp', dst', dstp') : t) =
-    andThen (compare_int srcp srcp')
-      (andThen (compare_int dstp dstp')
-         (andThen (Ipaddr.compare src src')
-            (Ipaddr.compare dst dst')))
+  let pp_debug ppf (src, srcp, dst, dstp) =
+    Fmt.pf ppf "%a:%d -> %a:%d" Ipaddr.pp src srcp Ipaddr.pp dst dstp
+
+  let compare a b = String.compare a.to_compare b.to_compare
 end
 
 (* in this we store Connection.t -> state *)
