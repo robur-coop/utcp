@@ -2,29 +2,35 @@
 
 (* arithmetics within the sequence number space -- 0 .. 2 ^ 32 - 1 *)
 
-(* TODO: evaluate performance, maybe int is more pleasant *)
-type t = int32
+type t = int
 
-let add = Int32.add
-let incr a = add a 1l
+let[@inline always] add a b = (a + b) land 0xFFFFFFFF
+let[@inline always] incr a = add a 1
+let zero = 0
+let[@inline always] addi a i = (add[@inlined]) a i
 
-let zero = 0l
+external sub : t -> t -> int = "%subint"
+external window : t -> t -> int = "%subint"
 
-let window a b = Int32.to_int (Int32.sub a b)
+let of_int32 x = Int32.to_int x land 0xFFFFFFFF
+let to_int32 = Int32.of_int
 
-let addi a i = add a (Int32.of_int i)
-let sub a b = Int32.to_int (Int32.sub a b)
+external ( < ) : 'a -> 'a -> bool = "%lessthan"
+external ( <= ) : 'a -> 'a -> bool = "%lessequal"
+external ( >= ) : 'a -> 'a -> bool = "%greaterequal"
+external ( > ) : 'a -> 'a -> bool = "%greaterthan"
 
-let of_int32 a = a
-let to_int32 a = a
+let ( > ) (x : int) y = x > y [@@inline]
+let ( < ) (x : int) y = x < y [@@inline]
+let ( <= ) (x : int) y = x <= y [@@inline]
+let ( >= ) (x : int) y = x >= y [@@inline]
+let min (a : int) b = if a <= b then a else b [@@inline]
+let max (a : int) b = if a >= b then a else b [@@inline]
 
-let less a b = Int32.sub a b < 0l
-let less_equal a b = Int32.sub a b <= 0l
-let greater a b = Int32.sub a b > 0l
-let greater_equal a b = Int32.sub a b >= 0l
-let equal a b = Int32.compare a b = 0
+let less a b = a - b < 0
+let less_equal a b = a - b <= 0
+let greater a b = a - b > 0
+let greater_equal a b = a - b >= 0
+let equal a b = a == b
 
-let min a b = if less a b then a else b
-let max a b = if greater a b then a else b
-
-let pp = Fmt.uint32
+let pp = Fmt.int
