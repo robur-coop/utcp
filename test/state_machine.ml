@@ -107,16 +107,16 @@ let equal_conn_state_full a b =
   a.cantsndmore = b.cantsndmore &&
   a.rcvbufsize = b.rcvbufsize &&
   a.sndbufsize = b.sndbufsize &&
-  leq Cstruct.equal a.sndq b.sndq &&
-  leq Cstruct.equal a.rcvq b.rcvq &&
+  Rope.equal a.sndq b.sndq &&
+  Rope.equal a.rcvq b.rcvq &&
   equal_control_block a.control_block b.control_block
 
 let equal_conn_state a b =
   equal_tcp_state a.State.tcp_state b.State.tcp_state &&
   a.cantrcvmore = b.cantrcvmore &&
   a.cantsndmore = b.cantsndmore &&
-  leq Cstruct.equal a.sndq b.sndq &&
-  leq Cstruct.equal a.rcvq b.rcvq
+  Rope.equal a.sndq b.sndq &&
+  Rope.equal a.rcvq b.rcvq
 
 let equal_tcp_full a b =
   State.IS.equal a.State.listeners b.State.listeners &&
@@ -152,7 +152,7 @@ let tcp_listen = State.start_listen tcp listen_port
 let basic_seg = {
   Segment.src_port ; dst_port = listen_port ; seq = Sequence.zero ;
   ack = None ; flag = None ; push = false ; window = 0 ;
-  options = [] ; payload = Cstruct.empty
+  options = [] ; payload_len = 0 ; payload = [ Cstruct.empty ]
 }
 
 let initial_seq = Sequence.of_int32 42l
@@ -165,15 +165,17 @@ let test_segs ack payload =
   and str =
     let l = Cstruct.length payload in
     if l = 0 then "" else "+" ^ string_of_int l ^ " bytes data"
-  in [
-    "NONE" ^ str, { seg with payload } ;
-    "ACK" ^ str, { seg with ack = Some ack ; payload } ;
-    "SYN" ^ str, { seg with flag = Some `Syn ; payload } ;
-    "RST" ^ str, { seg with flag = Some `Rst ; payload } ;
-    "FIN" ^ str, { seg with flag = Some `Fin ; payload } ;
-    "SYN+ACK" ^ str, { seg with flag = Some `Syn ; ack = Some ack ; payload } ;
-    "RST+ACK" ^ str, { seg with flag = Some `Rst ; ack = Some ack ; payload } ;
-    "FIN+ACK" ^ str, { seg with flag = Some `Fin ; ack = Some ack ; payload } ;
+  and payload_len = Cstruct.length payload in
+  let payload = [ payload ] in
+  [
+    "NONE" ^ str, { seg with payload_len ; payload } ;
+    "ACK" ^ str, { seg with ack = Some ack ; payload_len ; payload } ;
+    "SYN" ^ str, { seg with flag = Some `Syn ; payload_len ; payload } ;
+    "RST" ^ str, { seg with flag = Some `Rst ; payload_len ; payload } ;
+    "FIN" ^ str, { seg with flag = Some `Fin ; payload_len ; payload } ;
+    "SYN+ACK" ^ str, { seg with flag = Some `Syn ; ack = Some ack ; payload_len ; payload } ;
+    "RST+ACK" ^ str, { seg with flag = Some `Rst ; ack = Some ack ; payload_len ; payload } ;
+    "FIN+ACK" ^ str, { seg with flag = Some `Fin ; ack = Some ack ; payload_len ; payload } ;
   ]
 
 (* we encode the answers to each of these 16 segments for each state *)
