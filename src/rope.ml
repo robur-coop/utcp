@@ -33,7 +33,7 @@ let sub t ~off ~len =
   let stop = off + len in
   if off < 0 || len < 0 || stop > length t
   then invalid_arg "Rope.sub";
-  if len == 0 then t else sub t off stop
+  if len == 0 then empty else sub t off stop
 
 let shift t len = sub t ~off:len ~len:(length t - len)
 
