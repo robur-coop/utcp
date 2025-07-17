@@ -180,8 +180,11 @@ type t = {
   push : bool ;
   window : int ;
   options : tcp_option list ;
-  payload : string ;
+  payload : string list;
+  payload_len : int;
 }
+
+let sle a b = String.equal (String.concat "" a) (String.concat "" b)
 
 let equal a b =
   a.src_port = b.src_port && a.dst_port = b.dst_port &&
@@ -193,7 +196,7 @@ let equal a b =
   a.window = b.window &&
   List.length a.options = List.length b.options &&
   List.for_all2 equal_option a.options b.options &&
-  String.equal a.payload b.payload
+  sle a.payload b.payload
 
 let max_win = 1 lsl 16 - 1
 
@@ -217,7 +220,7 @@ let pp ppf t =
     Sequence.pp t.seq
     Fmt.(option ~none:(any "no") Sequence.pp) t.ack
     t.window Fmt.(list ~sep:(any ";@ ") pp_option) t.options
-    (String.length t.payload)
+    t.payload_len
 
 let count_flags = function
   | Some (`Fin | `Syn) -> 1
@@ -228,7 +231,7 @@ let make_rst_from_cb cb (src, src_port, dst, dst_port) =
   src, dst,
   { src_port ; dst_port ; seq = cb.State.snd_nxt ; ack = Some cb.rcv_nxt ;
     flag = Some `Rst ; push = false ; window = 0 ; options = [] ;
-    payload = String.empty }
+    payload_len= 0; payload = [] }
 
 (* auxFns:2219 *)
 let dropwithreset seg =
@@ -240,7 +243,7 @@ let dropwithreset seg =
       | Some ack -> None, ack (* never ACK an ACK *)
       | None ->
         let ack =
-          let data_len = String.length seg.payload
+          let data_len = seg.payload_len
           and flag_len = count_flags seg.flag
           in
           Sequence.(addi (addi seg.seq data_len) flag_len)
@@ -251,7 +254,7 @@ let dropwithreset seg =
            dst_port = seg.src_port ;
            seq ; ack ;
            flag = Some `Rst ; push = false ;
-           window = 0 ; options = [] ; payload = String.empty }
+           window = 0 ; options = [] ; payload_len= 0; payload = [] }
 
 (* auxFns:2331 *)
 let drop_and_close id conn =
@@ -380,13 +383,12 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
               (Sequence.window cb.State.snd_nxt cb.State.snd_una)))
         (* taking the minimum to avoid exceeding the sndq *)
     in
-    let data' = Rope.to_string data' in
+    let dlen = Rope.length data' in
     let len_could_be_sent = Int.max 0 snd_wnd_unused in
-    let dlen = String.length data' in
-    String.sub data' 0 (Int.min dlen (Int.min len_could_be_sent cb.State.t_maxseg)),
-    dlen > cb.t_maxseg && len_could_be_sent > cb.t_maxseg
+    let data' = Rope.sub data' ~off:0 ~len:(Int.min dlen (Int.min len_could_be_sent cb.State.t_maxseg)) in
+    data', dlen > cb.t_maxseg && len_could_be_sent > cb.t_maxseg
   in
-  let dlen = String.length data_to_send in
+  let dlen = Rope.length data_to_send in
   (*: Should [[FIN]] be set in this segment? :*)
   let fin = fin_required && Sequence.(greater_equal (addi cb.State.snd_nxt dlen) last_sndq_data_seq) in
   (*: If this socket has previously sent a [[FIN]] which has not yet been acked, and [[snd_nxt]]
@@ -425,7 +427,8 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
     { src_port ; dst_port ; seq = snd_nxt;
       ack = Some cb.State.rcv_nxt ; flag ; push ;
       window = Int.min (rcv_wnd' lsr cb.rcv_scale) max_win ;
-      options = [] ; payload = data_to_send
+      options = [] ; payload_len= Rope.length data_to_send ;
+      payload = Rope.to_strings data_to_send
     }
   in
   (*: If emitting a [[FIN]] for the first time then change TCP state :*)
@@ -532,8 +535,8 @@ let make_syn_ack cb (src, src_port, dst, dst_port) =
   in
   src, dst,
   { src_port ; dst_port ; seq = cb.iss ; ack = Some cb.rcv_nxt ;
-    flag = Some `Syn ; push = false ; window ; options ;
-    payload = String.empty }
+    flag = Some `Syn ; push = false ; window ; options ; payload_len = 0 ;
+    payload = [] }
 
 (* auxFns:1333 *)
 let make_syn cb (src, src_port, dst, dst_port) =
@@ -545,7 +548,7 @@ let make_syn cb (src, src_port, dst, dst_port) =
   src, dst,
   { src_port ; dst_port ; seq = cb.State.iss ; ack = None ;
     flag = Some `Syn ; push = false ;
-    window ; options ; payload = String.empty }
+    window ; options ; payload_len = 0 ; payload = [] }
 
 (* auxFns:1437 *)
 let make_ack cb ~fin (src, src_port, dst, dst_port) =
@@ -556,7 +559,7 @@ let make_ack cb ~fin (src, src_port, dst, dst_port) =
     seq = if fin then cb.snd_una else cb.snd_nxt ;
     ack = Some cb.rcv_nxt ;
     flag = if fin then Some `Fin else None ;
-    push = false ; window ; options = [] ; payload = String.empty }
+    push = false ; window ; options = [] ; payload_len = 0 ; payload = [] }
 
 let pseudoheader = Bytes.make 40 '\000'
 
@@ -620,10 +623,16 @@ let encode_into buf t =
   Cstruct.set_uint8 buf 13 (Flag.encode ((match t.ack with None -> false | Some _ -> true), t.flag, t.push));
   Cstruct.BE.set_uint16 buf 14 t.window;
   let _ = encode_options buf 20 t.options in
-  Cstruct.blit_from_string t.payload 0 buf (20 + opt_len) (String.length t.payload)
+  let rec go dst_off = function
+    | [] -> ()
+    | x :: r ->
+        let len = String.length x in
+        Cstruct.blit_from_string x 0 buf dst_off len;
+        go (dst_off + len) r in
+  go (20 + opt_len) t.payload
 
 let length t =
-  header_size + String.length t.payload + length_options t.options
+  header_size + t.payload_len + length_options t.options
 
 let encode t =
   let buf = Cstruct.create (length t) in
@@ -636,13 +645,24 @@ let encode_and_checksum_into now buf ~src ~dst t =
   Cstruct.BE.set_uint16 buf 16 checksum;
   State.Tracing.debug (fun m -> m "%a [%a] out %u %s"
                           State.Connection.pp (src, t.src_port, dst, t.dst_port)
-                          Mtime.pp now (String.length t.payload)
+                          Mtime.pp now t.payload_len
                           (Base64.encode_string (Cstruct.to_string buf)))
 
 let encode_and_checksum now ~src ~dst t =
   let buf = Cstruct.create (length t) in
   encode_and_checksum_into now buf ~src ~dst t;
   buf
+
+let cstruct_to_chunk cs =
+  let rec go acc cs =
+    let max = Cstruct.length cs in
+    if max > 0 then begin
+      let len = Int.min 0x7ff max in
+      let buf = Bytes.create len in
+      Cstruct.blit_to_bytes cs 0 buf 0 len;
+      go (Bytes.unsafe_to_string buf :: acc) (Cstruct.shift cs len)
+    end else List.rev acc in
+  go [] cs
 
 let decode data =
   let* () = guard (Cstruct.length data >= header_size) (`Msg "too small") in
@@ -662,9 +682,10 @@ let decode data =
   in
   let options_buf = Cstruct.sub data header_size (data_off - header_size) in
   let* options = decode_options options_buf in
-  let payload = Cstruct.to_string data ~off:data_off in
+  let payload_len = Cstruct.length data - data_off in
+  let payload = cstruct_to_chunk (Cstruct.shift data data_off) in
   let ack = if ackf then Some ack else None in
-  Ok ({ src_port; dst_port; seq; ack; flag; push; window; options; payload },
+  Ok ({ src_port; dst_port; seq; ack; flag; push; window; options; payload_len; payload },
       checksum)
 
 let decode_and_validate ~src ~dst data =

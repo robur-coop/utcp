@@ -10,6 +10,8 @@ let added_is_nonempty () =
   Alcotest.(check int "reassembly queue is not empty" 1 (length r))
 
 let data = String.make 10 '\042'
+let sle a b = String.equal (String.concat "" a) (String.concat "" b)
+let lenv = List.fold_left (fun acc x -> acc + String.length x) 0
 
 let added_can_be_taken () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -18,7 +20,7 @@ let added_can_be_taken () =
   match s with
   | None -> Alcotest.fail "should be some data"
   | Some (s, fin) ->
-    Alcotest.(check bool "data should be fine" true (String.equal data s));
+    Alcotest.(check bool "data should be fine" true (sle [data] s));
     Alcotest.(check bool "fin should be false" false fin)
 
 let added_can_be_taken2 () =
@@ -28,9 +30,9 @@ let added_can_be_taken2 () =
   match s with
   | None -> ()
   | Some (s, fin) ->
-    Alcotest.(check int "data should be fine" 5 (String.length s));
+    Alcotest.(check int "data should be fine" 5 (lenv s));
     let exp_data = String.sub data 5 (String.length data - 5) in
-    Alcotest.(check bool "data should be fine" true (String.equal s exp_data));
+    Alcotest.(check bool "data should be fine" true (sle s [exp_data]));
     Alcotest.(check bool "fin should be false" false fin)
 
 let added_can_be_taken3 () =
@@ -51,7 +53,7 @@ let coalescing_works () =
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) ->
     Alcotest.(check bool "data is good" true
-                (String.equal s (String.concat "" [data; data ])))
+                (sle s [data; data ]))
 
 let coalescing_works_rev () =
   let r = insert_seg empty (Sequence.of_int32 10l, false, data) in
@@ -63,7 +65,7 @@ let coalescing_works_rev () =
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) ->
     Alcotest.(check bool "data is good" true
-                (String.equal s (String.concat "" [data; data ])))
+                (sle s [data; data ]))
 
 let coalescing_works_3 () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -80,7 +82,7 @@ let coalescing_works_3 () =
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) ->
     Alcotest.(check bool "data is good" true
-                (String.equal s (String.concat "" [ data ; data ; data ; data ])))
+                (sle s [ data ; data ; data ; data ]))
 
 let coalescing_works_4 () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -95,7 +97,7 @@ let coalescing_works_4 () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 30 (String.length s))
+  | Some (s, _) -> Alcotest.(check int "data is good" 30 (lenv s))
 
 let coalescing_works_5 () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -124,7 +126,7 @@ let coalescing_works_5 () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 20 (String.length s))
+  | Some (s, _) -> Alcotest.(check int "data is good" 20 (lenv s))
 
 let coalescing_works_6 () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -145,7 +147,7 @@ let coalescing_works_6 () =
   Alcotest.(check int "reassembly queue is now one element" 1 (length r));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 40 (String.length s))
+  | Some (s, _) -> Alcotest.(check int "data is good" 40 (lenv s))
 
 let coalescing_works_7 () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -164,17 +166,17 @@ let coalescing_works_7 () =
   Alcotest.(check int "reassembly queue is now two elements" 2 (length r));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 10 (String.length s));
+  | Some (s, _) -> Alcotest.(check int "data is good" 10 (lenv s));
   let r, s = maybe_take r (Sequence.of_int32 15l) in
   Alcotest.(check int "reassembly queue is now one element" 1 (length r));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 15 (String.length s));
+  | Some (s, _) -> Alcotest.(check int "data is good" 15 (lenv s));
   let r, s = maybe_take r (Sequence.of_int32 45l) in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 15 (String.length s))
+  | Some (s, _) -> Alcotest.(check int "data is good" 15 (lenv s))
 
 let take_works () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -184,12 +186,12 @@ let take_works () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 30 (String.length s));
+  | Some (s, _) -> Alcotest.(check int "data is good" 30 (lenv s));
   let r', s = maybe_take r (Sequence.of_int32 15l) in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 15 (String.length s));
+  | Some (s, _) -> Alcotest.(check int "data is good" 15 (lenv s));
   let r', s = maybe_take r (Sequence.of_int32 45l) in
   Alcotest.(check int "reassembly queue is now empty (has been pruned)" 0 (length r'));
   match s with
@@ -220,7 +222,7 @@ let overlap_1 () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check string "data is good" "CCCCCCCCCCBBBBBBBBAAAAAA" s)
+  | Some (s, _) -> Alcotest.(check string "data is good" "CCCCCCCCCCBBBBBBBBAAAAAA" (String.concat "" s))
 
 let overlap_2 () =
   let r = insert_seg empty (Sequence.of_int32 8l, false, "BBBBBBBBBB") in
@@ -230,7 +232,7 @@ let overlap_2 () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check string "data is good" "CCCCCCCCCCBBBBBBAAAAAAAA" s)
+  | Some (s, _) -> Alcotest.(check string "data is good" "CCCCCCCCCCBBBBBBAAAAAAAA" (String.concat "" s))
 
 let overlap_3 () =
   let r = insert_seg empty (Sequence.of_int32 16l, false, "AAAAAAAA") in
@@ -240,7 +242,7 @@ let overlap_3 () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check string "data is good" "CCCCCCCCCCBBBBBBAAAAAAAA" s)
+  | Some (s, _) -> Alcotest.(check string "data is good" "CCCCCCCCCCBBBBBBAAAAAAAA" (String.concat "" s))
 
 let overlap_4 () =
   let r = insert_seg empty (Sequence.of_int32 16l, false, "AAAAAAAA") in
@@ -251,7 +253,7 @@ let overlap_4 () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check string "data is good" "DDDDDDDDCCCCCCCCCCCCCCAA" s)
+  | Some (s, _) -> Alcotest.(check string "data is good" "DDDDDDDDCCCCCCCCCCCCCCAA" (String.concat "" s))
 
 let overlap_5 () =
   let r = insert_seg empty (Sequence.of_int32 0l, false, "AAAAAAAAAAAAAAAA") in
@@ -263,7 +265,7 @@ let overlap_5 () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check string "data is good" "AAAABBBBBBCCDDEEDD" s)
+  | Some (s, _) -> Alcotest.(check string "data is good" "AAAABBBBBBCCDDEEDD" (String.concat "" s))
 
 let overlap_6 () =
   let r = insert_seg empty (Sequence.of_int32 0l, false, "AAAAAAAA") in
@@ -273,7 +275,7 @@ let overlap_6 () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check string "data is good" "AAAAAAAADDDDBBBB" s)
+  | Some (s, _) -> Alcotest.(check string "data is good" "AAAAAAAADDDDBBBB" (String.concat "" s))
 
 let regr_187 () =
   let r = insert_seg empty (Sequence.of_int32 16l, false, "000002om") in
@@ -283,7 +285,7 @@ let regr_187 () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check string "data is good" "002000mo001001nn001002nm001003nl" s)
+  | Some (s, _) -> Alcotest.(check string "data is good" "002000mo001001nn001002nm001003nl" (String.concat "" s))
 
 let regr_188 () =
   let r = insert_seg empty (Sequence.of_int32 24l, false, "000003ol") in
@@ -293,7 +295,7 @@ let regr_188 () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check string "data is good" "002000mo002001mn001002nm001003nl001004nk" s)
+  | Some (s, _) -> Alcotest.(check string "data is good" "002000mo002001mn001002nm001003nl001004nk" (String.concat "" s))
 
 let tests = [
   "empty reassembly queue", `Quick, empty_is_empty ;

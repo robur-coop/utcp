@@ -56,7 +56,8 @@ module Segment : sig
     push : bool ;
     window : int ;
     options : tcp_option list ;
-    payload : string ;
+    payload : string list ;
+    payload_len : int ;
   }
 
   val pp : t Fmt.t
@@ -99,7 +100,7 @@ val shutdown : 'a state -> Mtime.t -> flow -> [ `read | `write | `read_write ] -
   ('a state * output list, [ `Not_found | `Msg of string ]) result
 
 val recv : 'a state -> Mtime.t -> flow ->
-  ('a state * string * 'a * output list, [ `Not_found | `Msg of string | `Eof ]) result
+  ('a state * string list * 'a * output list, [ `Not_found | `Msg of string | `Eof ]) result
 
 val send : 'a state -> Mtime.t -> flow -> ?off:int -> ?len:int -> string ->
   ('a state * int * 'a * output list, [ `Not_found | `Msg of string ]) result
@@ -138,7 +139,7 @@ module State : sig
     val is_empty : t -> bool
     val length : t -> int
     val insert_seg : t -> (Sequence.t * bool * string) -> t
-    val maybe_take : t -> Sequence.t -> (t * (string * bool) option)
+    val maybe_take : t -> Sequence.t -> (t * (string list * bool) option)
     val pp : t Fmt.t
   end
   type control_block = {

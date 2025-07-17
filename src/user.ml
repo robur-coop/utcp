@@ -134,8 +134,9 @@ let recv t now id =
     let* () =
       guard (behind_established conn.tcp_state) (`Msg "not yet connected")
     in
-    let rcvq = Rope.to_string conn.rcvq in
-    let* () = guard (not (String.length rcvq = 0 && conn.cantrcvmore)) `Eof in
+    let rcvq_len = Rope.length conn.rcvq in
+    let rcvq = Rope.to_strings conn.rcvq in
+    let* () = guard (not (rcvq_len = 0 && conn.cantrcvmore)) `Eof in
     let conn' = { conn with rcvq = Rope.empty } in
     let conn', out = Segment.tcp_output_perhaps now id conn' in
     Ok ({ t with connections = CM.add id conn' t.connections }, rcvq, conn'.rcv_notify, out)

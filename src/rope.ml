@@ -52,11 +52,16 @@ let rec into_bytes buf dst_off = function
     into_bytes buf dst_off l;
     into_bytes buf (dst_off + length l) r
 
-let to_string t =
-  let len = length t in
-  let buf = Bytes.create len in
-  into_bytes buf 0 t;
-  Bytes.unsafe_to_string buf
+let to_strings t =
+  let rec go acc = function
+    | Str (_, _, 0) -> acc
+    | Str (data, 0, len) ->
+        if String.length data == len then data :: acc
+        else String.sub data 0 len :: acc
+    | Str (data, off, len) ->
+        String.sub data off len :: acc
+    | App (l, r, _, _) -> go (go acc r) l in
+  go [] t
 
 let concat a b = append (a, b)
 let prepend str t = append (Str (str, 0, String.length str), t)
@@ -67,5 +72,12 @@ let append t ?(off= 0) ?len str =
   append (t, (Str (str, off, len)))
 
 let of_string str = Str (str, 0, String.length str)
+let of_strings sstr = List.fold_left (fun t x -> append t x) empty sstr
 
-let equal a b = String.equal (to_string a) (to_string b)
+let equal a b =
+  let to_string t =
+    let len = length t in
+    let buf = Bytes.create len in
+    into_bytes buf 0 t;
+    Bytes.unsafe_to_string buf in
+  String.equal (to_string a) (to_string b)

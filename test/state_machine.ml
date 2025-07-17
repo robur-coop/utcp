@@ -152,7 +152,7 @@ let tcp_listen = State.start_listen tcp listen_port
 let basic_seg = {
   Segment.src_port ; dst_port = listen_port ; seq = Sequence.zero ;
   ack = None ; flag = None ; push = false ; window = 0 ;
-  options = [] ; payload = String.empty
+  options = [] ; payload_len= 0 ; payload = []
 }
 
 let initial_seq = Sequence.of_int32 42l
@@ -164,16 +164,18 @@ let test_segs ack payload =
   let seg = { basic_seg with seq = initial_seq }
   and str =
     let l = String.length payload in
-    if l = 0 then "" else "+" ^ string_of_int l ^ " bytes data"
-  in [
-    "NONE" ^ str, { seg with payload } ;
-    "ACK" ^ str, { seg with ack = Some ack ; payload } ;
-    "SYN" ^ str, { seg with flag = Some `Syn ; payload } ;
-    "RST" ^ str, { seg with flag = Some `Rst ; payload } ;
-    "FIN" ^ str, { seg with flag = Some `Fin ; payload } ;
-    "SYN+ACK" ^ str, { seg with flag = Some `Syn ; ack = Some ack ; payload } ;
-    "RST+ACK" ^ str, { seg with flag = Some `Rst ; ack = Some ack ; payload } ;
-    "FIN+ACK" ^ str, { seg with flag = Some `Fin ; ack = Some ack ; payload } ;
+    if l = 0 then "" else "+" ^ string_of_int l ^ " bytes data" in
+  let payload_len = String.length payload in
+  let payload = [ payload ] in
+  [
+    "NONE" ^ str, { seg with payload_len ; payload } ;
+    "ACK" ^ str, { seg with ack = Some ack ; payload_len ; payload } ;
+    "SYN" ^ str, { seg with flag = Some `Syn ; payload_len ; payload } ;
+    "RST" ^ str, { seg with flag = Some `Rst ; payload_len ; payload } ;
+    "FIN" ^ str, { seg with flag = Some `Fin ; payload_len ; payload } ;
+    "SYN+ACK" ^ str, { seg with flag = Some `Syn ; ack = Some ack ; payload_len ; payload } ;
+    "RST+ACK" ^ str, { seg with flag = Some `Rst ; ack = Some ack ; payload_len ; payload } ;
+    "FIN+ACK" ^ str, { seg with flag = Some `Fin ; ack = Some ack ; payload_len ; payload } ;
   ]
 
 (* we encode the answers to each of these 16 segments for each state *)

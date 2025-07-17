@@ -197,13 +197,13 @@ module Reassembly_queue = struct
           match r with
           | None ->
             if Sequence.equal seq e.seq then
-              Some (Rope.to_string e.data, e.fin), acc
+              Some (Rope.to_strings e.data, e.fin), acc
             else if Sequence.greater seq e.seq then
               let e_end = Sequence.addi e.seq (Rope.length e.data) in
               if Sequence.less seq e_end then
                 let to_cut = Sequence.sub seq e.seq in
                 let data = Rope.shift e.data to_cut in
-                let data = Rope.to_string data in
+                let data = Rope.to_strings data in
                 Some (data, e.fin), acc
               else
                 None, acc
