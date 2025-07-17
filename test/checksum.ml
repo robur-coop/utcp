@@ -7,52 +7,57 @@ let simple () =
   let t =
     Segment.{ src_port = 10 ; dst_port = 100 ; seq = Sequence.zero ;
               ack = None ; flag = None ; push = false ; window = 10 ;
-              options = [] ; payload = Cstruct.empty }
+              options = [] ; payload_len = 0 ; payload = [] }
   in
   Alcotest.(check int "simple" 39786 Segment.(checksum ~src ~dst (encode t)))
 
 let data1 () =
   let payload = Cstruct.of_hex "01" in
+  let payload_len = Cstruct.length payload in
   let t =
     Segment.{ src_port = 10 ; dst_port = 100 ; seq = Sequence.zero ;
               ack = None ; flag = None ; push = false ; window = 10 ;
-              options = [] ; payload }
+              options = [] ; payload_len ; payload = [ payload ] }
   in
   Alcotest.(check int "data1" 39529 Segment.(checksum ~src ~dst (encode t)))
 
 let data2 () =
   let payload = Cstruct.of_hex "01 02" in
+  let payload_len = Cstruct.length payload in
   let t =
     Segment.{ src_port = 10 ; dst_port = 100 ; seq = Sequence.zero ;
               ack = None ; flag = None ; push = false ; window = 10 ;
-              options = [] ; payload }
+              options = [] ; payload_len ; payload = [ payload ] }
   in
   Alcotest.(check int "data2" 39526 Segment.(checksum ~src ~dst (encode t)))
 
 let data3 () =
   let payload = Cstruct.of_hex "01 02 03" in
+  let payload_len = Cstruct.length payload in
   let t =
     Segment.{ src_port = 10 ; dst_port = 100 ; seq = Sequence.zero ;
               ack = None ; flag = None ; push = false ; window = 10 ;
-              options = [] ; payload }
+              options = [] ; payload_len ; payload = [ payload ] }
   in
   Alcotest.(check int "data3" 38757 Segment.(checksum ~src ~dst (encode t)))
 
 let data4 () =
   let payload = Cstruct.of_hex "01 02 03 04" in
+  let payload_len = Cstruct.length payload in
   let t =
     Segment.{ src_port = 10 ; dst_port = 100 ; seq = Sequence.zero ;
               ack = None ; flag = None ; push = false ; window = 10 ;
-              options = [] ; payload }
+              options = [] ; payload_len ; payload = [ payload ] }
   in
   Alcotest.(check int "data4" 38752 Segment.(checksum ~src ~dst (encode t)))
 
 let data5 () =
   let payload = Cstruct.of_hex "01 02 03 04 05" in
+  let payload_len = Cstruct.length payload in
   let t =
     Segment.{ src_port = 10 ; dst_port = 100 ; seq = Sequence.zero ;
               ack = None ; flag = None ; push = false ; window = 10 ;
-              options = [] ; payload }
+              options = [] ; payload_len ; payload = [ payload ] }
   in
   Alcotest.(check int "data5" 37471 Segment.(checksum ~src ~dst (encode t)))
 
