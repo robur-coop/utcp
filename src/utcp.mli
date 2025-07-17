@@ -54,7 +54,8 @@ module Segment : sig
     push : bool ;
     window : int ;
     options : tcp_option list ;
-    payload : Cstruct.t ;
+    payload : Cstruct.t list ;
+    payload_len : int ;
   }
 
   val pp : t Fmt.t
@@ -96,7 +97,7 @@ val shutdown : 'a state -> Mtime.t -> flow -> [ `read | `write | `read_write ] -
   ('a state * output list, [ `Not_found | `Msg of string ]) result
 
 val recv : 'a state -> Mtime.t -> flow ->
-  ('a state * Cstruct.t * 'a * output list, [ `Not_found | `Msg of string | `Eof ]) result
+  ('a state * Cstruct.t list * 'a * output list, [ `Not_found | `Msg of string | `Eof ]) result
 
 val send : 'a state -> Mtime.t -> flow -> Cstruct.t ->
   ('a state * int * 'a * output list, [ `Not_found | `Msg of string ]) result
@@ -134,8 +135,8 @@ module State : sig
     val empty : t
     val is_empty : t -> bool
     val length : t -> int
-    val insert_seg : t -> (Sequence.t * bool * Cstruct.t) -> t
-    val maybe_take : t -> Sequence.t -> (t * (Cstruct.t * bool) option)
+    val insert_seg : t -> (Sequence.t * bool * Rope.t) -> t
+    val maybe_take : t -> Sequence.t -> (t * (Rope.t * bool) option)
     val pp : t Fmt.t
   end
   type control_block = {
@@ -186,8 +187,8 @@ module State : sig
     cantsndmore : bool ;
     rcvbufsize : int ;
     sndbufsize : int ;
-    rcvq : Cstruct.t list ;
-    sndq : Cstruct.t list ;
+    rcvq : Rope.t ;
+    sndq : Rope.t ;
     rcv_notify : 'a;
     snd_notify : 'a;
     created : Mtime.t;
@@ -225,4 +226,5 @@ module User : sig
 end
 
 module Checksum = Checksum
+module Rope = Rope
 (**/**)

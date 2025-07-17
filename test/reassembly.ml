@@ -6,10 +6,10 @@ let empty_is_empty () =
   Alcotest.(check int "empty reassembly is empty" 0 (length empty))
 
 let added_is_nonempty () =
-  let r = insert_seg empty (Sequence.zero, false, Cstruct.empty) in
+  let r = insert_seg empty (Sequence.zero, false, Rope.empty) in
   Alcotest.(check int "reassembly queue is not empty" 1 (length r))
 
-let data = Cstruct.create_unsafe 10
+let data = Cstruct.create_unsafe 10 |> Rope.of_cs
 
 let added_can_be_taken () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -18,7 +18,7 @@ let added_can_be_taken () =
   match s with
   | None -> Alcotest.fail "should be some data"
   | Some (s, fin) ->
-    Alcotest.(check bool "data should be fine" true (Cstruct.equal data s));
+    Alcotest.(check bool "data should be fine" true (Rope.equal data s));
     Alcotest.(check bool "fin should be false" false fin)
 
 let added_can_be_taken2 () =
@@ -28,9 +28,9 @@ let added_can_be_taken2 () =
   match s with
   | None -> ()
   | Some (s, fin) ->
-    Alcotest.(check int "data should be fine" 5 (Cstruct.length s));
-    let exp_data = Cstruct.shift data 5 in
-    Alcotest.(check bool "data should be fine" true (Cstruct.equal s exp_data));
+    Alcotest.(check int "data should be fine" 5 (Rope.length s));
+    let exp_data = Rope.shift data 5 in
+    Alcotest.(check bool "data should be fine" true (Rope.equal s exp_data));
     Alcotest.(check bool "fin should be false" false fin)
 
 let added_can_be_taken3 () =
@@ -51,7 +51,7 @@ let coalescing_works () =
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) ->
     Alcotest.(check bool "data is good" true
-                (Cstruct.equal s (Cstruct.append data data)))
+                (Rope.equal s (Rope.concat data data)))
 
 let coalescing_works_rev () =
   let r = insert_seg empty (Sequence.of_int32 10l, false, data) in
@@ -63,7 +63,7 @@ let coalescing_works_rev () =
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) ->
     Alcotest.(check bool "data is good" true
-                (Cstruct.equal s (Cstruct.append data data)))
+                (Rope.equal s (Rope.concat data data)))
 
 let coalescing_works_3 () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -80,7 +80,7 @@ let coalescing_works_3 () =
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) ->
     Alcotest.(check bool "data is good" true
-                (Cstruct.equal s (Cstruct.concat [ data ; data ; data ; data ])))
+                (Rope.equal s (List.fold_left Rope.concat Rope.empty [ data ; data ; data ; data ])))
 
 let coalescing_works_4 () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -95,7 +95,7 @@ let coalescing_works_4 () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 30 (Cstruct.length s))
+  | Some (s, _) -> Alcotest.(check int "data is good" 30 (Rope.length s))
 
 let coalescing_works_5 () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -124,7 +124,7 @@ let coalescing_works_5 () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 20 (Cstruct.length s))
+  | Some (s, _) -> Alcotest.(check int "data is good" 20 (Rope.length s))
 
 let coalescing_works_6 () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -145,7 +145,7 @@ let coalescing_works_6 () =
   Alcotest.(check int "reassembly queue is now one element" 1 (length r));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 40 (Cstruct.length s))
+  | Some (s, _) -> Alcotest.(check int "data is good" 40 (Rope.length s))
 
 let coalescing_works_7 () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -164,17 +164,17 @@ let coalescing_works_7 () =
   Alcotest.(check int "reassembly queue is now two elements" 2 (length r));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 10 (Cstruct.length s));
+  | Some (s, _) -> Alcotest.(check int "data is good" 10 (Rope.length s));
   let r, s = maybe_take r (Sequence.of_int32 15l) in
   Alcotest.(check int "reassembly queue is now one element" 1 (length r));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 15 (Cstruct.length s));
+  | Some (s, _) -> Alcotest.(check int "data is good" 15 (Rope.length s));
   let r, s = maybe_take r (Sequence.of_int32 45l) in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 15 (Cstruct.length s))
+  | Some (s, _) -> Alcotest.(check int "data is good" 15 (Rope.length s))
 
 let take_works () =
   let r = insert_seg empty (Sequence.zero, false, data) in
@@ -184,12 +184,12 @@ let take_works () =
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 30 (Cstruct.length s));
+  | Some (s, _) -> Alcotest.(check int "data is good" 30 (Rope.length s));
   let r', s = maybe_take r (Sequence.of_int32 15l) in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
-  | Some (s, _) -> Alcotest.(check int "data is good" 15 (Cstruct.length s));
+  | Some (s, _) -> Alcotest.(check int "data is good" 15 (Rope.length s));
   let r', s = maybe_take r (Sequence.of_int32 45l) in
   Alcotest.(check int "reassembly queue is now empty (has been pruned)" 0 (length r'));
   match s with
@@ -213,95 +213,95 @@ let take_works_taking_before_2 () =
   | Some _ -> Alcotest.fail "there shouldn't be anything"
 
 let overlap_1 () =
-  let r = insert_seg empty (Sequence.of_int32 16l, false, Cstruct.of_string "AAAAAAAA") in
-  let r = insert_seg r (Sequence.of_int32 8l, false, Cstruct.of_string "BBBBBBBBBB") in
-  let r = insert_seg r (Sequence.of_int32 0l, false, Cstruct.of_string "CCCCCCCCCC") in
+  let r = insert_seg empty (Sequence.of_int32 16l, false, Rope.of_string "AAAAAAAA") in
+  let r = insert_seg r (Sequence.of_int32 8l, false, Rope.of_string "BBBBBBBBBB") in
+  let r = insert_seg r (Sequence.of_int32 0l, false, Rope.of_string "CCCCCCCCCC") in
   let r', s = maybe_take r Sequence.zero in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) -> Alcotest.(check string "data is good" "CCCCCCCCCCBBBBBBBBAAAAAA"
-                               (Cstruct.to_string s))
+                               (Rope.to_string s))
 
 let overlap_2 () =
-  let r = insert_seg empty (Sequence.of_int32 8l, false, Cstruct.of_string "BBBBBBBBBB") in
-  let r = insert_seg r (Sequence.of_int32 16l, false, Cstruct.of_string "AAAAAAAA") in
-  let r = insert_seg r (Sequence.of_int32 0l, false, Cstruct.of_string "CCCCCCCCCC") in
+  let r = insert_seg empty (Sequence.of_int32 8l, false, Rope.of_string "BBBBBBBBBB") in
+  let r = insert_seg r (Sequence.of_int32 16l, false, Rope.of_string "AAAAAAAA") in
+  let r = insert_seg r (Sequence.of_int32 0l, false, Rope.of_string "CCCCCCCCCC") in
   let r', s = maybe_take r Sequence.zero in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) -> Alcotest.(check string "data is good" "CCCCCCCCCCBBBBBBAAAAAAAA"
-                               (Cstruct.to_string s))
+                               (Rope.to_string s))
 
 let overlap_3 () =
-  let r = insert_seg empty (Sequence.of_int32 16l, false, Cstruct.of_string "AAAAAAAA") in
-  let r = insert_seg r (Sequence.of_int32 8l, false, Cstruct.of_string "BBBBBBBB") in
-  let r = insert_seg r (Sequence.of_int32 0l, false, Cstruct.of_string "CCCCCCCCCC") in
+  let r = insert_seg empty (Sequence.of_int32 16l, false, Rope.of_string "AAAAAAAA") in
+  let r = insert_seg r (Sequence.of_int32 8l, false, Rope.of_string "BBBBBBBB") in
+  let r = insert_seg r (Sequence.of_int32 0l, false, Rope.of_string "CCCCCCCCCC") in
   let r', s = maybe_take r Sequence.zero in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) -> Alcotest.(check string "data is good" "CCCCCCCCCCBBBBBBAAAAAAAA"
-                               (Cstruct.to_string s))
+                               (Rope.to_string s))
 
 let overlap_4 () =
-  let r = insert_seg empty (Sequence.of_int32 16l, false, Cstruct.of_string "AAAAAAAA") in
-  let r = insert_seg r (Sequence.of_int32 8l, false, Cstruct.of_string "BBBBBB") in
-  let r = insert_seg r (Sequence.of_int32 6l, false, Cstruct.of_string "CCCCCCCCCCCCCCCC") in
-  let r = insert_seg r (Sequence.of_int32 0l, false, Cstruct.of_string "DDDDDDDD") in
+  let r = insert_seg empty (Sequence.of_int32 16l, false, Rope.of_string "AAAAAAAA") in
+  let r = insert_seg r (Sequence.of_int32 8l, false, Rope.of_string "BBBBBB") in
+  let r = insert_seg r (Sequence.of_int32 6l, false, Rope.of_string "CCCCCCCCCCCCCCCC") in
+  let r = insert_seg r (Sequence.of_int32 0l, false, Rope.of_string "DDDDDDDD") in
   let r', s = maybe_take r Sequence.zero in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) -> Alcotest.(check string "data is good" "DDDDDDDDCCCCCCCCCCCCCCAA"
-                               (Cstruct.to_string s))
+                               (Rope.to_string s))
 
 let overlap_5 () =
-  let r = insert_seg empty (Sequence.of_int32 0l, false, Cstruct.of_string "AAAAAAAAAAAAAAAA") in
-  let r = insert_seg r (Sequence.of_int32 4l, false, Cstruct.of_string "BBBBBB") in
-  let r = insert_seg r (Sequence.of_int32 10l, false, Cstruct.of_string "CCCCCC") in
-  let r = insert_seg r (Sequence.of_int32 12l, false, Cstruct.of_string "DDDDDD") in
-  let r = insert_seg r (Sequence.of_int32 14l, false, Cstruct.of_string "EE") in
+  let r = insert_seg empty (Sequence.of_int32 0l, false, Rope.of_string "AAAAAAAAAAAAAAAA") in
+  let r = insert_seg r (Sequence.of_int32 4l, false, Rope.of_string "BBBBBB") in
+  let r = insert_seg r (Sequence.of_int32 10l, false, Rope.of_string "CCCCCC") in
+  let r = insert_seg r (Sequence.of_int32 12l, false, Rope.of_string "DDDDDD") in
+  let r = insert_seg r (Sequence.of_int32 14l, false, Rope.of_string "EE") in
   let r', s = maybe_take r Sequence.zero in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) -> Alcotest.(check string "data is good" "AAAABBBBBBCCDDEEDD"
-                               (Cstruct.to_string s))
+                               (Rope.to_string s))
 
 let overlap_6 () =
-  let r = insert_seg empty (Sequence.of_int32 0l, false, Cstruct.of_string "AAAAAAAA") in
-  let r = insert_seg r (Sequence.of_int32 10l, false, Cstruct.of_string "BBBBBB") in
-  let r = insert_seg r (Sequence.of_int32 8l, false, Cstruct.of_string "DDDD") in
+  let r = insert_seg empty (Sequence.of_int32 0l, false, Rope.of_string "AAAAAAAA") in
+  let r = insert_seg r (Sequence.of_int32 10l, false, Rope.of_string "BBBBBB") in
+  let r = insert_seg r (Sequence.of_int32 8l, false, Rope.of_string "DDDD") in
   let r', s = maybe_take r Sequence.zero in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) -> Alcotest.(check string "data is good" "AAAAAAAADDDDBBBB"
-                               (Cstruct.to_string s))
+                               (Rope.to_string s))
 
 let regr_187 () =
-  let r = insert_seg empty (Sequence.of_int32 16l, false, Cstruct.of_string "000002om") in
-  let r = insert_seg r (Sequence.of_int32 8l, false, Cstruct.of_string "001001nn001002nm001003nl") in
-  let r = insert_seg r (Sequence.of_int32 0l, false, Cstruct.of_string "002000mo") in
+  let r = insert_seg empty (Sequence.of_int32 16l, false, Rope.of_string "000002om") in
+  let r = insert_seg r (Sequence.of_int32 8l, false, Rope.of_string "001001nn001002nm001003nl") in
+  let r = insert_seg r (Sequence.of_int32 0l, false, Rope.of_string "002000mo") in
   let r', s = maybe_take r Sequence.zero in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) -> Alcotest.(check string "data is good" "002000mo001001nn001002nm001003nl"
-                               (Cstruct.to_string s))
+                               (Rope.to_string s))
 
 let regr_188 () =
-  let r = insert_seg empty (Sequence.of_int32 24l, false, Cstruct.of_string "000003ol") in
-  let r = insert_seg r (Sequence.of_int32 8l, false, Cstruct.of_string "001001nn001002nm001003nl001004nk") in
-  let r = insert_seg r (Sequence.of_int32 0l, false, Cstruct.of_string "002000mo002001mn") in
+  let r = insert_seg empty (Sequence.of_int32 24l, false, Rope.of_string "000003ol") in
+  let r = insert_seg r (Sequence.of_int32 8l, false, Rope.of_string "001001nn001002nm001003nl001004nk") in
+  let r = insert_seg r (Sequence.of_int32 0l, false, Rope.of_string "002000mo002001mn") in
   let r', s = maybe_take r Sequence.zero in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) -> Alcotest.(check string "data is good" "002000mo002001mn001002nm001003nl001004nk"
-                               (Cstruct.to_string s))
+                               (Rope.to_string s))
 
 let tests = [
   "empty reassembly queue", `Quick, empty_is_empty ;
