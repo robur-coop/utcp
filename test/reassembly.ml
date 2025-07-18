@@ -9,7 +9,7 @@ let added_is_nonempty () =
   let r = insert_seg empty (Sequence.zero, false, Rope.empty) in
   Alcotest.(check int "reassembly queue is not empty" 1 (length r))
 
-let data = Cstruct.create_unsafe 10 |> Rope.of_cs
+let data = Bytes.create 10 |> Bytes.unsafe_to_string |> Rope.of_string
 
 let added_can_be_taken () =
   let r = insert_seg empty (Sequence.zero, false, data) in
