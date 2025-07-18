@@ -57,36 +57,36 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
 
   let read (t, flow) =
     match Utcp.recv t.tcp (now ()) flow with
-    | Ok (tcp, data, cond, segs) ->
+    | Ok (tcp, [], cond, segs) -> (
       t.tcp <- tcp ;
       output_ign t segs >>= fun () ->
-      if Cstruct.length data = 0 then (
-        Lwt_condition.wait cond >>= fun r ->
-        match r with
+      Lwt_condition.wait cond >>= fun r ->
+      match r with
+      | Error `Eof ->
+        Lwt.return (Ok `Eof)
+      | Error `Msg msg ->
+        Log.err (fun m -> m "%a error %s from condition while recv" Utcp.pp_flow flow msg);
+        (* TODO better error *)
+        Lwt.return (Error `Refused)
+      | Ok () ->
+        match Utcp.recv t.tcp (now ()) flow with
+        | Ok (tcp, data, _cond, segs) ->
+          t.tcp <- tcp ;
+          output_ign t segs >>= fun () ->
+          begin match data with
+          | [] -> Lwt.return (Ok `Eof)
+          | data -> Lwt.return (Ok (`Data (Cstruct.concat data))) end
         | Error `Eof ->
           Lwt.return (Ok `Eof)
         | Error `Msg msg ->
-          Log.err (fun m -> m "%a error %s from condition while recv" Utcp.pp_flow flow msg);
+          Log.err (fun m -> m "%a error while read (second recv) %s" Utcp.pp_flow flow msg);
           (* TODO better error *)
           Lwt.return (Error `Refused)
-        | Ok () ->
-          match Utcp.recv t.tcp (now ()) flow with
-          | Ok (tcp, data, _cond, segs) ->
-            t.tcp <- tcp ;
-            output_ign t segs >>= fun () ->
-            if Cstruct.length data = 0 then
-              Lwt.return (Ok `Eof) (* can this happen? *)
-            else
-              Lwt.return (Ok (`Data data))
-          | Error `Eof ->
-            Lwt.return (Ok `Eof)
-          | Error `Msg msg ->
-            Log.err (fun m -> m "%a error while read (second recv) %s" Utcp.pp_flow flow msg);
-            (* TODO better error *)
-            Lwt.return (Error `Refused)
-          | Error `Not_found -> Lwt.return (Error `Refused)
-      ) else (
-        Lwt.return (Ok (`Data data)))
+        | Error `Not_found -> Lwt.return (Error `Refused))
+    | Ok (tcp, data, _cond, segs) ->
+      t.tcp <- tcp ;
+      output_ign t segs >>= fun () ->
+      Lwt.return (Ok (`Data (Cstruct.concat data)))
     | Error `Eof ->
       Lwt.return (Ok `Eof)
     | Error `Msg msg ->

@@ -46,12 +46,13 @@ let jump _ src src_port dst dst_port syn fin rst push ack seq window data =
         | false, false, false -> None
         | _ -> invalid_arg "invalid flag combination"
       and ack = match ack with None -> None | Some x -> Some (Sequence.of_int32 (Int32.of_int x))
-      and payload = match data with None -> Cstruct.empty | Some x -> Cstruct.of_string x
-      in
+      and payload = match data with None -> Cstruct.empty | Some x -> Cstruct.of_string x in
+      let payload_len = Cstruct.length payload in
+      let payload = [ payload ] in
       let s = {
         src_port ; dst_port ;
         seq = Sequence.of_int32 (Int32.of_int seq) ;
-        ack ; flag ; push ; window ; options = [] ; payload
+        ack ; flag ; push ; window ; options = [] ; payload_len ; payload
       } in
       encode_and_checksum (Mtime_clock.now ()) ~src:Ipaddr.(V4 (V4.Prefix.address cidr)) ~dst s
     in
