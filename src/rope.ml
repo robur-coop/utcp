@@ -18,22 +18,22 @@ let append = function
       App (t1, t2, length t1 + length t2, 1 + Int.max (height t1) (height t2))
 
 
-let rec sub t start stop =
+let rec unsafe_sub t start stop =
   if start == 0 && stop = length t
   then t else match t with
     | Str (str, off, _) ->
         Str (str, off + start, stop - start)
     | App (l, r, _, _) ->
         let len = length l in
-        if stop <= len then sub l start stop
-        else if start >= len then sub r (start - len) (stop - len)
-        else append (sub l start len, sub r 0 (stop - len))
+        if stop <= len then unsafe_sub l start stop
+        else if start >= len then unsafe_sub r (start - len) (stop - len)
+        else append (unsafe_sub l start len, unsafe_sub r 0 (stop - len))
 
 let sub t ~off ~len =
   let stop = off + len in
   if off < 0 || len < 0 || stop > length t
   then invalid_arg "Rope.sub";
-  if len == 0 then empty else sub t off stop
+  if len == 0 then empty else unsafe_sub t off stop
 
 let shift t len = sub t ~off:len ~len:(length t - len)
 
