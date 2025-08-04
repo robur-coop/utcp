@@ -72,7 +72,7 @@ module Reassembly_queue = struct
   type reassembly_segment = {
     seq : Sequence.t ;
     fin : bool ;
-    data : Rope.t ; (* in reverse order *)
+    data : Rope.t ;
   }
 
   (* we take care that the list is sorted by the sequence number *)
@@ -431,8 +431,8 @@ type 'a conn_state = {
   cantsndmore : bool ;
   rcvbufsize : int ;
   sndbufsize : int ;
-  rcvq : Rope.t ; (* reverse of the received data *)
-  sndq : Rope.t ; (* reverse list of data to be sent out *)
+  rcvq : Rope.t ;
+  sndq : Rope.t ;
   rcv_notify : 'a;
   snd_notify : 'a;
   created : Mtime.t;
