@@ -1,3 +1,3 @@
 (test
  (name tests)
- (libraries utcp alcotest logs logs.fmt))
+ (libraries ohex utcp alcotest logs logs.fmt))
