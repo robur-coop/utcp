@@ -29,13 +29,18 @@ let rec unsafe_sub t start stop =
         else if start >= len then unsafe_sub r (start - len) (stop - len)
         else append (unsafe_sub l start len, unsafe_sub r 0 (stop - len))
 
-let sub t ~off ~len =
-  let stop = off + len in
-  if off < 0 || len < 0 || stop > length t
-  then invalid_arg "Rope.sub";
-  if len == 0 then empty else unsafe_sub t off stop
+let chop t len =
+  if len < 0 || len > length t
+  then invalid_arg "Rope.chop";
+  if len == 0 then empty else unsafe_sub t 0 len
 
-let shift t len = sub t ~off:len ~len:(length t - len)
+let shift t len =
+  if len < 0 then t
+  else if len == 0 then t
+  else
+    let max = length t in
+    let len = Int.min max len in
+    unsafe_sub t len (len + (max - len))
 
 let rec into_bytes buf dst_off = function
   | Str (cs, src_off, len) -> Cstruct.blit_to_bytes cs src_off buf dst_off len

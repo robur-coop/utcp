@@ -652,7 +652,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
      segment. :*)
   let data_trimmed_left_right =
     let len = Int.min cb.rcv_wnd (Rope.length data_trimmed_left) in
-    Rope.sub data_trimmed_left ~off:0 ~len
+    Rope.chop data_trimmed_left len
   in
   let fin_trimmed =
     fin && Rope.length data_trimmed_left_right == Rope.length data_trimmed_left

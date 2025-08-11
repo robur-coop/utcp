@@ -386,7 +386,7 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
     let len_could_be_sent = Int.max 0 snd_wnd_unused in
     let data' =
       let len = Int.min dlen (Int.min len_could_be_sent cb.State.t_maxseg) in
-      Rope.sub data' ~off:0 ~len in
+      Rope.chop data' len in
     data', dlen > cb.t_maxseg && len_could_be_sent > cb.t_maxseg
   in
   let dlen = Rope.length data_to_send in

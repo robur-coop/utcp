@@ -166,7 +166,7 @@ module Reassembly_queue = struct
                   Some (e, Sequence.addi e_seq_e (Rope.length data)), e :: acc
                 else
                   let overlap = Sequence.sub e_seq_e seq in
-                  let pre = Rope.sub e.data ~off:0 ~len:(Rope.length e.data - overlap) in
+                  let pre = Rope.chop e.data (Rope.length e.data - overlap) in
                   let seq_e = Sequence.addi seq (Rope.length data) in
                   let end_ = Sequence.max e_seq_e seq_e in
                   let post =

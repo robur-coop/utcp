@@ -8,7 +8,7 @@ let simple =
   let r = Rope.append ~off:5 ~len:1 r c in
   let r = Rope.append ~off:6 r c in
   Alcotest.(check string) "to_string" (Rope.to_string r) "Hello World!";
-  Alcotest.(check string) "sub" Rope.(to_string (sub ~off:0 ~len:5 r)) "Hello"
+  Alcotest.(check string) "chop" Rope.(to_string (chop r 5)) "Hello"
 
 let cstruct = Alcotest.testable Cstruct.hexdump_pp Cstruct.equal
 
