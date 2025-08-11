@@ -241,7 +241,7 @@ let in_window cb seg =
   let seq = seg.Segment.seq
   and max = Sequence.addi cb.rcv_nxt cb.rcv_wnd
   in
-  match Cstruct.length seg.Segment.payload, cb.rcv_wnd with
+  match seg.Segment.payload_len, cb.rcv_wnd with
   | 0, 0 -> Sequence.equal seq cb.rcv_nxt
   | 0, _ -> Sequence.less_equal cb.rcv_nxt seq && Sequence.less seq max
   | _, 0 -> false
@@ -415,7 +415,7 @@ let di3_newackstuff now id conn ourfinisacked ack =
         (*: If this socket has previously emitted a [[FIN]] segment and the
            [[FIN]] has now been [[ACK]]ed, decrease [[snd_wnd]] by the length of
            the send queue and clear the send queue.:*)
-        cb.snd_wnd - Cstruct.lenv conn.sndq, []
+        cb.snd_wnd - Rope.length conn.sndq, Rope.empty
       else
         (*: Otherwise, reduce the send window by the amound of data acknowledged
            as it is now consuming space on the receiver's receive queue. Remove
@@ -423,7 +423,7 @@ let di3_newackstuff now id conn ourfinisacked ack =
            be retransmitted.:*)
         let acked = Sequence.window ack cb.snd_una in
         cb.snd_wnd - acked,
-        List.rev (Cstruct.shiftv (List.rev conn.sndq) acked)
+        Rope.shift conn.sndq acked
     in
     (*: Update the control block :*)
     let cb' =
@@ -510,7 +510,7 @@ let di3_ackstuff now id conn seg ourfinisacked fin ack =
      from the other end, these may all contain the same acknowledgement number
      and trigger the retransmit logic erroneously. :*)
   let maybe_dup_ack =
-    Cstruct.length seg.payload = 0 && win = cb.snd_wnd &&
+    seg.payload_len = 0 && win = cb.snd_wnd &&
     match cb.tt_rexmt with Some ((Rexmt, _), _) -> true | _ -> false
   in
   (* It turns out since some time the first FIN(+ACK) doesn't account for
@@ -636,11 +636,12 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
      urgent data in the segment. :*)
   let trim_amt_left =
     if Sequence.greater cb.rcv_nxt seg.Segment.seq then
-      Int.min (Sequence.window cb.rcv_nxt seg.seq) (Cstruct.length seg.payload)
+      Int.min (Sequence.window cb.rcv_nxt seg.seq) seg.payload_len
     else
       0
   in
-  let data_trimmed_left = Cstruct.shift seg.payload trim_amt_left in
+  let data_trimmed_left = Rope.of_css seg.payload in
+  let data_trimmed_left = Rope.shift data_trimmed_left trim_amt_left in
   let seq_trimmed = Sequence.addi seg.seq trim_amt_left in
   (*: Trimmed data starts at [[seq_trimmed]] :*)
   (*: Trim any data outside the receive window from the right hand edge. If all
@@ -650,10 +651,11 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
      here because there is still urgent data to be received, but now in a future
      segment. :*)
   let data_trimmed_left_right =
-    Cstruct.sub data_trimmed_left 0 (Int.min cb.rcv_wnd (Cstruct.length data_trimmed_left))
+    let len = Int.min cb.rcv_wnd (Rope.length data_trimmed_left) in
+    Rope.chop data_trimmed_left len
   in
   let fin_trimmed =
-    fin && Cstruct.length data_trimmed_left_right == Cstruct.length data_trimmed_left
+    fin && Rope.length data_trimmed_left_right == Rope.length data_trimmed_left
   in
   (*: Build trimmed segment to place on reassembly queue.  If urgent data is in
      this segment and the socket is not doing inline delivery (and hence the
@@ -672,7 +674,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
      the conditions below. :*)
   let rseq_trimmed =
     Sequence.addi seq_trimmed
-      (Cstruct.length data_trimmed_left_right + (if fin_trimmed then 1 else 0))
+      (Rope.length data_trimmed_left_right + (if fin_trimmed then 1 else 0))
   in
   let (conn', fin_reass, out), cont =
     if
@@ -683,7 +685,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
       (*: Only need to acknowledge the segment if there is new in-window data
          (including urgent data) or a valid [[FIN]] :*)
       let have_stuff_to_ack =
-        Cstruct.length data_trimmed_left_right > 0 || fin_trimmed
+        Rope.length data_trimmed_left_right > 0 || fin_trimmed
       in
       (*: If the socket is connected, has data to [[ACK]] but no [[FIN]] to
          [[ACK]], the reassembly queue is empty, the socket is not currently
@@ -700,10 +702,10 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
       let t_segq, r = Reassembly_queue.maybe_take cb.t_segq rseq_trimmed in
       (* Length (in sequence space) of reassembled data, counting a [[FIN]] as
          one byte and including any out-of-line urgent data previously removed *)
-      let data_reass, fin_reass0 = Option.value ~default:(Cstruct.empty, false) r in
-      let data = Cstruct.append data_trimmed_left_right data_reass in
+      let data_reass, fin_reass0 = Option.value ~default:(Rope.empty, false) r in
+      let data = Rope.concat data_trimmed_left_right data_reass in
       let fin_reass_trimmed = fin_trimmed || fin_reass0 in
-      let data_len = Cstruct.length data + if fin_reass_trimmed then 1 else 0 in
+      let data_len = Rope.length data + if fin_reass_trimmed then 1 else 0 in
      (*: Add the reassembled data to the receive queue and increment [[rcv_nxt]]
         to mark the sequence number of the byte past the last byte in the
         receive queue:*)
@@ -723,7 +725,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
         (*: Set if not delaying an [[ACK]] and have stuff to [[ACK]] :*)
         not delay_ack && have_stuff_to_ack
       and rcv_nxt = Sequence.addi cb.rcv_nxt data_len
-      and rcv_wnd = cb.rcv_wnd - (Cstruct.length data)
+      and rcv_wnd = cb.rcv_wnd - (Rope.length data)
       in
       let control_block = {
         cb with
@@ -733,7 +735,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
         rcv_nxt ;
         rcv_wnd ;
       }
-      and rcvq = data :: conn.rcvq
+      and rcvq = Rope.concat conn.rcvq data
       in
       ({ conn with control_block ; rcvq }, fin_reass_trimmed, []), true
      (*: Case (2) The segment contains new out-of-order in-window data, possibly
@@ -743,7 +745,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
     else if
       Sequence.greater seq_trimmed cb.rcv_nxt &&
       Sequence.less seq_trimmed (Sequence.addi cb.rcv_nxt cb.rcv_wnd) &&
-      Cstruct.length data_trimmed_left_right + (if fin_trimmed then 1 else 0) > 0 &&
+      Rope.length data_trimmed_left_right + (if fin_trimmed then 1 else 0) > 0 &&
       cb.rcv_wnd > 0
     then
       (*: Hack: assertion used to share values with later conditions :*)
@@ -762,7 +764,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
          segment) is used in the guard to ensure this really was a pure [[ACK]]
          segment. :*)
     else if Sequence.equal seq_trimmed cb.rcv_nxt &&
-            Cstruct.length seg.payload + (if fin then 1 else 0) = 0
+            seg.payload_len + (if fin then 1 else 0) = 0
     then
       (*: Hack: assertion used to share values with later conditions :*)
       let fin_reass = false in (* Have not received a FIN *)
@@ -823,7 +825,7 @@ let di3_datastuff now the_ststuff conn seg ourfinisacked fin ack =
     ((Sequence.greater ack cb.snd_una && Sequence.less_equal ack cb.snd_max &&
       cb.snd_cwnd >= cb.snd_wnd && cb.t_dupacks < 3)
      || (Sequence.equal ack cb.snd_una && Reassembly_queue.is_empty cb.t_segq &&
-         Cstruct.length seg.payload < conn.rcvbufsize - Cstruct.lenv conn.rcvq))
+         seg.payload_len < conn.rcvbufsize - Rope.length conn.rcvq))
   in
   (*: Update the send window using the received segment if the segment will not be processed by
       BSD's fast path, has the [[ACK]] flag set, is not to the right of the window, and either:
@@ -846,7 +848,7 @@ let di3_datastuff now the_ststuff conn seg ourfinisacked fin ack =
       (Sequence.less cb.snd_wl2 ack || Sequence.equal cb.snd_wl2 ack && win > cb.snd_wnd)))
   in
   let seq_trimmed =
-    Sequence.max seg.seq (Sequence.min cb.rcv_nxt (Sequence.addi seg.seq (Cstruct.length seg.payload)))
+    Sequence.max seg.seq (Sequence.min cb.rcv_nxt (Sequence.addi seg.seq seg.payload_len))
   in
   (*: Write back the window updates :*)
   let control_block =
@@ -923,7 +925,7 @@ let deliver_in_3 m now id conn seg flag ack =
   let fin = flag = Some `Fin in
   (* PAWS, timers, rcv_wnd may have opened! updates fin_wait_2 timer *)
   let cb = conn.control_block in
-  let wesentafin = Sequence.greater cb.snd_max (Sequence.addi cb.snd_una (Cstruct.lenv conn.sndq)) in
+  let wesentafin = Sequence.greater cb.snd_max (Sequence.addi cb.snd_una (Rope.length conn.sndq)) in
   let ourfinisacked = wesentafin && Sequence.greater_equal ack cb.snd_max in
   let control_block = di3_topstuff now conn in
   (* ACK processing *)
@@ -1060,7 +1062,7 @@ let handle_conn t now id conn seg =
       let* () =
         guard (in_window conn.control_block seg)
           (`Drop (fun () -> Fmt.str "in_window seq %a seql %u rcv_nxt %a rcv_wnd %u"
-                     Sequence.pp seg.Segment.seq (Cstruct.length seg.payload)
+                     Sequence.pp seg.Segment.seq seg.payload_len
                      Sequence.pp conn.control_block.rcv_nxt conn.control_block.rcv_wnd))
       in
       (* RFC5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
@@ -1109,7 +1111,7 @@ let handle_buf t now ~src ~dst data =
   | Ok (seg, id) ->
     Tracing.debug (fun m -> m "%a [%a] handle_buf %u %s"
                       Connection.pp id Mtime.pp now
-                      (Cstruct.length seg.payload)
+                      seg.payload_len
                       (Base64.encode_string (Cstruct.to_string data)));
     (* deliver_in_3a deliver_in_4 are done now! *)
     let t', outs = handle_segment t now id seg in
@@ -1125,8 +1127,8 @@ let handle_buf t now ~src ~dst data =
         | Some s ->
           s.tcp_state = Established,
           true,
-          Cstruct.lenv s.rcvq > 0,
-          Cstruct.lenv s.sndq < s.sndbufsize,
+          Rope.length s.rcvq > 0,
+          Rope.length s.sndq < s.sndbufsize,
           Some s.rcv_notify, Some s.snd_notify
       in
       match was_established, is_established, was_present, is_present with

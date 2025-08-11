@@ -4,6 +4,7 @@ let tests = [
   "Checksum", Checksum.tests ;
   "State machine", State_machine.tests ;
   "Reassembly", Reassembly.tests ;
+  "Rope", Rope.tests ;
 ]
 
 let () =

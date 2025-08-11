@@ -72,7 +72,7 @@ module Reassembly_queue = struct
   type reassembly_segment = {
     seq : Sequence.t ;
     fin : bool ;
-    data : Cstruct.t list ; (* in reverse order *)
+    data : Rope.t ;
   }
 
   (* we take care that the list is sorted by the sequence number *)
@@ -85,12 +85,12 @@ module Reassembly_queue = struct
   let length t = List.length t
 
   let pp_rseg ppf { seq ; data ; _ } =
-    Fmt.pf ppf "%a (len %u)" Sequence.pp seq (Cstruct.lenv data)
+    Fmt.pf ppf "%a (len %u)" Sequence.pp seq (Rope.length data)
 
   let pp = Fmt.(list ~sep:(any ", ") pp_rseg)
 
   (* insert segment, potentially coalescing existing ones *)
-  let insert_seg t (seq, fin, data) =
+  let insert_seg t (seq, fin, (data : Rope.t)) =
     (* they may overlap, the newest seg wins *)
     (* (1) figure out the place whereafter to insert the seg *)
     (* (2) peek whether the next seg can be already coalesced *)
@@ -104,14 +104,14 @@ module Reassembly_queue = struct
               let overlap = Sequence.sub seq_end e.seq in
               if overlap = 0 then
                 (* overlap = 0, we can just merge them *)
-                let elt = { elt with fin = e.fin || elt.fin ; data = e.data @ elt.data } in
-                Some (elt, Sequence.addi elt.seq (Cstruct.lenv elt.data)), elt :: acc'
+                let elt = { elt with fin = e.fin || elt.fin ; data = Rope.concat elt.data e.data } in
+                Some (elt, Sequence.addi elt.seq (Rope.length elt.data)), elt :: acc'
               else
                 (* we need to cut some bytes from e *)
-                let data = List.rev (Cstruct.shiftv (List.rev e.data) overlap) in
-                let data = data @ elt.data in
+                let data = Rope.shift e.data overlap in
+                let data = Rope.concat elt.data data in
                 let elt = { elt with fin = e.fin || elt.fin ; data } in
-                Some (elt, Sequence.addi elt.seq (Cstruct.lenv data)), elt :: acc'
+                Some (elt, Sequence.addi elt.seq (Rope.length data)), elt :: acc'
             else
               (* there's still a hole, nothing to merge *)
               (inserted, e :: acc)
@@ -128,7 +128,7 @@ module Reassembly_queue = struct
             *)
             if Sequence.less_equal seq e.seq then
               (* case (a) *)
-              let seq_e = Sequence.addi seq (Cstruct.length data) in
+              let seq_e = Sequence.addi seq (Rope.length data) in
               (* case (1): a new segment that is way before the existing one:
                  seq <= e.seq && seq_e <= e.seq -> e must be retained
                  case (2): a new segment that is partially before the existing:
@@ -138,56 +138,46 @@ module Reassembly_queue = struct
               *)
               if Sequence.less_equal seq_e e.seq then
                 if Sequence.equal seq_e e.seq then
-                  let e = { seq ; fin = fin || e.fin ; data = e.data @ [ data ] } in
-                  Some (e, Sequence.addi seq (Cstruct.lenv e.data)), e :: acc
+                  let e = { seq ; fin = fin || e.fin ; data = Rope.concat data e.data } in
+                  Some (e, Sequence.addi seq (Rope.length e.data)), e :: acc
                 else
-                  let e' = { seq ; fin ; data = [ data ] } in
-                  Some (e', Sequence.addi seq (Cstruct.length data)), e :: e' :: acc
+                  let e' = { seq ; fin ; data } in
+                  Some (e', Sequence.addi seq (Rope.length data)), e :: e' :: acc
               else
-                let e_seq_e = Sequence.addi e.seq (Cstruct.lenv e.data) in
+                let e_seq_e = Sequence.addi e.seq (Rope.length e.data) in
                 if Sequence.greater_equal seq_e e_seq_e then
-                  let e' = { seq ; fin ; data = [ data ] } in
+                  let e' = { seq ; fin ; data } in
                   Some (e', seq_e), e' :: acc
                 else
                   (* we've to retain some parts of seq *)
                   let post =
                     let retain_data = Sequence.sub e_seq_e seq_e in
-                    let skip_data = Cstruct.lenv e.data - retain_data in
-                    Cstruct.shiftv (List.rev e.data) skip_data
+                    let skip_data = Rope.length e.data - retain_data in
+                    Rope.shift e.data skip_data
                   in
-                  let e = { seq ; fin = fin || e.fin ; data = List.rev (data :: post) } in
-                  Some (e, Sequence.addi seq (Cstruct.lenv e.data)), e :: acc
+                  let e = { seq ; fin = fin || e.fin ; data = Rope.concat data post } in
+                  Some (e, Sequence.addi seq (Rope.length e.data)), e :: acc
             else
-              let e_seq_e = Sequence.addi e.seq (Cstruct.lenv e.data) in
+              let e_seq_e = Sequence.addi e.seq (Rope.length e.data) in
               if Sequence.less_equal seq e_seq_e then
                 (* case (b) we append to the thing *)
                 if Sequence.equal seq e_seq_e then
-                  let e = { e with fin = fin || e.fin ; data = data :: e.data } in
-                  Some (e, Sequence.addi e_seq_e (Cstruct.length data)), e :: acc
+                  let e = { e with fin = fin || e.fin ; data = Rope.concat e.data data } in
+                  Some (e, Sequence.addi e_seq_e (Rope.length data)), e :: acc
                 else
                   let overlap = Sequence.sub e_seq_e seq in
-                  let pre =
-                    let rec cut_some amount = function
-                      | [] -> []
-                      | hd :: tl ->
-                        if Cstruct.length hd < amount then
-                          cut_some (amount - Cstruct.length hd) tl
-                        else
-                          Cstruct.sub hd amount (Cstruct.length hd - amount) :: tl
-                    in
-                    cut_some overlap e.data
-                  in
-                  let seq_e = Sequence.addi seq (Cstruct.length data) in
+                  let pre = Rope.chop e.data (Rope.length e.data - overlap) in
+                  let seq_e = Sequence.addi seq (Rope.length data) in
                   let end_ = Sequence.max e_seq_e seq_e in
                   let post =
                     if Sequence.greater e_seq_e seq_e then
                       let retain_data = Sequence.sub e_seq_e seq_e in
-                      let skip_data = Cstruct.lenv e.data - retain_data in
-                      Cstruct.shiftv (List.rev e.data) skip_data
+                      let skip_data = Rope.length e.data - retain_data in
+                      Rope.shift e.data skip_data
                     else
-                      []
+                      Rope.empty
                   in
-                  let e = { e with fin = fin || e.fin ; data = post @ data :: pre } in
+                  let e = { e with fin = fin || e.fin ; data = Rope.concat (Rope.concat pre data) post } in
                   Some (e, end_), e :: acc
               else
                 (None, e :: acc))
@@ -195,7 +185,7 @@ module Reassembly_queue = struct
     in
     let segq =
       if inserted = None then
-        { seq ; fin ; data = [ data ] } :: segq
+        { seq ; fin ; data } :: segq
       else
         segq
     in
@@ -207,13 +197,13 @@ module Reassembly_queue = struct
           match r with
           | None ->
             if Sequence.equal seq e.seq then
-              Some (Cstruct.concat (List.rev e.data), e.fin), acc
+              Some (e.data, e.fin), acc
             else if Sequence.greater seq e.seq then
-              let e_end = Sequence.addi e.seq (Cstruct.lenv e.data) in
+              let e_end = Sequence.addi e.seq (Rope.length e.data) in
               if Sequence.less seq e_end then
                 let to_cut = Sequence.sub seq e.seq in
-                let data = Cstruct.concat (List.rev e.data) in
-                Some (Cstruct.shift data to_cut, e.fin), acc
+                let data = Rope.shift e.data to_cut in
+                Some (data, e.fin), acc
               else
                 None, acc
             else
@@ -441,8 +431,8 @@ type 'a conn_state = {
   cantsndmore : bool ;
   rcvbufsize : int ;
   sndbufsize : int ;
-  rcvq : Cstruct.t list ; (* reverse of the received data *)
-  sndq : Cstruct.t list ; (* reverse list of data to be sent out *)
+  rcvq : Rope.t ;
+  sndq : Rope.t ;
   rcv_notify : 'a;
   snd_notify : 'a;
   created : Mtime.t;
@@ -451,7 +441,7 @@ type 'a conn_state = {
 let conn_state created mk_notify ~rcvbufsize ~sndbufsize tcp_state control_block = {
   tcp_state ; control_block ;
   cantrcvmore = false ; cantsndmore = false ;
-  rcvq = [] ; sndq = [] ;
+  rcvq = Rope.empty ; sndq = Rope.empty ;
   rcvbufsize ; sndbufsize ;
   rcv_notify = mk_notify () ; snd_notify = mk_notify () ;
   created ;
@@ -524,8 +514,8 @@ let metrics () =
       CM.fold (fun k conn (rcvq, sndq, acc) ->
           if Mtime.(Span.to_uint64_ns (span now conn.created)) > Duration.of_min 1 then
             Log.info (fun m -> m "%a in %a" Connection.pp k (pp_conn_state now) conn);
-          rcvq + Cstruct.lenv conn.rcvq,
-          sndq + Cstruct.lenv conn.sndq,
+          rcvq + Rope.length conn.rcvq,
+          sndq + Rope.length conn.sndq,
           States.update conn.tcp_state (fun v -> Some (succ (Option.value ~default:0 v))) acc)
         connections
         (0, 0, States.empty)
