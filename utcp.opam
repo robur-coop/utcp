@@ -38,6 +38,7 @@ depends: [
   "crowbar" {>= "0.2.1" & with-test}
   "bechamel" {with-test}
   "bechamel-js" {with-test}
+  "ohex" {with-test}
 ]
 build: [
   ["dune" "subst"] {dev}

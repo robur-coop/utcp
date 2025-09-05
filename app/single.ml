@@ -49,6 +49,7 @@ let jump _ src src_port dst dst_port syn fin rst push ack seq window data =
       and payload = match data with None -> Cstruct.empty | Some x -> Cstruct.of_string x in
       let payload_len = Cstruct.length payload in
       let payload = [ payload ] in
+      let payload = List.map Cstruct.to_string payload in
       let s = {
         src_port ; dst_port ;
         seq = Sequence.of_int32 (Int32.of_int seq) ;

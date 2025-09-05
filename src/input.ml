@@ -640,7 +640,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
     else
       0
   in
-  let data_trimmed_left = Rope.of_css seg.payload in
+  let data_trimmed_left = Rope.of_strings seg.payload in
   let data_trimmed_left = Rope.shift data_trimmed_left trim_amt_left in
   let seq_trimmed = Sequence.addi seg.seq trim_amt_left in
   (*: Trimmed data starts at [[seq_trimmed]] :*)
