@@ -18,6 +18,7 @@ val to_string : t -> string
 (** [to_string] compiles the given rope [t]) into an allocated [string]. *)
 
 val to_strings : t -> string list
+(** [to_strings] compiles the given rope [t]) into a [string list]. This may allocate if there are partial strings (where off is not 0 or the length is not the complete string). *)
 
 val concat : t -> t -> t
 (** [concat t0 t1] concatenates the rope [t0] and [t1]. *)
@@ -32,5 +33,6 @@ val of_string : string -> t
 (** [of_string str] is a rope from a [string] [str]. *)
 
 val of_strings : string list -> t
+(** [of_strings strs] is a rope from the [string list] [strs]. *)
 
 val equal : t -> t -> bool

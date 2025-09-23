@@ -118,7 +118,8 @@ let send t now id ?(off= 0) ?len buf =
     in
     let len = match len with
       | Some len -> len
-      | None -> String.length buf - off in
+      | None -> String.length buf - off
+    in
     let space = max 0 (conn.sndbufsize - Rope.length conn.sndq) in
     let len = if space < len then space else len in
     let sndq = Rope.append conn.sndq ~off ~len buf in
