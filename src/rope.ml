@@ -87,7 +87,9 @@ let prepend str t = append (Str (str, 0, String.length str), t)
 
 let append t ?(off= 0) ?len str =
   let len = match len with
-    | Some len -> len | None -> String.length str - off in
+    | Some len -> len
+    | None -> String.length str - off
+  in
   append (t, (Str (str, off, len)))
 
 let of_string str = Str (str, 0, String.length str)
