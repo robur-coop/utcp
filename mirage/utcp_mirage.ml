@@ -114,7 +114,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
           Lwt.return (Error `Closed)
         | Ok () ->
           let buf = String.sub buf bytes_sent (String.length buf - bytes_sent) in
-          write (t, flow) buf 
+          write (t, flow) buf
       else
         Lwt.return (Ok ())
     | Error `Msg msg ->
