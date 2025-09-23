@@ -103,10 +103,13 @@ let close t now id =
     in
     Ok ({ t with connections = CM.add id conn' t.connections }, out)
 
-let send t now id ?(off= 0) ?len buf =
+let send t now id ?(off = 0) ?len buf =
+  let len = match len with
+    | Some len -> len
+    | None -> String.length buf - off
+  in
   Tracing.debug (fun m -> m "%a [%a] send %u %s" Connection.pp id Mtime.pp now
-                   (String.length buf)
-                   (Base64.encode_string buf));
+                    len (Base64.encode_string (String.sub buf off len)));
   match CM.find_opt id t.connections with
   | None -> Error `Not_found
   | Some conn ->
@@ -115,10 +118,6 @@ let send t now id ?(off= 0) ?len buf =
     in
     let* () =
       guard (not conn.cantsndmore) (`Msg "cant write")
-    in
-    let len = match len with
-      | Some len -> len
-      | None -> String.length buf - off
     in
     let space = max 0 (conn.sndbufsize - Rope.length conn.sndq) in
     let len = if space < len then space else len in
