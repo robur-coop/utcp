@@ -35,7 +35,7 @@ let append = function
       Bytes.blit_string s2 ofs2 buf len1 len2;
       App (Str (Bytes.unsafe_to_string buf, 0, len1 + len2), t2, len1 + len2 + length t2, 1 + height t2)
   *)
-  | t1, t2 -> 
+  | t1, t2 ->
       App (t1, t2, length t1 + length t2, 1 + Int.max (height t1) (height t2))
 
 let rec unsafe_sub t start stop =
@@ -85,7 +85,7 @@ let to_string t =
 let concat a b = append (a, b)
 let prepend str t = append (Str (str, 0, String.length str), t)
 
-let append t ?(off= 0) ?len str =
+let append t ?(off = 0) ?len str =
   let len = match len with
     | Some len -> len
     | None -> String.length str - off

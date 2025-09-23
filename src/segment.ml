@@ -428,7 +428,7 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
     { src_port ; dst_port ; seq = snd_nxt;
       ack = Some cb.State.rcv_nxt ; flag ; push ;
       window = Int.min (rcv_wnd' lsr cb.rcv_scale) max_win ;
-      options = [] ; payload_len= Rope.length data_to_send ;
+      options = [] ; payload_len = Rope.length data_to_send ;
       payload = Rope.to_strings data_to_send
     }
   in
