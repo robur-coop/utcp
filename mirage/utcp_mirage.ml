@@ -75,7 +75,9 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
           output_ign t segs >>= fun () ->
           begin match data with
           | [] -> Lwt.return (Ok `Eof)
-          | data -> Lwt.return (Ok (`Data (Cstruct.concat data))) end
+          | sstr ->
+              let cs = Cstruct.of_string (String.concat "" sstr) in
+              Lwt.return (Ok (`Data cs)) end
         | Error `Eof ->
           Lwt.return (Ok `Eof)
         | Error `Msg msg ->
@@ -83,10 +85,11 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
           (* TODO better error *)
           Lwt.return (Error `Refused)
         | Error `Not_found -> Lwt.return (Error `Refused))
-    | Ok (tcp, data, _cond, segs) ->
+    | Ok (tcp, sstr, _cond, segs) ->
       t.tcp <- tcp ;
       output_ign t segs >>= fun () ->
-      Lwt.return (Ok (`Data (Cstruct.concat data)))
+      let cs = Cstruct.of_string (String.concat "" sstr) in
+      Lwt.return (Ok (`Data cs))
     | Error `Eof ->
       Lwt.return (Ok `Eof)
     | Error `Msg msg ->
@@ -100,7 +103,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
     | Ok (tcp, bytes_sent, cond, segs) ->
       t.tcp <- tcp ;
       output_ign t segs >>= fun () ->
-      if bytes_sent < Cstruct.length buf then
+      if bytes_sent < String.length buf then
         (* partial write *)
         Lwt_condition.wait cond >>= fun r ->
         match r with
@@ -110,7 +113,8 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
           Log.err (fun m -> m "%a error %s from condition while sending" Utcp.pp_flow flow msg);
           Lwt.return (Error `Closed)
         | Ok () ->
-          write (t, flow) (Cstruct.shift buf bytes_sent)
+          let buf = String.sub buf bytes_sent (String.length buf - bytes_sent) in
+          write (t, flow) buf
       else
         Lwt.return (Ok ())
     | Error `Msg msg ->
@@ -118,7 +122,8 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
       Lwt.return (Error `Closed)
     | Error `Not_found -> Lwt.return (Error `Refused)
 
-  let writev flow bufs = write flow (Cstruct.concat bufs)
+  let writev flow bufs = write flow (Cstruct.to_string (Cstruct.concat bufs))
+  let write flow buf = write flow (Cstruct.to_string buf)
 
   let close (t, flow) =
     match Utcp.close t.tcp (now ()) flow with

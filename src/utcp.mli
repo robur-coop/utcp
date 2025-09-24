@@ -54,7 +54,7 @@ module Segment : sig
     push : bool ;
     window : int ;
     options : tcp_option list ;
-    payload : Cstruct.t list ;
+    payload : string list ;
     payload_len : int ;
   }
 
@@ -97,9 +97,9 @@ val shutdown : 'a state -> Mtime.t -> flow -> [ `read | `write | `read_write ] -
   ('a state * output list, [ `Not_found | `Msg of string ]) result
 
 val recv : 'a state -> Mtime.t -> flow ->
-  ('a state * Cstruct.t list * 'a * output list, [ `Not_found | `Msg of string | `Eof ]) result
+  ('a state * string list * 'a * output list, [ `Not_found | `Msg of string | `Eof ]) result
 
-val send : 'a state -> Mtime.t -> flow -> Cstruct.t ->
+val send : 'a state -> Mtime.t -> flow -> ?off:int -> ?len:int -> string ->
   ('a state * int * 'a * output list, [ `Not_found | `Msg of string ]) result
 
 (**/**)

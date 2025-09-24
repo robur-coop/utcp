@@ -180,7 +180,7 @@ type t = {
   push : bool ;
   window : int ;
   options : tcp_option list ;
-  payload : Cstruct.t list ;
+  payload : string list ;
   payload_len : int ;
 }
 
@@ -194,7 +194,7 @@ let equal a b =
   a.window = b.window &&
   List.length a.options = List.length b.options &&
   List.for_all2 equal_option a.options b.options &&
-  Cstruct.(equal (concat a.payload) (concat b.payload))
+  String.(equal (concat "" a.payload) (concat "" b.payload))
 
 let max_win = 1 lsl 16 - 1
 
@@ -428,8 +428,8 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
     { src_port ; dst_port ; seq = snd_nxt;
       ack = Some cb.State.rcv_nxt ; flag ; push ;
       window = Int.min (rcv_wnd' lsr cb.rcv_scale) max_win ;
-      options = [] ; payload_len= Rope.length data_to_send ;
-      payload = Rope.to_css data_to_send
+      options = [] ; payload_len = Rope.length data_to_send ;
+      payload = Rope.to_strings data_to_send
     }
   in
   (*: If emitting a [[FIN]] for the first time then change TCP state :*)
@@ -602,8 +602,9 @@ let encode_into buf t =
   let _ = encode_options buf 20 t.options in
   let rec go dst_off = function
     | [] -> ()
-    | { Cstruct.len; _ } as x :: r ->
-        Cstruct.blit x 0 buf dst_off len; go (dst_off + len) r in
+    | x :: r ->
+        let len = String.length x in
+        Cstruct.blit_from_string x 0 buf dst_off len; go (dst_off + len) r in
   go (20 + opt_len) t.payload
 
 let length t =
@@ -628,6 +629,22 @@ let encode_and_checksum now ~src ~dst t =
   encode_and_checksum_into now buf ~src ~dst t;
   buf
 
+(* NOTE(dinosaure): We would like the data to be located on the minor heap. For
+   this reason, to convert from [Cstruct.t] to strings, we fragment the data so
+   that each chunk can be allocated as quickly as possible (on the minor heap),
+   unlike allocation on the major heap, where data exceeding [0x7ff] bytes is
+   allocated. *)
+let to_chunks cs =
+  let rec go acc cs =
+    if Cstruct.length cs == 0 then List.rev acc
+    else begin
+      let len = Int.min 0x7ff (Cstruct.length cs) in
+      let buf = Bytes.create len in
+      Cstruct.blit_to_bytes cs 0 buf 0 len;
+      go (Bytes.unsafe_to_string buf :: acc) (Cstruct.shift cs len)
+    end in
+  go [] cs
+
 let decode data =
   let* () = guard (Cstruct.length data >= header_size) (`Msg "too small") in
   let src_port = Cstruct.BE.get_uint16 data 0
@@ -648,7 +665,7 @@ let decode data =
   let* options = decode_options options_buf in
   let payload = Cstruct.shift data data_off in
   let payload_len = Cstruct.length payload in
-  let payload = [ payload ] in
+  let payload = to_chunks payload in
   let ack = if ackf then Some ack else None in
   Ok ({ src_port; dst_port; seq; ack; flag; push; window; options; payload_len; payload },
       checksum)

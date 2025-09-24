@@ -167,6 +167,7 @@ let jump () filename ip =
               let state =
                 if Cstruct.length payload > 0 then (
                   Logs.info (fun m -> m "sending with %u bytes" (Cstruct.length payload));
+                  let payload = Cstruct.to_string payload in
                   match Utcp.send state mt flow payload with
                   | Error `Not_found ->
                     Logs.err (fun m -> m "failure during send: not found");
@@ -175,9 +176,9 @@ let jump () filename ip =
                     Logs.err (fun m -> m "failure during send: %s" msg);
                     assert false
                   | Ok (state, bytes_sent, _cond, out) ->
-                    if bytes_sent <> Cstruct.length payload then begin
+                    if bytes_sent <> String.length payload then begin
                       Logs.err (fun m -> m "partial send: %u of %u bytes"
-                                   bytes_sent (Cstruct.length payload));
+                                   bytes_sent (String.length payload));
                       assert false
                     end;
                     List.iter print_out out;

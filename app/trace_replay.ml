@@ -254,7 +254,8 @@ let jump () filename ip =
              state, false, succ idx)
         | `Send ->
           let flow = Option.get !flow in
-          (match Utcp.send state tm flow (Cstruct.create (fst msg.data)) with
+          let payload = String.make (fst msg.data) '\000' in
+          (match Utcp.send state tm flow payload with
            | Ok (state, bytes_sent, _cond, out) ->
              if bytes_sent <> fst msg.data then begin
                Logs.err (fun m -> m "partial send: %u of %u bytes"
