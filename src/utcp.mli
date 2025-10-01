@@ -102,6 +102,9 @@ val recv : 'a state -> Mtime.t -> flow ->
 val send : 'a state -> Mtime.t -> flow -> ?off:int -> ?len:int -> string ->
   ('a state * int * 'a * output list, [ `Not_found | `Msg of string ]) result
 
+val attempt_to_directly_send : 'a state -> Mtime.t -> flow -> ?off:int -> ?len:int -> string ->
+  ('a state * output list, [ `Not_enough_space | `Not_found | `Msg of string ]) result
+
 (**/**)
 (* only to be used for testing! *)
 module Timers : sig
