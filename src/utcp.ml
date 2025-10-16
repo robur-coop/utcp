@@ -28,6 +28,7 @@ let shutdown = User.shutdown
 let recv = User.recv
 
 let send = User.send
+let attempt_to_directly_send = User.attempt_to_directly_send
 
 module Segment = Segment
 

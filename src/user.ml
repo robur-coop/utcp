@@ -126,6 +126,30 @@ let send t now id ?(off = 0) ?len buf =
     let conn', out = Segment.tcp_output_perhaps now id conn' in
     Ok ({ t with connections = CM.add id conn' t.connections }, len, conn'.snd_notify, out)
 
+let attempt_to_directly_send t now id ?(off= 0) ?len buf =
+  let len = match len with
+    | Some len -> len
+    | None -> String.length buf - off
+  in
+  Tracing.debug (fun m -> m "%a [%a] send %u %s" Connection.pp id Mtime.pp now
+                    len (Base64.encode_string (String.sub buf off len)));
+  match CM.find_opt id t.connections with
+  | None -> Error `Not_found
+  | Some conn ->
+    let* () =
+      guard (behind_established conn.tcp_state) (`Msg "not yet established")
+    in
+    let* () =
+      guard (not conn.cantsndmore) (`Msg "cant write")
+    in
+    let space = max 0 (conn.sndbufsize - Rope.length conn.sndq) in
+    if space < len then Error `Not_enough_space
+    else
+      let sndq = Rope.append conn.sndq ~off ~len buf in
+      let conn' = { conn with sndq } in
+      let conn', out = Segment.tcp_output_perhaps now id conn' in
+      Ok ({ t with connections= CM.add id conn' t.connections }, out)
+
 let recv t now id =
   Tracing.debug (fun m -> m "%a [%a] receive" Connection.pp id Mtime.pp now);
   match CM.find_opt id t.connections with
