@@ -29,6 +29,8 @@ let recv = User.recv
 
 let send = User.send
 
+let force_enqueue = User.force_enqueue
+
 module Segment = Segment
 
 module Sequence = Sequence
