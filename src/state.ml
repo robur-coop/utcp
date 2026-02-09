@@ -482,7 +482,6 @@ end
 
 (* path mtu (its global to a stack) *)
 type 'a t = {
-  rng : int -> string ;
   listeners : IS.t ;
   connections : 'a conn_state CM.t ;
   stats : Stats.t ;
@@ -576,10 +575,9 @@ let pp now ppf t =
 let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 
-let empty mk_notify id rng =
+let empty mk_notify id =
   {
     id ;
-    rng ;
     listeners = IS.empty ;
     connections = CM.empty ;
     stats = Stats.empty () ;

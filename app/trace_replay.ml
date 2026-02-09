@@ -199,9 +199,9 @@ let jump () filename ip =
     Logs.warn (fun m -> m "only decoding and printing trace, no replaying done (specify --ip=<IP> to take an endpoint)");
   let msgs = trace_reader filename in
   let rng_data = Bytes.make 4 '\000' in
-  let rng i = assert (i = 4) ; Bytes.unsafe_to_string rng_data in
+  Mirage_crypto_rng.set_default_generator (Mirage_crypto_rng.create (module Zero_rng));
   let state =
-    let s = Utcp.empty Fun.id "trace-replay" rng in
+    let s = Utcp.empty Fun.id "trace-replay" in
     Utcp.start_listen s 443
   in
   let flow = ref None in

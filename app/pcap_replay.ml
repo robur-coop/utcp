@@ -117,8 +117,8 @@ let jump () filename ip =
     Logs.warn (fun m -> m "only decoding and printing pcap, no replaying done (specify --ip=<IP> to take an endpoint)");
   let fold = pcap_reader filename in
   let rng_data = Bytes.make 4 '\000' in
-  let rng i = assert (i = 4) ; Bytes.unsafe_to_string rng_data in
-  let state = Utcp.empty Fun.id "pcap-replay" rng in
+  Mirage_crypto_rng.set_default_generator (Mirage_crypto_rng.create (module Zero_rng));
+  let state = Utcp.empty Fun.id "pcap-replay" in
   let flow = ref None in
   fold (fun (state, act) idx ts ~src ~dst tcp ->
       let state =

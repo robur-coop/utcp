@@ -37,7 +37,7 @@ deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - not handled
 let dropwithreset (src, _, dst, _) seg =
   Option.map (fun x -> src, dst, x) (Segment.dropwithreset seg)
 
-let deliver_in_1 mk_notify m stats rng now id seg =
+let deliver_in_1 mk_notify m stats now id seg =
   (* there's a difference from the model, namely that we don't care about
      sockets in TIME_WAIT - this is handled in handle_conn explicitly (allowing
      port reusage with strictly higher sequence numbers - RFC1122 4.2.2.13).
@@ -62,7 +62,7 @@ let deliver_in_1 mk_notify m stats rng now id seg =
     let request_r_scale, rcv_scale =
       if tf_doing_ws then Some Params.scale, Params.scale else None, 0
     in
-    let iss = Sequence.of_int32 (Randomconv.int32 rng)
+    let iss = Sequence.of_int32 (Randomconv.int32 Mirage_crypto_rng.generate)
     and ack' = Sequence.incr seg.Segment.seq (* ACK the SYN *)
     in
     let t_rttseg = Some (now, iss) in
@@ -968,7 +968,7 @@ let handle_noconn t now id seg =
   with
   | true, true ->
     (* there can't be anything in TIME_WAIT, otherwise we wouldn't end up here *)
-    let conn, reply = deliver_in_1 t.mk_notify m t.stats t.rng now id seg in
+    let conn, reply = deliver_in_1 t.mk_notify m t.stats now id seg in
     { t with connections = CM.add id conn t.connections }, [ reply ]
   | true, false ->
     (* deliver_in_1b *)
@@ -1056,7 +1056,7 @@ let handle_conn t now id conn seg =
          state. This is modelled by closing the existing [[TIME_WAIT]] socket and creating the new
          socket from scratch.
       *)
-      let conn, reply = deliver_in_1 t.mk_notify m t.stats t.rng now id seg in
+      let conn, reply = deliver_in_1 t.mk_notify m t.stats now id seg in
       Ok ({ t with connections = CM.add id conn t.connections }, [ reply ])
     | _ ->
       let* () =

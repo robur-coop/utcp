@@ -18,6 +18,7 @@ depends: [
   "randomconv" {>= "0.2.0"}
   "mtime" {>= "1.4.0"}
   "metrics" {>= "0.4.1"}
+  "mirage-crypto-rng" {>= "1.2.0"}
   "base64" {>= "3.5.1"} #only used for tracing
   #for mirage sublibrary
   "lwt" {>= "5.4.2"}
@@ -27,7 +28,6 @@ depends: [
   "tcpip" {>= "9.0.0"}
   "mirage-flow" {>= "4.0.0"}
   #for apps
-  "mirage-crypto-rng" {>= "1.2.0" & dev}
   "cmdliner" {>= "1.1.0" & dev}
   "mirage-net-unix" {>= "2.8.0" & dev}
   "ethernet" {>= "2.2.1" & dev}
