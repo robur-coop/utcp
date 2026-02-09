@@ -22,11 +22,15 @@ depends: [
   "base64" {>= "3.5.1"} #only used for tracing
   #for mirage sublibrary
   "lwt" {>= "5.4.2"}
-  "mirage-crypto-rng-mirage" {>= "1.0.0"}
   "mirage-sleep" {>= "4.0.0"}
   "mirage-mtime" {>= "5.0.0"}
   "tcpip" {>= "9.0.0"}
-  "mirage-flow" {>= "4.0.0"}
+  #for testing
+  "alcotest" {>= "1.5.0" & with-test}
+  "crowbar" {>= "0.2.1" & with-test}
+  "ohex" {with-test}
+  "bechamel" {with-test}
+  "bechamel-js" {with-test}
   #for apps
   "cmdliner" {>= "1.1.0" & dev}
   "mirage-net-unix" {>= "2.8.0" & dev}
@@ -34,11 +38,6 @@ depends: [
   "arp" {>= "4.0.0" & dev}
   "mirage-unix" {>= "5.0.0" & dev}
   "pcap-format" {>= "0.6.0" & dev}
-  "alcotest" {>= "1.5.0" & with-test}
-  "crowbar" {>= "0.2.1" & with-test}
-  "bechamel" {with-test}
-  "bechamel-js" {with-test}
-  "ohex" {with-test}
 ]
 build: [
   ["dune" "subst"] {dev}
@@ -62,3 +61,4 @@ pointers).
 The target of this opam package is the MirageOS (https://mirageos.org) unikernel
 operating system.
 """
+x-maintenance-intent: [ "(latest)" ]
