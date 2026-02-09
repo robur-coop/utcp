@@ -1,6 +1,8 @@
 type 'a state
 
-val empty : (unit -> 'a) -> string -> (int -> string) -> 'a state
+(** [empty make_notify id] constructs an empty TCP state with a function
+    how to create a notifications, and an identifier for the TCP stack. *)
+val empty : (unit -> 'a) -> string -> 'a state
 
 val start_listen : 'a state -> int -> 'a state
 
@@ -202,7 +204,6 @@ module State : sig
   module CM : Map.S with type key = flow
   module Stats : sig type t end
   type 'a t = {
-    rng : int -> string ;
     listeners : IS.t ;
     connections : 'a conn_state CM.t ;
     stats : Stats.t ;
@@ -213,7 +214,7 @@ module State : sig
     mk_notify : unit -> 'a;
   }
   val pp : Mtime.t -> 'a t Fmt.t
-  val empty : (unit -> 'a) -> string -> (int -> string) -> 'a t
+  val empty : (unit -> 'a) -> string -> 'a t
   val start_listen : 'a t -> int -> 'a t
   val stop_listen : 'a t -> int -> 'a t
 end

@@ -3,8 +3,26 @@
 open Utcp
 
 (* generates the bit pattern 0b10100101 *)
-let static_rng y =
-  Bytes.make y '\xA5' |> Bytes.unsafe_to_string
+module Static_rng : Mirage_crypto_rng.Generator = struct
+  type g = unit
+
+  let block = 1
+
+  let create ?time:_ () = ()
+
+  let generate_into ~g:_ data ~off len =
+    for i = off to off + len - 1 do
+      Bytes.set data i '\xA5'
+    done
+
+  let reseed ~g:_ _bytes = ()
+
+  let accumulate ~g:_ _source = `Acc (fun _data -> ())
+
+  let seeded ~g:_ = true
+
+  let pools = 1
+end
 
 let equal_rttinf a b =
   a.State.t_rttupdated = b.State.t_rttupdated &&
@@ -146,7 +164,8 @@ and src_port = 4321
 let quad = Obj.magic (my_ip, listen_port, your_ip, src_port)
 
 (* a TCP stack listening on port 1234 *)
-let tcp = State.empty Fun.id "" static_rng
+let () = Mirage_crypto_rng.set_default_generator (Mirage_crypto_rng.create (module Static_rng))
+let tcp = State.empty Fun.id ""
 let tcp_listen = State.start_listen tcp listen_port
 
 let basic_seg = {

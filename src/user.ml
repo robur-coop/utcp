@@ -10,13 +10,13 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let connect ~src ?src_port ~dst ~dst_port t now =
   let src_port = match src_port with
-    | None -> Randomconv.int16 t.rng
+    | None -> Randomconv.int16 Mirage_crypto_rng.generate
     | Some p -> p
   in
   let id = src, src_port, dst, dst_port in
   Tracing.debug (fun m -> m "%a [%a] connect" Connection.pp id Mtime.pp now);
   let conn =
-    let iss = Sequence.of_int32 (Randomconv.int32 t.rng) in
+    let iss = Sequence.of_int32 (Randomconv.int32 Mirage_crypto_rng.generate) in
     let rcv_wnd = Params.so_rcvbuf in
     let advmss = Subr.tcp_mssopt id in
     let t_rttseg = Some (now, iss) in

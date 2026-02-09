@@ -200,7 +200,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
 
   let connect id ip =
     Log.info (fun m -> m "starting µTCP on %S" id);
-    let tcp = Utcp.empty Lwt_condition.create id Mirage_crypto_rng.generate in
+    let tcp = Utcp.empty Lwt_condition.create id in
     let t = { tcp ; ip ; listeners = Port_map.empty } in
     Lwt.async (fun () ->
         let rec timer n =

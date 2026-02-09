@@ -17,12 +17,18 @@
    mtime.clock.os)
  (optional))
 
+(library
+ (name zero_rng)
+ (wrapped false)
+ (modules zero_rng)
+ (libraries mirage-crypto-rng))
+
 (executable
  (name pcap_replay)
  (public_name pcap)
  (modules pcap_replay)
  (libraries utcp cstruct pcap-format ipaddr mtime logs ipaddr-cstruct cmdliner
-   logs.fmt fmt.cli logs.cli fmt.tty)
+   logs.fmt fmt.cli logs.cli fmt.tty zero_rng)
  (optional))
 
 (executable
@@ -30,5 +36,5 @@
  (public_name trace)
  (modules trace_replay)
  (libraries utcp base64 cstruct ipaddr mtime logs ipaddr-cstruct cmdliner
-   logs.fmt fmt.cli logs.cli fmt.tty)
+   logs.fmt fmt.cli logs.cli fmt.tty zero_rng)
  (optional))
