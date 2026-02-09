@@ -22,11 +22,9 @@ depends: [
   "base64" {>= "3.5.1"} #only used for tracing
   #for mirage sublibrary
   "lwt" {>= "5.4.2"}
-  "mirage-crypto-rng-mirage" {>= "1.0.0"}
   "mirage-sleep" {>= "4.0.0"}
   "mirage-mtime" {>= "5.0.0"}
   "tcpip" {>= "9.0.0"}
-  "mirage-flow" {>= "4.0.0"}
   #for apps
   "cmdliner" {>= "1.1.0" & dev}
   "mirage-net-unix" {>= "2.8.0" & dev}
