@@ -60,3 +60,4 @@ pointers).
 The target of this opam package is the MirageOS (https://mirageos.org) unikernel
 operating system.
 """
+x-maintenance-intent: [ "(latest)" ]
