@@ -661,8 +661,10 @@ let decode data =
   let* () =
     guard (Cstruct.length data >= data_off) (`Msg "data_offset too big")
   in
-  let options_buf = Cstruct.sub data header_size (data_off - header_size) in
-  let* options = decode_options options_buf in
+  let* options =
+    if data_off - header_size > 0
+    then decode_options (Cstruct.sub data header_size (data_off - header_size))
+    else Ok [] (* no options *) in
   let payload = Cstruct.shift data data_off in
   let payload_len = Cstruct.length payload in
   let payload = to_chunks payload in
