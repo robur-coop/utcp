@@ -11,8 +11,8 @@ val add : t -> t -> t
 val incr : t -> t
 
 val addi : t -> int -> t
-external sub : t -> t -> int = "%subint"
-external window : t -> t -> int = "%subint"
+val sub : t -> t -> int
+val window : t -> t -> int
 
 val less : t -> t -> bool
 val less_equal : t -> t -> bool
