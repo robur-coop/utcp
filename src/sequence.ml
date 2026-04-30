@@ -27,21 +27,34 @@ let to_int32 x =
   Int32.of_int r
 
 external ( < ) : 'a -> 'a -> bool = "%lessthan"
-external ( <= ) : 'a -> 'a -> bool = "%lessequal"
-external ( >= ) : 'a -> 'a -> bool = "%greaterequal"
 external ( > ) : 'a -> 'a -> bool = "%greaterthan"
 
-let[@inline always] less a b = a < b
-
-let[@inline always] less_equal a b = a <= b
-
-let[@inline always] greater a b = a > b
-
-let[@inline always] greater_equal a b = a >= b
+let max_add = 1 lsl 31
 
 let equal a b = a == b
 
-let[@inline always] min a b = if a <= b then a else b
-let[@inline always] max a b = if a >= b then a else b
+let[@inline always] less a b =
+  not (equal a b) &&
+  (a < b && sub b a < max_add) ||
+  (a > b && sub a b > max_add)
+
+let[@inline always] less_equal a b =
+  equal a b || less a b
+
+let[@inline always] greater a b =
+  not (equal a b) &&
+  (a < b && sub b a > max_add) ||
+  (a > b && sub a b < max_add)
+
+let[@inline always] greater_equal a b =
+  equal a b || greater a b
+
+let[@inline always] min a b =
+  if sub a b > max_add then min a b else
+  if less a b then a else b
+
+let[@inline always] max a b =
+  if sub a b > max_add then max a b else
+  if greater a b then a else b
 
 let pp = Fmt.int

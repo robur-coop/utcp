@@ -41,22 +41,23 @@ let window_negative_within_wrap () =
   Alcotest.(check int) "window across wrap reversed = 0xffffffe0" 0xffffffe0 v
 
 let less_across_wrap () =
-  Alcotest.(check bool) "less 0xFFFFFFFF 0 = false" false (Sequence.less ffffffff z);
-  Alcotest.(check bool) "less 0 0xFFFFFFFF = true" true (Sequence.less z ffffffff)
+  Alcotest.(check bool) "less 0xFFFFFFFF 0 = true" true (Sequence.less ffffffff z);
+  Alcotest.(check bool) "less 0xFFFFFFFF 0xFFFFFFFE = false" false (Sequence.less ffffffff (v 0xfffffffel));
+  Alcotest.(check bool) "less 0 0xFFFFFFFF = false" false (Sequence.less z ffffffff)
 
 let greater_across_wrap () =
-  Alcotest.(check bool) "greater 0 0xFFFFFFFF = false" false (Sequence.greater z ffffffff);
-  Alcotest.(check bool) "greater 0xFFFFFFFF 0 = true" true (Sequence.greater ffffffff z)
+  Alcotest.(check bool) "greater 0 0xFFFFFFFF = true" true (Sequence.greater z ffffffff);
+  Alcotest.(check bool) "greater 0xFFFFFFFF 0 = false" false (Sequence.greater ffffffff z)
 
 let less_equal_across_wrap () =
-  Alcotest.(check bool) "less_equal 0xFFFFFFFF 0 = false" false (Sequence.less_equal ffffffff z);
+  Alcotest.(check bool) "less_equal 0xFFFFFFFF 0 = true" true (Sequence.less_equal ffffffff z);
   Alcotest.(check bool) "less_equal 0xFFFFFFFF 0xFFFFFFFF = true" true (Sequence.less_equal ffffffff ffffffff);
-  Alcotest.(check bool) "less_equal 0 0xFFFFFFFF = true" true (Sequence.less_equal z ffffffff)
+  Alcotest.(check bool) "less_equal 0 0xFFFFFFFF = false" false (Sequence.less_equal z ffffffff)
 
 let greater_equal_across_wrap () =
-  Alcotest.(check bool) "greater_equal 0 0xFFFFFFFF = false" false (Sequence.greater_equal z ffffffff);
+  Alcotest.(check bool) "greater_equal 0 0xFFFFFFFF = true" true (Sequence.greater_equal z ffffffff);
   Alcotest.(check bool) "greater_equal 0 0 = true" true (Sequence.greater_equal z z);
-  Alcotest.(check bool) "greater_equal 0xFFFFFFFF 0 = true" true (Sequence.greater_equal ffffffff z)
+  Alcotest.(check bool) "greater_equal 0xFFFFFFFF 0 = false" false (Sequence.greater_equal ffffffff z)
 
 let min_across_wrap () =
   Alcotest.(check seqno) "min 0xFFFFFFFF 0 = 0" z (Sequence.min ffffffff z)
