@@ -60,10 +60,10 @@ let greater_equal_across_wrap () =
   Alcotest.(check bool) "greater_equal 0xFFFFFFFF 0 = false" false (Sequence.greater_equal ffffffff z)
 
 let min_across_wrap () =
-  Alcotest.(check seqno) "min 0xFFFFFFFF 0 = 0" z (Sequence.min ffffffff z)
+  Alcotest.(check seqno) "min 0xFFFFFFFF 0 = 0xFFFFFFFF" ffffffff (Sequence.min ffffffff z)
 
 let max_across_wrap () =
-  Alcotest.(check seqno) "max 0xFFFFFFFF 0 = 0xFFFFFFFF" ffffffff (Sequence.max ffffffff z)
+  Alcotest.(check seqno) "max 0xFFFFFFFF 0 = 0" z (Sequence.max ffffffff z)
 
 let to_of_int32 () =
   Alcotest.(check seqno) "of_int32 (to_int32 0) = 0" z Sequence.(of_int32 (to_int32 z));

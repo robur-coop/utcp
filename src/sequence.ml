@@ -50,11 +50,9 @@ let[@inline always] greater_equal a b =
   equal a b || greater a b
 
 let[@inline always] min a b =
-  if sub a b > max_add then min a b else
   if less a b then a else b
 
 let[@inline always] max a b =
-  if sub a b > max_add then max a b else
   if greater a b then a else b
 
 let pp = Fmt.int
