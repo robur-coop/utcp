@@ -38,7 +38,7 @@ val pp_flow : flow Fmt.t
     IP and port. *)
 val peers : flow -> (Ipaddr.t * int) * (Ipaddr.t * int)
 
-(** The module of TCP sequence numbers (unsigned 32 bit values, arithmetic operations may wrap) *)
+(** The module of TCP sequence numbers (unsigned 32 bit values, arithmetic operations may wrap), comparison adheres to serial number arithmetics from RFC 1982. *)
 module Sequence : sig
 
   (** The abstract type of a sequence number. *)
