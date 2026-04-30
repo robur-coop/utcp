@@ -1,5 +1,8 @@
 (* (c) 2017 Hannes Mehnert, all rights reserved *)
 
+(* TCP Sequence numbers are in the ring 0 .. 2 ^ 32 - 1. Especially the
+   comparison takes RFC 1982 (serial number arithmetics) into account. *)
+
 type t = private int [@@immediate]
 
 val of_int32 : int32 -> t
@@ -11,8 +14,8 @@ val add : t -> t -> t
 val incr : t -> t
 
 val addi : t -> int -> t
-external sub : t -> t -> int = "%subint"
-external window : t -> t -> int = "%subint"
+val sub : t -> t -> int
+val window : t -> t -> int
 
 val less : t -> t -> bool
 val less_equal : t -> t -> bool
