@@ -41,28 +41,34 @@ let window_negative_within_wrap () =
   Alcotest.(check int) "window across wrap reversed = 0xffffffe0" 0xffffffe0 v
 
 let less_across_wrap () =
-  Alcotest.(check bool) "less 0xFFFFFFFF 0 = true" true (Sequence.less ffffffff z);
-  Alcotest.(check bool) "less 0 0xFFFFFFFF = false" false (Sequence.less z ffffffff)
+  Alcotest.(check bool) "less 0xFFFFFFFF 0 = false" false (Sequence.less ffffffff z);
+  Alcotest.(check bool) "less 0 0xFFFFFFFF = true" true (Sequence.less z ffffffff)
 
 let greater_across_wrap () =
-  Alcotest.(check bool) "greater 0 0xFFFFFFFF = true" true (Sequence.greater z ffffffff);
-  Alcotest.(check bool) "greater 0xFFFFFFFF 0 = false" false (Sequence.greater ffffffff z)
+  Alcotest.(check bool) "greater 0 0xFFFFFFFF = false" false (Sequence.greater z ffffffff);
+  Alcotest.(check bool) "greater 0xFFFFFFFF 0 = true" true (Sequence.greater ffffffff z)
 
 let less_equal_across_wrap () =
-  Alcotest.(check bool) "less_equal 0xFFFFFFFF 0 = true" true (Sequence.less_equal ffffffff z);
+  Alcotest.(check bool) "less_equal 0xFFFFFFFF 0 = false" false (Sequence.less_equal ffffffff z);
   Alcotest.(check bool) "less_equal 0xFFFFFFFF 0xFFFFFFFF = true" true (Sequence.less_equal ffffffff ffffffff);
-  Alcotest.(check bool) "less_equal 0 0xFFFFFFFF = false" false (Sequence.less_equal z ffffffff)
+  Alcotest.(check bool) "less_equal 0 0xFFFFFFFF = true" true (Sequence.less_equal z ffffffff)
 
 let greater_equal_across_wrap () =
-  Alcotest.(check bool) "greater_equal 0 0xFFFFFFFF = true" true (Sequence.greater_equal z ffffffff);
+  Alcotest.(check bool) "greater_equal 0 0xFFFFFFFF = false" false (Sequence.greater_equal z ffffffff);
   Alcotest.(check bool) "greater_equal 0 0 = true" true (Sequence.greater_equal z z);
-  Alcotest.(check bool) "greater_equal 0xFFFFFFFF 0 = false" false (Sequence.greater_equal ffffffff z)
+  Alcotest.(check bool) "greater_equal 0xFFFFFFFF 0 = true" true (Sequence.greater_equal ffffffff z)
 
 let min_across_wrap () =
-  Alcotest.(check seqno) "min 0xFFFFFFFF 0 = 0xFFFFFFFF" ffffffff (Sequence.min ffffffff z)
+  Alcotest.(check seqno) "min 0xFFFFFFFF 0 = 0" z (Sequence.min ffffffff z)
 
 let max_across_wrap () =
-  Alcotest.(check seqno) "max 0xFFFFFFFF 0 = 0" z (Sequence.max ffffffff z)
+  Alcotest.(check seqno) "max 0xFFFFFFFF 0 = 0xFFFFFFFF" ffffffff (Sequence.max ffffffff z)
+
+let to_of_int32 () =
+  Alcotest.(check seqno) "of_int32 (to_int32 0) = 0" z Sequence.(of_int32 (to_int32 z));
+  Alcotest.(check seqno) "of_int32 (to_int32 0xFFFFFFFF) = 0xFFFFFFFF" ffffffff Sequence.(of_int32 (to_int32 ffffffff));
+  Alcotest.(check seqno) "of_int32 (to_int32 0x7FFFFFFF) = 0x7FFFFFFF" (v 0x7fffffffl) Sequence.(of_int32 (to_int32 (v 0x7fffffffl)));
+  Alcotest.(check seqno) "of_int32 (to_int32 0x80000000) = 0x80000000" (v 0x80000000l) Sequence.(of_int32 (to_int32 (v 0x80000000l)))
 
 let tests = [
   "add wraps at 2^32",          `Quick, add_wraps_at_2_32 ;
@@ -77,4 +83,5 @@ let tests = [
   "greater_equal across wrap",  `Quick, greater_equal_across_wrap ;
   "min across wrap",            `Quick, min_across_wrap ;
   "max across wrap",            `Quick, max_across_wrap ;
+  "to and of int32",            `Quick, to_of_int32 ;
 ]

@@ -15,26 +15,33 @@ let[@inline always] sub a b =
 
 let[@inline always] window a b = sub a b
 
-let of_int32 x = Int32.to_int x land 0xFFFFFFFF
-let to_int32 = Int32.of_int
+(* project to 0 .. 0xffffffff, i.e. the positive part *)
+let of_int32 x =
+  let r = Int32.to_int x in
+  if x < 0l then r + 0x1_0000_0000 else r
 
-let[@inline always] less a b =
-  (a - b) land 0x80000000 <> 0
+let to_int32 x =
+  let r =
+    if x >= 0x80000000 then x - 0x1_0000_0000 else x
+  in
+  Int32.of_int r
 
-let[@inline always] less_equal a b =
-  let d = (a - b) land 0xFFFFFFFF in
-  d = 0 || d land 0x80000000 <> 0
+external ( < ) : 'a -> 'a -> bool = "%lessthan"
+external ( <= ) : 'a -> 'a -> bool = "%lessequal"
+external ( >= ) : 'a -> 'a -> bool = "%greaterequal"
+external ( > ) : 'a -> 'a -> bool = "%greaterthan"
 
-let[@inline always] greater a b =
-  let d = (a - b) land 0xFFFFFFFF in
-  d <> 0 && d land 0x80000000 = 0
+let[@inline always] less a b = a < b
 
-let[@inline always] greater_equal a b =
-  (a - b) land 0x80000000 = 0
+let[@inline always] less_equal a b = a <= b
+
+let[@inline always] greater a b = a > b
+
+let[@inline always] greater_equal a b = a >= b
 
 let equal a b = a == b
 
-let[@inline always] min a b = if less a b then a else b
-let[@inline always] max a b = if greater a b then a else b
+let[@inline always] min a b = if a <= b then a else b
+let[@inline always] max a b = if a >= b then a else b
 
 let pp = Fmt.int
