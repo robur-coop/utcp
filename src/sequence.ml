@@ -10,8 +10,8 @@ let zero = 0
 let[@inline always] addi a i = (add[@inlined]) a i
 
 let[@inline always] sub a b =
-  let d = (a - b) land 0xFFFFFFFF in
-  if d land 0x80000000 <> 0 then d - 0x1_0000_0000 else d
+  let d = a - b in
+  if d < 0 then d + 0x1_0000_0000 else d
 
 let[@inline always] window a b = sub a b
 

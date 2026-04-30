@@ -28,7 +28,7 @@ let sub_across_wrap_forward () =
 
 let sub_across_wrap_backward () =
   let v = Sequence.window ffffffff z in
-  Alcotest.(check int) "sub 0xFFFFFFFF 0 = -1" (-1) v
+  Alcotest.(check int) "sub 0xFFFFFFFF 0 = 0xffffffff" 0xffffffff v
 
 let window_within_wrap () =
   let snd_una = v 0xFFFFFFF0l and snd_nxt = v 0x10l in
@@ -38,7 +38,7 @@ let window_within_wrap () =
 let window_negative_within_wrap () =
   let snd_una = v 0xFFFFFFF0l and snd_nxt = v 0x10l in
   let v = Sequence.window snd_una snd_nxt in
-  Alcotest.(check int) "window across wrap reversed = -0x20" (-0x20) v
+  Alcotest.(check int) "window across wrap reversed = 0xffffffe0" 0xffffffe0 v
 
 let less_across_wrap () =
   Alcotest.(check bool) "less 0xFFFFFFFF 0 = true" true (Sequence.less ffffffff z);
