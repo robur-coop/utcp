@@ -307,8 +307,6 @@ module State : sig
     stats : Stats.t ;
     id : string ;
     mutable ctr : int ;
-    metrics : (string -> Metrics.field list, Mtime.t * 'a conn_state CM.t * Stats.t -> Metrics.data) Metrics.src;
-    transitions : (string -> Metrics.field list, string -> Metrics.data) Metrics.src;
     mk_notify : unit -> 'a;
   }
   val pp : Mtime.t -> 'a t Fmt.t

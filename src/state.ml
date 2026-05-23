@@ -487,8 +487,6 @@ type 'a t = {
   stats : Stats.t ;
   id : string ;
   mutable ctr : int ;
-  metrics : (string -> Metrics.field list, Mtime.t * 'a conn_state CM.t * Stats.t -> Metrics.data) Metrics.src;
-  transitions : (string -> Metrics.field list, string -> Metrics.data) Metrics.src;
   mk_notify : unit -> 'a;
 }
 
@@ -500,7 +498,17 @@ module States = Map.Make (struct
 let src = Logs.Src.create "tcp.state" ~doc:"TCP state"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-let metrics () =
+let collect_metrics now connections =
+  CM.fold (fun k conn (rcvq, sndq, acc) ->
+      if Mtime.(Span.to_uint64_ns (span now conn.created)) > Duration.of_min 1 then
+        Log.info (fun m -> m "%a in %a" Connection.pp k (pp_conn_state now) conn);
+      rcvq + Rope.length conn.rcvq,
+      sndq + Rope.length conn.sndq,
+      States.update conn.tcp_state (fun v -> Some (succ (Option.value ~default:0 v))) acc)
+    connections
+    (0, 0, States.empty)
+
+let metrics =
   let tcp_states =
     [ Syn_sent ; Syn_received ; Established ; Close_wait ; Fin_wait_1 ;
       Closing ; Last_ack ; Fin_wait_2 ; Time_wait
@@ -508,17 +516,7 @@ let metrics () =
   in
   let open Metrics in
   let doc = "uTCP metrics" in
-  let data (now, connections, stats) =
-    let rcvq, sndq, states =
-      CM.fold (fun k conn (rcvq, sndq, acc) ->
-          if Mtime.(Span.to_uint64_ns (span now conn.created)) > Duration.of_min 1 then
-            Log.info (fun m -> m "%a in %a" Connection.pp k (pp_conn_state now) conn);
-          rcvq + Rope.length conn.rcvq,
-          sndq + Rope.length conn.sndq,
-          States.update conn.tcp_state (fun v -> Some (succ (Option.value ~default:0 v))) acc)
-        connections
-        (0, 0, States.empty)
-    in
+  let data ((rcvq, sndq, states), stats) =
     let total = States.fold (fun _ v acc -> v + acc) states 0 in
     Data.v
       (List.map (fun tcp_state ->
@@ -537,9 +535,9 @@ let metrics () =
   Src.v ~doc ~tags:Tags.[ tag ] ~data "utcp"
 
 let add_metrics t now =
-  Metrics.add t.metrics (fun x -> x t.id) (fun d -> d (now, t.connections, t.stats))
+  Metrics.add metrics (fun x -> x t.id) (fun d -> d (collect_metrics now t.connections, t.stats))
 
-let transitions () =
+let transitions =
   let create () =
     let data : (string, int) Hashtbl.t = Hashtbl.create 7 in
     (fun key ->
@@ -564,7 +562,7 @@ let transitions () =
   Src.v ~doc ~tags:Metrics.Tags.[ tag ] ~data "utcp_transition"
 
 let rule t name =
-  Metrics.add t.transitions (fun x -> x t.id) (fun d -> d name)
+  Metrics.add transitions (fun x -> x t.id) (fun d -> d name)
 
 let pp now ppf t =
   Fmt.pf ppf "listener %a, connections: %a"
@@ -582,7 +580,5 @@ let empty mk_notify id =
     connections = CM.empty ;
     stats = Stats.empty () ;
     ctr = 0 ;
-    metrics = metrics () ;
-    transitions = transitions () ;
     mk_notify ;
   }
