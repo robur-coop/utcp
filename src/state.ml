@@ -501,7 +501,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 let collect_metrics now connections =
   CM.fold (fun k conn (rcvq, sndq, acc) ->
       if Mtime.(Span.to_uint64_ns (span now conn.created)) > Duration.of_min 1 then
-        Log.info (fun m -> m "%a in %a" Connection.pp k (pp_conn_state now) conn);
+        Log.debug (fun m -> m "%a in %a" Connection.pp k (pp_conn_state now) conn);
       rcvq + Rope.length conn.rcvq,
       sndq + Rope.length conn.sndq,
       States.update conn.tcp_state (fun v -> Some (succ (Option.value ~default:0 v))) acc)

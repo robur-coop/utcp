@@ -139,7 +139,8 @@ let slow_timer t now =
           match expired cb.tt_rexmt, expired cb.tt_2msl, expired cb.tt_conn_est, expired cb.tt_fin_wait_2 with
           | Some (RexmtSyn, shift), _, _, _ ->
             Log.debug (fun m -> m "%a syn retransmit expired %a" Connection.pp id (pp_conn_state now) conn);
-            if not (conn.tcp_state = Syn_sent) then Log.err (fun m -> m "not in syn_sent");
+            if not (conn.tcp_state = Syn_sent) then
+              Log.err (fun m -> m "%a is not in syn_sent (RexmtSyn), but in %a" Connection.pp id pp_fsm conn.tcp_state);
             timer_tt_rexmtsyn m now shift id conn
           | Some (Rexmt, shift), _, _, _ ->
             Log.debug (fun m -> m "%a retransmit expired %a" Connection.pp id (pp_conn_state now) conn);
@@ -151,19 +152,22 @@ let slow_timer t now =
           | None, Some (), _, _ ->
             (* timer_tt_2msl_1 *)
             Log.debug (fun m -> m "%a 2msl timer expired %a" Connection.pp id (pp_conn_state now) conn);
-            if not (conn.tcp_state = Time_wait) then Log.err (fun m -> m "not in time_wait!!!!");
+            if not (conn.tcp_state = Time_wait) then
+              Log.err (fun m -> m "%a is not in time_wait, but in %a" Connection.pp id pp_fsm conn.tcp_state);
             m "timer-tt-2msl";
             Error `Timer_2msl, None
           | None, None, Some (), _ ->
             (* timer_tt_conn_est_1 *)
             Log.debug (fun m -> m "%a connection established timer expired %a" Connection.pp id (pp_conn_state now) conn);
-            if not (conn.tcp_state = Syn_sent) then Log.err (fun m -> m "not in syn_sent");
+            if not (conn.tcp_state = Syn_sent) then
+              Log.err (fun m -> m "%a is not in syn_sent (timer_tt_conn_est_1), but in %a" Connection.pp id pp_fsm conn.tcp_state);
             m "timer-tt-conn-est";
             Error `Timer_connection_established, Segment.drop_and_close id conn
           | None, None, None, Some () ->
             (* timer_tt_fin_wait_2_1 *)
             Log.debug (fun m -> m "%a fin_wait_2 timer expired %a" Connection.pp id (pp_conn_state now) conn);
-            if not (conn.tcp_state = Fin_wait_2) then Log.err (fun m -> m "not in fin_wait_2");
+            if not (conn.tcp_state = Fin_wait_2) then
+              Log.err (fun m -> m "%a is not in fin_wait_2, but in %a" Connection.pp id pp_fsm conn.tcp_state);
             m "timer-tt-fin-wait-2";
             Error `Timer_fin_wait_2, None
           | None, None, None, None -> Ok conn, None
