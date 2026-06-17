@@ -267,9 +267,14 @@ let tcp_output_required now conn =
   let cb = conn.State.control_block in
   let snd_cwnd =
     let rxtcur = Subr.computed_rxtcur cb.State.t_rttinf in
-    let than = match Mtime.add_span cb.State.t_idletime (Mtime.Span.of_uint64_ns rxtcur) with
-      | None -> assert false
-      | Some ms -> ms
+    let than =
+      let span =
+        Mtime.add_span cb.State.t_idletime (Mtime.Span.of_uint64_ns rxtcur)
+      in
+      if span = None then
+        Log.warn (fun m -> m "span overflow (idle %a rxtcur %Lu)"
+                     Mtime.pp cb.t_idletime rxtcur);
+      Option.value ~default:Mtime.max_stamp span
     in
     if Sequence.equal cb.State.snd_max cb.State.snd_una && Mtime.is_later ~than now then
       (*: The connection is idle and has been for >= 1RTO :*)
@@ -354,9 +359,14 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
   let cb = conn.State.control_block in
   let snd_cwnd =
     let rxtcur = Subr.computed_rxtcur cb.State.t_rttinf in
-    let than = match Mtime.add_span cb.State.t_idletime (Mtime.Span.of_uint64_ns rxtcur) with
-      | None -> assert false
-      | Some ms -> ms
+    let than =
+      let span =
+        Mtime.add_span cb.State.t_idletime (Mtime.Span.of_uint64_ns rxtcur)
+      in
+      if span = None then
+        Log.warn (fun m -> m "span overflow (idle %a rxtcur %Lu)"
+                     Mtime.pp cb.t_idletime rxtcur);
+      Option.value ~default:Mtime.max_stamp span
     in
     if Sequence.equal cb.State.snd_max cb.State.snd_una && Mtime.is_later ~than now then
       (*: The connection is idle and has been for >= 1RTO :*)

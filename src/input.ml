@@ -910,11 +910,15 @@ let di3_ststuff id now conn rcvd_fin ourfinisacked =
   | Closing, _ -> conn'
   | Last_ack, false -> conn'
   | Last_ack, true ->
-    Log.info (fun m -> m "Last_ack and we received a fin on %a"
+    Log.warn (fun m -> m "Last_ack and we received a fin on %a"
                  Connection.pp id);
-    assert false
+    (* let's avoid assert false here *)
+    conn'
   | Time_wait, _ -> enter_time_wait
-  | _ -> assert false
+  | x, f ->
+    Log.warn (fun m -> m "%a on %a, received fin? %B" pp_fsm x Connection.pp id f);
+    (* avoid assert false *)
+    conn'
 
 let deliver_in_3 m now id conn seg flag ack =
   m "deliver-in-3";
