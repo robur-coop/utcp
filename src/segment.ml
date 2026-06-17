@@ -272,7 +272,7 @@ let tcp_output_required now conn =
         Mtime.add_span cb.State.t_idletime (Mtime.Span.of_uint64_ns rxtcur)
       in
       if span = None then
-        Log.warn (fun m -> m "span overflow (idle %a rxtcur %Lu)"
+        Log.warn (fun m -> m "(tcp_output_required) span overflow (idle %a rxtcur %Lu)"
                      Mtime.pp cb.t_idletime rxtcur);
       Option.value ~default:Mtime.max_stamp span
     in
@@ -364,7 +364,7 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
         Mtime.add_span cb.State.t_idletime (Mtime.Span.of_uint64_ns rxtcur)
       in
       if span = None then
-        Log.warn (fun m -> m "span overflow (idle %a rxtcur %Lu)"
+        Log.warn (fun m -> m "(tcp_output_really_helper) span overflow (idle %a rxtcur %Lu)"
                      Mtime.pp cb.t_idletime rxtcur);
       Option.value ~default:Mtime.max_stamp span
     in
