@@ -1,3 +1,7 @@
+# 0.0.5 (2026-06-17)
+
+* Avoid assert false, also cleanup log messages (#70 @hannesm)
+
 # 0.0.4 (2026-05-23)
 
 * Deuplicate the metrics sources, there's no need for each stack constructing
