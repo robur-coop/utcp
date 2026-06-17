@@ -1,3 +1,9 @@
+# 0.0.4 (2026-05-23)
+
+* Deuplicate the metrics sources, there's no need for each stack constructing
+  their own value. The "stack-id" is present as tag in each measurement.
+  (#69 @hannesm)
+
 # 0.0.3 (2026-04-30)
 
 * Fix sequence number arithmetics, stick to unsigned int32 with "serial number
