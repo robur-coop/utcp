@@ -387,7 +387,6 @@ let run_timers tcp now n =
   in
   go tcp [] [] n
 
-
 let test_window_probe =
   (* NOTE(dinosaure): here, we are the receiver and our receive buffer fills
      up ([rcv_wnd] = 0, it becomes full). The peer is in persist mode and sends
@@ -509,5 +508,105 @@ let test_window_probe =
   ; "out-of-window RST is dropped", `Quick,
     rst_out_of_window_is_dropped ]
 
+let test_close_wait =
+  let now = Mtime.of_uint64_ns 0L in
+  let handle tcp seg =
+    let data = Segment.encode_and_checksum now ~src:your_ip ~dst:my_ip seg in
+    handle_buf tcp now ~src:your_ip ~dst:my_ip data
+  in
+  let established () =
+    let ctr = ref 0 in
+    let fetch_and_incr () = incr ctr; !ctr in
+    let tcp = start_listen (empty fetch_and_incr "") listen_port in
+    let syn = { basic_seg with flag = Some `Syn ; seq = initial_seq } in
+    (* SYN ([out] should be SYN+ACK) *)
+    let tcp, _ev, _out = handle tcp syn in
+    let ack = { basic_seg with seq = Sequence.incr initial_seq ;
+                               ack = Some (Sequence.incr rng_seq) ;
+                               window = 1 lsl 16 - 1 } in
+    (* ACK (we should be in the [Established] mode) *)
+    let tcp, ev, _out = handle tcp ack in
+    let id = match ev with
+      | Some (`Established (id, None)) -> id
+      | _ -> Alcotest.fail "expected an ESTABLISHED event"
+    in
+    let tcp, rcv_cond = match recv tcp now id with
+      | Ok (tcp, _, cond, _) -> tcp, cond
+      | Error _ -> Alcotest.fail "recv failed"
+    in
+    let tcp, snd_cond = match send tcp now id "" with
+      | Ok (tcp, _, cond, _) -> tcp, cond
+      | Error _ -> Alcotest.fail "send failed"
+    in
+    tcp, id, rcv_cond, snd_cond
+  in
+  let fin = { basic_seg with flag = Some `Fin ; push = true ;
+                             seq = Sequence.incr initial_seq ;
+                             ack = Some (Sequence.incr rng_seq) ;
+                             window = 1 lsl 16 - 1 ;
+                             payload_len = 4 ; payload = [ "bye!" ] }
+  and rst = { basic_seg with flag = Some `Rst ;
+                             seq = Sequence.incr initial_seq }
+  in
+  let fin_on_established () =
+    (* NOTE(dinosaure): the aim here is to demonstrate that a client can
+       'half-close' a connection. In other words, the client signals that it
+       will no longer send any bytes, but the server can still send data. We
+       must also ensure that the 'conditions' are properly released.
+
+       [C]: Client
+       [S]: Server
+       [s]: state of the server
+
+       C: SYN ->            ACK -> FIN ->
+       S:        SYN+ACK ->     |               ACK ->
+       s:                       | [ESTABLISHED]     | [CLOSE_WAIT] *)
+    let tcp, id, rcv_cond, snd_cond = established () in
+    (* FIN ([out] should be ACK) *)
+    let tcp, ev, _out = handle tcp fin in
+    begin match ev with
+    | Some (`Signal (_, conds)) ->
+      Alcotest.(check (list int)) "the reader (and writer) is woken up"
+        [ rcv_cond ; snd_cond ] conds
+    | Some (`Drop _) -> Alcotest.fail "unexpected drop"
+    | _ -> Alcotest.fail "expected a signal" end;
+    (* NOTE(dinosaure: The reader drains the pending data, and must observes
+       [Eof] then. *)
+    let tcp = match recv tcp now id with
+      | Ok (tcp, bufs, _, _) ->
+        Alcotest.(check string) "bye!"
+          "bye!" (String.concat "" bufs) ;
+        tcp
+      | Error _ -> Alcotest.fail "expected recv to deliver the pending data"
+    in
+    let tcp = match recv tcp now id with
+      | Error `Eof -> tcp
+      | Ok _ -> Alcotest.fail "expected eof"
+      | Error _ -> Alcotest.fail "expected eof"
+    in
+    (* NOTE(dinosaure): half-close: the connection is still usable for sending
+       bytes by the server. *)
+    match send tcp now id "ok" with
+    | Ok (_, 2, _, _) -> ()
+    | Ok _ -> Alcotest.fail "impossible to send data in CLOSE_WAIT"
+    | Error _ -> Alcotest.fail "impossible to send data in CLOSE_WAIT" in
+  let rst_on_established () =
+    (* NOTE(dinosaure): the aim here is to show that we are correctly consuming
+       our conditions despite an [RST] being sent by the client. *)
+    let tcp, id, rcv_cond, snd_cond = established () in
+    let tcp, ev, _out = handle tcp rst in
+    begin match ev with
+    | Some (`Drop (_, None, conds)) ->
+      Alcotest.(check (list int)) "all waiters are woken up with eof"
+        [ rcv_cond ; snd_cond ] conds
+    | Some (`Drop (_, Some _, _)) ->
+      Alcotest.fail "we don't have any readers"
+    | _ -> Alcotest.fail "expected a drop event on RST reception" end;
+    match recv tcp now id with
+    | Error `Not_found -> ()
+    | _ -> Alcotest.fail "unexpected connection" in
+  [ "FIN in Established signals, does not drop", `Quick, fin_on_established
+  ; "RST in Established drops and wakes all waiters", `Quick, rst_on_established ]
+
 let tests =
-  test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd @ test_window_probe
+  test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd @ test_window_probe @ test_close_wait
