@@ -13,8 +13,22 @@ let generate_port () =
   (* as required in RFC 6056, 3.2 *)
   1024 + Randomconv.int ~bound:64512 Mirage_crypto_rng.generate
 
+let ephemeral_port ~src ~dst ~dst_port connections =
+  let rec go () =
+    let src_port = generate_port () in
+    if CM.mem (src, src_port, dst, dst_port) connections then
+      go ()
+    else src_port
+  in
+  go ()
+
 let connect ~src ?src_port ~dst ~dst_port t now =
-  let src_port = match src_port with None -> generate_port () | Some p -> p in
+  let src_port =
+    match src_port with
+    | None ->
+      ephemeral_port ~src ~dst ~dst_port t.connections
+    | Some p -> p
+  in
   let id = src, src_port, dst, dst_port in
   Tracing.debug (fun m -> m "%a [%a] connect" Connection.pp id Mtime.pp now);
   let conn =
