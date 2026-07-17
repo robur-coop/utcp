@@ -177,6 +177,7 @@ let basic_seg = {
 let initial_seq = Sequence.of_int32 42l
 and initial_ack = Sequence.of_int32 23l
 and rng_seq = Sequence.of_int32 0xA5A5A5A5l
+let sequence = Alcotest.testable Sequence.pp Sequence.equal
 
 (* 8 different input segments for testing our state machine *)
 let test_segs ack payload =
@@ -376,5 +377,137 @@ let test_syn_rcvd =
   in
   test_all " " (Sequence.incr rng_seq) String.empty
 
+let run_timers tcp now n =
+  let rec go tcp drops outs = function
+    | 0 -> tcp, List.rev drops, List.rev outs
+    | n ->
+      let tcp, drops', outs' = timer tcp now in
+      go tcp (List.rev_append drops' drops) (List.rev_append outs' outs)
+        (pred n)
+  in
+  go tcp [] [] n
+
+
+let test_window_probe =
+  (* NOTE(dinosaure): here, we are the receiver and our receive buffer fills
+     up ([rcv_wnd] = 0, it becomes full). The peer is in persist mode and sends
+     zero-window probes (one byte past our window, thus unacceptable). Such a
+     probe must be answered with an immediate ACK: it is the only way for the
+     client to discover that our window has reopened once the user drained
+     [rcvq] (the window update sent by [recv] can get lost). Dropping the probe
+     silently can lead to a deadlock: the server must send a window update
+     packet but this one can be lost (for whatever reason). If this packet is
+     lost and if we drop window probe packets, the client will never know when
+     the window has reopened and it will never retry to send back bytes. On the
+     other side, the receiver will always wait bytes from the client. It's a
+     deadlock!
+
+     Here, we simulate such situation and expect an ACK when we send a
+     window-probe packet. We also ensure that RST packets are still dropped (the
+     initial behavior) in order to prevent the "blind-reset" attack (see RFC
+     5961 § 3.2). *)
+  let handle tcp now seg =
+    let data = Segment.encode_and_checksum now ~src:your_ip ~dst:my_ip seg in
+    handle_buf tcp now ~src:your_ip ~dst:my_ip data
+  in
+  let _0ns = Mtime.of_uint64_ns 0L in
+  let established_and_filled () =
+    let tcp = start_listen (empty (Fun.const ()) "") listen_port in
+    let syn = { basic_seg with flag = Some `Syn ; seq = initial_seq } in
+    (* SYN ([out] should be SYN+ACK) *)
+    let tcp, _ev, _out = handle tcp _0ns syn in
+    let ack = { basic_seg with seq = Sequence.incr initial_seq ;
+                               ack = Some (Sequence.incr rng_seq) ;
+                               window = 1 lsl 16 - 1 } in
+    (* ACK (we should be in the [Established] mode) *)
+    let tcp, ev, _out = handle tcp _0ns ack in
+    let id = match ev with
+      | Some (`Established (id, _)) -> id
+      | _ -> Alcotest.fail "expected an ESTABLISHED event"
+    in
+    let window = 1 lsl 16 - 1 in
+    let data = { basic_seg with seq = Sequence.incr initial_seq ;
+                                ack = Some (Sequence.incr rng_seq) ;
+                                window = 1 lsl 16 - 1 ;
+                                payload_len = window ;
+                                payload = [ String.make window 'A' ] } in
+    let tcp, _ev, _out = handle tcp _0ns data in
+    (* NOTE(dinosaure): the delayed ACK tells us how much space is left in
+       [rcvq]. We can retrieve it after 100ms (we chosen 200ms), see
+       [Params.tcptv_delack]. We would like to trigger [fast_timer] AND
+       [slow_timer], so we iterate [run_timers] with [10]:
+       - which is a multiple of [2]
+       - and a multiple of [5] *)
+    let _200ms = Mtime.of_uint64_ns (Duration.of_ms 200) in
+    let tcp, drops, out = run_timers tcp _200ms 10 in
+    Alcotest.(check int) "no connection is dropped" 0 (List.length drops);
+    let left = match out with
+      | [ (_, _, seg) ] -> seg.Segment.window
+      | _ -> Alcotest.fail "expected a (delayed) ACK for the data"
+    in
+    (* fill the rest of the receive buffer: [rcv_wnd] falls to zero *)
+    let tcp = match left with
+      | 0 -> tcp
+      | left ->
+        let data = { data with seq = Sequence.addi initial_seq (1 + window) ;
+                               payload_len = left ;
+                               payload = [ String.make left 'B' ] } in
+        let tcp, _ev, _out = handle tcp _200ms data in
+        tcp
+    in
+    (* NOTE(dinosaure): calculate our next sequence number for our probe *)
+    let filled = window + left in
+    let probe_seq = Sequence.addi initial_seq (1 + filled) in
+    tcp, id, probe_seq, filled
+  in
+  let probe seq = { basic_seg with seq ;
+                                   ack = Some (Sequence.incr rng_seq) ;
+                                   window = 1 lsl 16 - 1 ;
+                                   payload_len = 1 ; payload = [ "X" ] } in
+  let _400ms = Mtime.of_uint64_ns (Duration.of_ms 400) in
+  let probe_is_acked () =
+    let tcp, id, probe_seq, filled = established_and_filled () in
+    (* first probe *)
+    let tcp, _ev, out = handle tcp _400ms (probe probe_seq) in
+    begin match out with
+     | [ (_, _, seg) ] ->
+       Alcotest.(check bool) "ACK"
+         true (seg.Segment.ack <> None && seg.Segment.flag = None);
+       Alcotest.(check int) "window-zero"
+         0 seg.Segment.window;
+       Alcotest.(check (option sequence)) "unacceptable probe"
+         (Some probe_seq) seg.Segment.ack;
+     | _ -> Alcotest.fail "expected ACK" end;
+    (* read everything *)
+    let tcp = match recv tcp _400ms id with
+      | Ok (tcp, bufs, _, _out) ->
+        Alcotest.(check int) "rcvq" filled
+          (String.length (String.concat "" bufs));
+        tcp
+      | Error _ -> Alcotest.fail "no pending data"
+    in
+    (* second probe *)
+    let tcp, _ev, _out = handle tcp _400ms (probe probe_seq) in
+    match recv tcp _400ms id with
+    | Ok (_, bufs, _, _) ->
+      Alcotest.(check string) "probe" "X" (String.concat "" bufs)
+    | Error _ -> Alcotest.fail "probe dropped"
+  in
+  let rst_out_of_window_is_dropped () =
+    let tcp, id, probe_seq, _filled = established_and_filled () in
+    (* RST packet *)
+    let rst = { basic_seg with flag = Some `Rst ;
+                               seq = Sequence.addi probe_seq 4242 } in
+    let tcp, _ev, out = handle tcp _400ms rst in
+    Alcotest.(check int) "no reply" 0 (List.length out);
+    match recv tcp _400ms id with
+    | Ok _ -> ()
+    | Error _ -> Alcotest.fail "connection deleted"
+  in
+  [ "zero-window probe is acked", `Quick,
+    probe_is_acked
+  ; "out-of-window RST is dropped", `Quick,
+    rst_out_of_window_is_dropped ]
+
 let tests =
-  test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd
+  test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd @ test_window_probe

@@ -1063,31 +1063,51 @@ let handle_conn t now id conn seg =
       let conn, reply = deliver_in_1 t.mk_notify m t.stats now id seg in
       Ok ({ t with connections = CM.add id conn t.connections }, [ reply ])
     | _ ->
-      let* () =
-        guard (in_window conn.control_block seg)
-          (`Drop (fun () -> Fmt.str "in_window seq %a seql %u rcv_nxt %a rcv_wnd %u"
-                     Sequence.pp seg.Segment.seq seg.payload_len
-                     Sequence.pp conn.control_block.rcv_nxt conn.control_block.rcv_wnd))
-      in
-      (* RFC5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
-      match seg.Segment.flag, seg.Segment.ack with
-      | Some `Rst, _ ->
-        let* seg' = deliver_in_7 m id conn seg in
-        Ok (t, [ seg' ])
-      | Some `Syn, _ ->
-        let* seg' = deliver_in_8 m id conn seg in
-        Ok (t, [ seg' ])
-      | _, None -> Error (`Drop (fun () -> "no ACK"))
-      | f, Some ack ->
-        let* conn', out = deliver_in_3 m now id conn seg f ack in
-        match conn' with
-        | None -> Ok (drop (), [])
-        | Some conn' ->
-          let conn'', out' = match out with
-            | [] -> Segment.tcp_output_perhaps now id conn'
-            | x -> conn', x
-          in
-          Ok (add conn'', out')
+      if not (in_window conn.control_block seg) then
+        if seg.Segment.flag = Some `Rst then
+          Error (`Drop (fun () -> Fmt.str "RST out of window seq %a rcv_nxt %a"
+                           Sequence.pp seg.Segment.seq
+                           Sequence.pp conn.control_block.rcv_nxt))
+        else begin
+          (* RFC9293 3.10.7.4 (Other states, [_]):
+
+             If an incoming segment is not acceptable, an acknowledgment should
+             be sent in reply (unless the RST bit is set, if so drop the segment
+             and return):
+
+             <SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK> *)
+          Log.debug (fun m ->
+              m "%a unacceptable segment seq %a seql %u rcv_nxt %a rcv_wnd %u, acking"
+                Connection.pp id
+                Sequence.pp seg.Segment.seq seg.payload_len
+                Sequence.pp conn.control_block.rcv_nxt
+                conn.control_block.rcv_wnd);
+          let control_block =
+            { conn.control_block with tf_shouldacknow = true } in
+          let conn' = { conn with control_block } in
+          let conn', out = Segment.tcp_output_perhaps now id conn' in
+          Ok (add conn', out)
+        end
+      else
+        (* RFC5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
+        match seg.Segment.flag, seg.Segment.ack with
+        | Some `Rst, _ ->
+          let* seg' = deliver_in_7 m id conn seg in
+          Ok (t, [ seg' ])
+        | Some `Syn, _ ->
+          let* seg' = deliver_in_8 m id conn seg in
+          Ok (t, [ seg' ])
+        | _, None -> Error (`Drop (fun () -> "no ACK"))
+        | f, Some ack ->
+          let* conn', out = deliver_in_3 m now id conn seg f ack in
+          match conn' with
+          | None -> Ok (drop (), [])
+          | Some conn' ->
+            let conn'', out' = match out with
+              | [] -> Segment.tcp_output_perhaps now id conn'
+              | x -> conn', x
+            in
+            Ok (add conn'', out')
   in
   match r with
   | Ok (t, a) -> t, a
