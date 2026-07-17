@@ -1186,7 +1186,14 @@ let handle_buf t now ~src ~dst data =
           | None -> None, None
           | Some s -> Some s.rcv_notify, Some s.snd_notify
         in
-        Some (`Drop (id, None, Option.to_list rcv_n @ Option.to_list snd_n))
+        (* here, we preserve the same semantic as below, if [rcv_data || rcvd_fin],
+           we shoud notify [Ok _] to the reader. Otherwise, we notify [Eof]. *)
+        let opt, ns =
+          if rcv_data || rcvd_fin
+          then rcv_n, []
+          else None, Option.to_list rcv_n in
+        let ns = ns @ Option.to_list snd_n in
+        Some (`Drop (id, opt, ns))
       | _, _, false, false ->
         (* nothing to do, the connection is not present and was not. *)
         None
