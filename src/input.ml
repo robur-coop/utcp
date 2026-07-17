@@ -1171,8 +1171,8 @@ let handle_buf t now ~src ~dst data =
       (* impossible case, if [is_present = false], [is_established == false]
          also (see when we introspect [new_conn]). If [was_present = false],
          [was_established == false] also (see when we introspect [old_conn]). *)
-      | _, true, _, false -> assert false
-      | true, _, false, _ -> assert false
+      | _, true, _, false -> None
+      | true, _, false, _ -> None
       | false, true, _, _ ->
         (* active open, there's likely someone waiting *)
         let cond = if was_syn_sent then rcv_n else None in
