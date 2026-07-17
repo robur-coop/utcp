@@ -87,7 +87,7 @@ let initial_packet state ip rng_data now ~src ~dst tcp =
     (* we're the client - set ISS to match *)
     Bytes.set_int32_le rng_data 0 (Cstruct.BE.get_uint32 tcp 4);
     let state, flow, _cond, out =
-      Utcp.connect ~src ~src_port ~dst ~dst_port state now
+      Result.get_ok (Utcp.connect ~src ~src_port ~dst ~dst_port state now)
     in
     print_out out;
     state, None, Some flow

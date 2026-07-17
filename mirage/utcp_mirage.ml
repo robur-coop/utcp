@@ -151,24 +151,29 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
 
   let create_connection ?keepalive:_ t (dst, dst_port) =
     let src = Ip.src t.ip ~dst in
-    let tcp, id, cond, seg = Utcp.connect ~src ~dst ~dst_port t.tcp (now ()) in
-    t.tcp <- tcp;
-    output_ip t seg >>= function
-    | Error e ->
-      Log.err (fun m -> m "%a error sending syn: %a" Utcp.pp_flow id Ip.pp_error e);
-      Lwt.return (Error `Refused)
-    | Ok () ->
-      Lwt_condition.wait cond >|= fun r ->
-      match r with
-      | Ok () -> Ok (t, id)
-      | Error `Eof ->
-        Log.err (fun m -> m "%a error establishing connection (timeout)" Utcp.pp_flow id);
-        (* TODO better error *)
-        Error `Timeout
-      | Error `Msg msg ->
-        Log.err (fun m -> m "%a error establishing connection: %s" Utcp.pp_flow id msg);
-        (* TODO better error *)
-        Error `Timeout
+    match Utcp.connect ~src ~dst ~dst_port t.tcp (now ()) with
+    | Error `Msg msg ->
+      Log.err (fun m -> m "error establishing connection to %a:%u: %s" Ipaddr.pp dst dst_port msg);
+      (* TODO better error *)
+      Lwt.return (Error `Timeout)
+    | Ok (tcp, id, cond, seg) ->
+      t.tcp <- tcp;
+      output_ip t seg >>= function
+      | Error e ->
+        Log.err (fun m -> m "%a error sending syn: %a" Utcp.pp_flow id Ip.pp_error e);
+        Lwt.return (Error `Refused)
+      | Ok () ->
+        Lwt_condition.wait cond >|= fun r ->
+        match r with
+        | Ok () -> Ok (t, id)
+        | Error `Eof ->
+          Log.err (fun m -> m "%a error establishing connection (timeout)" Utcp.pp_flow id);
+          (* TODO better error *)
+          Error `Timeout
+        | Error `Msg msg ->
+          Log.err (fun m -> m "%a error establishing connection: %s" Utcp.pp_flow id msg);
+          (* TODO better error *)
+          Error `Timeout
 
   let input t ~src ~dst data =
     let tcp, ev, segs = Utcp.handle_buf t.tcp (now ()) ~src ~dst data in
