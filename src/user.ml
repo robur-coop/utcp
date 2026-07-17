@@ -8,11 +8,13 @@ let ( let* ) = Result.bind
 let src = Logs.Src.create "tcp.user" ~doc:"TCP user"
 module Log = (val Logs.src_log src : Logs.LOG)
 
+let generate_port () =
+  (* 64512 + 1024 -> 65536, the bound is exclusive in Randomconv *)
+  (* as required in RFC 6056, 3.2 *)
+  1024 + Randomconv.int ~bound:64512 Mirage_crypto_rng.generate
+
 let connect ~src ?src_port ~dst ~dst_port t now =
-  let src_port = match src_port with
-    | None -> Randomconv.int16 Mirage_crypto_rng.generate
-    | Some p -> p
-  in
+  let src_port = match src_port with None -> generate_port () | Some p -> p in
   let id = src, src_port, dst, dst_port in
   Tracing.debug (fun m -> m "%a [%a] connect" Connection.pp id Mtime.pp now);
   let conn =
