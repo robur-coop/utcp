@@ -327,7 +327,7 @@ let tcp_output_required now conn =
     cb.State.tf_shouldacknow
   in
   let persist_fun =
-    let cant_send = not do_output && Rope.length conn.sndq = 0 && cb.State.tt_rexmt = None in
+    let cant_send = not do_output && Rope.length conn.sndq <> 0 && cb.State.tt_rexmt = None in
     let window_shrunk = win = 0 && snd_wnd_unused < 0 in  (*: [[win = 0]] if in [[SYN_SENT]], but still may send FIN :*)
                                                      (* (bsd_arch arch ==> tcp_sock.st <> SYN_SENT)) in *)
     if cant_send then  (* takes priority over window_shrunk; note this needs to be checked *)
