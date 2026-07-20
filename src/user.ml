@@ -8,10 +8,34 @@ let ( let* ) = Result.bind
 let src = Logs.Src.create "tcp.user" ~doc:"TCP user"
 module Log = (val Logs.src_log src : Logs.LOG)
 
+let max_port = 64512 (* 65536 - 1024 *)
+
+let generate_port () =
+  (* as required in RFC 6056, 3.2 *)
+  1024 + Randomconv.int ~bound:max_port Mirage_crypto_rng.generate
+
+let ephemeral_port ~src ~dst ~dst_port connections =
+  let rec go attempt =
+    if attempt = max_port then
+      Error (`Msg "no free port found")
+    else
+      let src_port = generate_port () in
+      if CM.mem (src, src_port, dst, dst_port) connections then
+        go (succ attempt)
+      else
+        Ok src_port
+  in
+  go 0
+
 let connect ~src ?src_port ~dst ~dst_port t now =
-  let src_port = match src_port with
-    | None -> Randomconv.int16 Mirage_crypto_rng.generate
-    | Some p -> p
+  let* src_port =
+    match src_port with
+    | None -> ephemeral_port ~src ~dst ~dst_port t.connections
+    | Some p ->
+      if CM.mem (src, p, dst, dst_port) t.connections then
+        Error (`Msg "TCP quadruple already in use")
+      else
+        Ok p
   in
   let id = src, src_port, dst, dst_port in
   Tracing.debug (fun m -> m "%a [%a] connect" Connection.pp id Mtime.pp now);
@@ -43,7 +67,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
     CM.add id conn t.connections
   in
   Stats.incr_active t.stats;
-  { t with connections }, id, conn.rcv_notify, (src, dst, seg)
+  Ok ({ t with connections }, id, conn.rcv_notify, (src, dst, seg))
 
 (* shutdown_1 and shutdown_3 *)
 let shutdown t now id v =

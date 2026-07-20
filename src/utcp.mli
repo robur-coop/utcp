@@ -171,7 +171,7 @@ val handle_buf : 'a state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
     random if not provided. The output is a fresh TCP state, the flow, a
     notification, and a segment to send out. *)
 val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
-  'a state -> Mtime.t -> ('a state * flow * 'a * output)
+  'a state -> Mtime.t -> ('a state * flow * 'a * output, [ `Msg of string ]) result
 
 (** [close state now flow] closes [flow]. It results either in a fresh TCP state
     and a list of segments to send out, or an error (if the [flow] cannot be
@@ -322,7 +322,7 @@ end
 
 module User : sig
   val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
-    'a State.t -> Mtime.t -> ('a State.t * flow * 'a * output)
+    'a State.t -> Mtime.t -> ('a State.t * flow * 'a * output, [ `Msg of string ]) result
 end
 
 module Checksum = Checksum

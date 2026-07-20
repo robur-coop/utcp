@@ -277,7 +277,8 @@ let test_listen =
 
 let tcp_syn_sent =
   let tcp', _id, _signal, _out =
-    User.connect ~src:my_ip ~src_port:listen_port ~dst:your_ip ~dst_port:src_port tcp (Mtime.of_uint64_ns 0L)
+    Result.get_ok
+      (User.connect ~src:my_ip ~src_port:listen_port ~dst:your_ip ~dst_port:src_port tcp (Mtime.of_uint64_ns 0L))
   in
   tcp'
 
