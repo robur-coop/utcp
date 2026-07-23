@@ -132,6 +132,10 @@ let send t now id ?(off = 0) ?len buf =
     | Some len -> len
     | None -> String.length buf - off
   in
+  let* () =
+    guard (off >= 0 && len >= 0 && off <= String.length buf - len)
+      (`Msg "invalid bounds for buffer")
+  in
   Tracing.debug (fun m -> m "%a [%a] send %u %s" Connection.pp id Mtime.pp now
                     len (Base64.encode_string (String.sub buf off len)));
   match CM.find_opt id t.connections with
@@ -154,6 +158,10 @@ let force_enqueue t now id ?(off = 0) ?len buf =
   let len = match len with
     | Some len -> len
     | None -> String.length buf - off
+  in
+  let* () =
+    guard (off >= 0 && len >= 0 && off <= String.length buf - len)
+      (`Msg "invalid bounds for buffer")
   in
   Tracing.debug (fun m -> m "%a [%a] force enqueue %u %s" Connection.pp id Mtime.pp now
                     len (Base64.encode_string (String.sub buf off len)));
