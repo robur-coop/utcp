@@ -275,7 +275,7 @@ let jump () filename ip =
         | `Close ->
           let flow = Option.get !flow in
           (match Utcp.close state tm flow with
-           | Ok (state, out) ->
+           | Ok (state, _, out) ->
              List.iter print_out out;
              state, true, succ idx
            | Error `Msg s ->

@@ -99,7 +99,11 @@ let shutdown t now id v =
         else
           Segment.tcp_output_perhaps now id conn'
       in
-      Ok ({ t with connections = CM.add id conn' t.connections }, out)
+      let n =
+        (if read then [ conn.rcv_notify ] else []) @
+        (if write then [ conn.snd_notify ] else [])
+      in
+      Ok ({ t with connections = CM.add id conn' t.connections }, n, out)
     else
       Error (`Msg "not connected")
 
@@ -125,7 +129,8 @@ let close t now id =
       else
         Segment.tcp_output_perhaps now id conn'
     in
-    Ok ({ t with connections = CM.add id conn' t.connections }, out)
+    let n = [ conn.rcv_notify ; conn.snd_notify ] in
+    Ok ({ t with connections = CM.add id conn' t.connections }, n, out)
 
 let send t now id ?(off = 0) ?len buf =
   let len = match len with

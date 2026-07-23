@@ -127,8 +127,9 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
 
   let close (t, flow) =
     match Utcp.close t.tcp (now ()) flow with
-    | Ok (tcp, segs) ->
+    | Ok (tcp, cs, segs) ->
       t.tcp <- tcp ;
+      List.iter (fun c -> Lwt_condition.signal c (Error `Eof)) cs;
       output_ign t segs
     | Error `Msg msg ->
       Log.err (fun m -> m "%a error in close: %s" Utcp.pp_flow flow msg);
@@ -137,8 +138,9 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
 
   let shutdown (t, flow) mode =
     match Utcp.shutdown t.tcp (now ()) flow mode with
-    | Ok (tcp, segs) ->
+    | Ok (tcp, cs, segs) ->
       t.tcp <- tcp ;
+      List.iter (fun c -> Lwt_condition.signal c (Error `Eof)) cs;
       output_ign t segs
     | Error `Msg msg ->
       Log.err (fun m -> m "%a error in shutdown: %s" Utcp.pp_flow flow msg);

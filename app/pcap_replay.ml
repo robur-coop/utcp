@@ -197,7 +197,7 @@ let jump () filename ip =
                  | Error `Msg msg ->
                    Logs.err (fun m -> m "failure during close: %s" msg);
                    assert false
-                 | Ok (state, out) ->
+                 | Ok (state, _, out) ->
                    List.iter print_out out;
                    state)
               else

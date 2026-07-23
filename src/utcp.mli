@@ -159,7 +159,7 @@ val timer : 'a state -> Mtime.t ->
 
 (** [handle_buf state now ~src ~dst buf] handles the buffer [buf] for the TCP
     stack. This results in a fresh state, optionally a change in the flow
-    (Established, Drop, Signal), and a list of segments to send. *)
+    (Established, Drop, Received, Send), and a list of segments to send. *)
 val handle_buf : 'a state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
   Cstruct.t ->
   ('a state * [ `Established of flow * [ `Active | `Passive ]
@@ -174,17 +174,19 @@ val handle_buf : 'a state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
 val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
   'a state -> Mtime.t -> ('a state * flow * 'a * output, [ `Msg of string ]) result
 
-(** [close state now flow] closes [flow]. It results either in a fresh TCP state
-    and a list of segments to send out, or an error (if the [flow] cannot be
-    found, or some other error). *)
+(** [close state now flow] closes [flow]. It results either in a fresh TCP
+    state, a list of changes in the flow (conditions to be notified), and a list
+    of segments to send out, or an error (if the [flow] cannot be found, or some
+    other error). *)
 val close : 'a state -> Mtime.t -> flow ->
-  ('a state * output list, [ `Not_found | `Msg of string ]) result
+  ('a state * 'a list * output list, [ `Not_found | `Msg of string ]) result
 
 (** [shutdown state now flow direction] shuts the [flow] down in the given
-    [direction]. It results in a frsh TCP state and a list of segments to send
-    out, or an error. *)
+    [direction]. It results in a fresh TCP state, a list of changes in the flow
+    (conditions to be notified), and a list of segments to send out, or an
+    error. *)
 val shutdown : 'a state -> Mtime.t -> flow -> [ `read | `write | `read_write ] ->
-  ('a state * output list, [ `Not_found | `Msg of string ]) result
+  ('a state * 'a list * output list, [ `Not_found | `Msg of string ]) result
 
 (** [recv state now flow] receives data for [flow]. The read notification is
     also provided - if there's no awaiting data, this notification can be waited
