@@ -1140,13 +1140,15 @@ let handle_buf t now ~src ~dst data =
     (* deliver_in_3a deliver_in_4 are done now! *)
     let t', outs = handle_segment t now id seg in
     let ev =
+      let old_conn = CM.find_opt id t.connections in
+      let new_conn = CM.find_opt id t'.connections in
       let was_established, was_syn_sent, was_present =
-        match CM.find_opt id t.connections with
+        match old_conn with
         | None -> false, false, false
         | Some s -> s.tcp_state = Established, s.tcp_state = Syn_sent, true
       in
       let is_established, is_present, rcv_data, snd_space, rcv_n, snd_n =
-        match CM.find_opt id t'.connections with
+        match new_conn with
         | None -> false, false, false, false, None, None
         | Some s ->
           s.tcp_state = Established,
@@ -1155,23 +1157,49 @@ let handle_buf t now ~src ~dst data =
           Rope.length s.sndq < s.sndbufsize,
           Some s.rcv_notify, Some s.snd_notify
       in
+      let rcvd_fin =
+        (* the peer shut down its write side (half-close): a pending reader
+           must be woken up (it will drain the remaining data and observe
+           Eof on the next recv), but the connection stays usable for
+           sending (CLOSE_WAIT). See [di3_ststuff] to see when we set
+           [cantrcvmore]. *)
+        match old_conn, new_conn with
+        | Some o, Some n -> not o.cantrcvmore && n.cantrcvmore
+        | _ -> false
+      in
       match was_established, is_established, was_present, is_present with
+      (* impossible case, if [is_present = false], [is_established == false]
+         also (see when we introspect [new_conn]). If [was_present = false],
+         [was_established == false] also (see when we introspect [old_conn]). *)
+      | _, true, _, false -> None
+      | true, _, false, _ -> None
       | false, true, _, _ ->
         (* active open, there's likely someone waiting *)
         let cond = if was_syn_sent then rcv_n else None in
         Some (`Established (id, cond))
-      | true, false, _, _
-      | _, _, true, false ->
-        let opt_cond, conds =
-          if rcv_data then
-            rcv_n, Option.to_list snd_n
-          else
-            None, Option.to_list rcv_n @ Option.to_list snd_n
+      | _, false, true, false ->
+        (* the connection disappeared (RST or final close): every waiter must
+           be woken up with Eof. The notify conditions are taken from the
+           previous state since the connection no longer exists in [t']. *)
+        let rcv_n, snd_n =
+          match old_conn with
+          | None -> None, None
+          | Some s -> Some s.rcv_notify, Some s.snd_notify
         in
-        Some (`Drop (id, opt_cond, conds))
-      | _ ->
+        (* here, we preserve the same semantic as below, if [rcv_data || rcvd_fin],
+           we shoud notify [Ok _] to the reader. Otherwise, we notify [Eof]. *)
+        let opt, ns =
+          if rcv_data || rcvd_fin
+          then rcv_n, []
+          else None, Option.to_list rcv_n in
+        let ns = ns @ Option.to_list snd_n in
+        Some (`Drop (id, opt, ns))
+      | _, _, false, false ->
+        (* nothing to do, the connection is not present and was not. *)
+        None
+      | _, _, _, true ->
         match
-          (if rcv_data then Option.to_list rcv_n else []) @
+          (if rcv_data || rcvd_fin then Option.to_list rcv_n else []) @
           (if snd_space then Option.to_list snd_n else [])
         with
         | [] -> None
