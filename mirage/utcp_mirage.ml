@@ -176,30 +176,26 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
           Error `Timeout
 
   let input t ~src ~dst data =
-    let tcp, ev, segs = Utcp.handle_buf t.tcp (now ()) ~src ~dst data in
+    let tcp, evs, segs = Utcp.handle_buf t.tcp (now ()) ~src ~dst data in
     t.tcp <- tcp;
-    Option.fold ~none:()
-      ~some:(function
-          | `Established (id, cond) ->
-            (match cond with
-             | None ->
-               let (_, port), _ = Utcp.peers id in
-               (match Port_map.find_opt port t.listeners with
-                | None ->
-                  Log.debug (fun m -> m "%a not found in waiting or listeners"
-                                Utcp.pp_flow id)
-                | Some cb ->
-                  (* NOTE we start an asynchronous task with the callback *)
-                  Lwt.async (fun () -> cb (t, id)))
-             | Some cond ->
-               Lwt_condition.signal cond (Ok ()))
-          | `Drop (_id, c_opt, cs) ->
-            List.iter (fun c -> Lwt_condition.signal c (Error `Eof)) cs;
-            Option.iter (fun c -> Lwt_condition.signal c (Ok ())) c_opt
-          | `Signal (_id, conds) ->
-            List.iter (fun c -> Lwt_condition.signal c (Ok ())) conds
-        )
-      ev;
+    List.iter (function
+        | `Established (id, `Passive) ->
+          let (_, port), _ = Utcp.peers id in
+          (match Port_map.find_opt port t.listeners with
+           | None ->
+             Log.debug (fun m -> m "%a not found in waiting or listeners"
+                           Utcp.pp_flow id)
+           | Some cb ->
+             (* NOTE we start an asynchronous task with the callback *)
+             Lwt.async (fun () -> cb (t, id)))
+        | `Established (_, `Active) -> () (* now ready! *)
+        | `Received (_, what, c) ->
+          let ev = match what with `Eof -> Error `Eof | `Data -> Ok () in
+          Lwt_condition.signal c ev
+        | `Send (_, c) -> Lwt_condition.signal c (Ok ())
+        | `Drop (_, cs) ->
+          List.iter (fun c ->  Lwt_condition.signal c (Error `Eof)) cs)
+      evs;
     (* TODO do not ignore IP write error *)
     output_ign t segs
 

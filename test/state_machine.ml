@@ -420,10 +420,16 @@ let test_window_probe =
                                ack = Some (Sequence.incr rng_seq) ;
                                window = 1 lsl 16 - 1 } in
     (* ACK (we should be in the [Established] mode) *)
-    let tcp, ev, _out = handle tcp _0ns ack in
-    let id = match ev with
-      | Some (`Established (id, _)) -> id
-      | _ -> Alcotest.fail "expected an ESTABLISHED event"
+    let tcp, evs, _out = handle tcp _0ns ack in
+    let id =
+      List.fold_left (fun acc -> function
+          | `Established (id, _) -> Some id
+          | _ -> acc)
+        None evs
+    in
+    let id = match id with
+      | Some x -> x
+      | None -> Alcotest.fail "expected an ESTABLISHED event"
     in
     let window = 1 lsl 16 - 1 in
     let data = { basic_seg with seq = Sequence.incr initial_seq ;
@@ -526,10 +532,17 @@ let test_close_wait =
                                ack = Some (Sequence.incr rng_seq) ;
                                window = 1 lsl 16 - 1 } in
     (* ACK (we should be in the [Established] mode) *)
-    let tcp, ev, _out = handle tcp ack in
-    let id = match ev with
-      | Some (`Established (id, None)) -> id
-      | _ -> Alcotest.fail "expected an ESTABLISHED event"
+    let tcp, evs, _out = handle tcp ack in
+    let id =
+      List.fold_left (fun acc -> function
+          | `Established (id, _) -> Some id
+          | _ -> acc)
+        None evs
+    in
+    let id =
+      match id with
+      | Some x -> x
+      | None -> Alcotest.fail "expected an ESTABLISHED event"
     in
     let tcp, rcv_cond = match recv tcp now id with
       | Ok (tcp, _, cond, _) -> tcp, cond
@@ -562,15 +575,17 @@ let test_close_wait =
        C: SYN ->            ACK -> FIN ->
        S:        SYN+ACK ->     |               ACK ->
        s:                       | [ESTABLISHED]     | [CLOSE_WAIT] *)
-    let tcp, id, rcv_cond, snd_cond = established () in
+    let tcp, id, rcv_cond, _snd_cond = established () in
     (* FIN ([out] should be ACK) *)
-    let tcp, ev, _out = handle tcp fin in
-    begin match ev with
-    | Some (`Signal (_, conds)) ->
-      Alcotest.(check (list int)) "the reader (and writer) is woken up"
-        [ rcv_cond ; snd_cond ] conds
-    | Some (`Drop _) -> Alcotest.fail "unexpected drop"
-    | _ -> Alcotest.fail "expected a signal" end;
+    let tcp, evs, _out = handle tcp fin in
+    let woken =
+      List.fold_left (fun acc -> function
+          | `Received (_, _, n) -> n :: acc
+          | `Send (_, n) -> n :: acc
+          | _ -> acc)
+        [] evs
+    in
+    Alcotest.(check (list int)) "the reader is woken up" [ rcv_cond ] woken;
     (* NOTE(dinosaure: The reader drains the pending data, and must observes
        [Eof] then. *)
     let tcp = match recv tcp now id with
@@ -595,14 +610,15 @@ let test_close_wait =
     (* NOTE(dinosaure): the aim here is to show that we are correctly consuming
        our conditions despite an [RST] being sent by the client. *)
     let tcp, id, rcv_cond, snd_cond = established () in
-    let tcp, ev, _out = handle tcp rst in
-    begin match ev with
-    | Some (`Drop (_, None, conds)) ->
-      Alcotest.(check (list int)) "all waiters are woken up with eof"
-        [ rcv_cond ; snd_cond ] conds
-    | Some (`Drop (_, Some _, _)) ->
-      Alcotest.fail "we don't have any readers"
-    | _ -> Alcotest.fail "expected a drop event on RST reception" end;
+    let tcp, evs, _out = handle tcp rst in
+    let woken =
+      List.fold_left (fun acc -> function
+          | `Drop (_, conds) -> conds
+          | _ -> acc)
+        [] evs
+    in
+    Alcotest.(check (list int)) "all waiters are woken up with eof"
+      [ rcv_cond ; snd_cond ] woken;
     match recv tcp now id with
     | Error `Not_found -> ()
     | _ -> Alcotest.fail "unexpected connection" in

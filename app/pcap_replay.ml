@@ -137,11 +137,13 @@ let jump () filename ip =
           state, f
         else if Ipaddr.compare x dst = 0 then begin
           Logs.info (fun m -> m "replay packet %u" idx);
-          let state, stuff, out = Utcp.handle_buf state mt ~src ~dst tcp in
-          (match stuff with Some (`Established (fl, _)) ->
-             Logs.info (fun m -> m "flow established! (previously %s)"
-                           (match !flow with Some _ -> "SOME" | None -> "none"));
-             flow := Some fl | _ -> ());
+          let state, evs, out = Utcp.handle_buf state mt ~src ~dst tcp in
+          (List.iter (function
+               | `Established (fl, _) ->
+                 Logs.info (fun m -> m "flow established! (previously %s)"
+                               (match !flow with Some _ -> "SOME" | None -> "none"));
+                 flow := Some fl
+               | _ -> ()) evs);
           List.iter print_out out;
           state, None
         end else if Ipaddr.compare x src = 0 then begin

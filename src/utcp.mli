@@ -162,9 +162,10 @@ val timer : 'a state -> Mtime.t ->
     (Established, Drop, Signal), and a list of segments to send. *)
 val handle_buf : 'a state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
   Cstruct.t ->
-  ('a state * [ `Established of flow * 'a option
-              | `Drop of flow * 'a option * 'a list
-              | `Signal of flow * 'a list ] option * output list)
+  ('a state * [ `Established of flow * [ `Active | `Passive ]
+              | `Drop of flow * 'a list
+              | `Received of flow * [ `Data | `Eof ] * 'a
+              | `Send of flow * 'a ] list * output list)
 
 (** [connect ~src ?src_port ~dst ~dst_port state now] starts a TCP connection
     from [src, src_port] to [dst, dst_port]. The [src_port] will be picked at

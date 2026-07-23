@@ -49,14 +49,15 @@ let jump () =
       in
       (fun ~src ~dst payload ->
          let src = Ipaddr.V4 src and dst = Ipaddr.V4 dst in
-         let s', ev, data =
+         let s', evs, data =
            Utcp.handle_buf !s (Mtime_clock.now ()) ~src ~dst payload
          in
-         (match ev with
-          | Some `Established _id -> Logs.app (fun m -> m "connection established")
-          | Some `Drop _id -> Logs.app (fun m -> m "connection drop")
-          | Some `Signal (_id, _) -> Logs.app (fun m -> m "buffer")
-          | None -> ());
+         (List.iter (function
+          | `Established _id -> Logs.app (fun m -> m "connection established")
+          | `Drop _id -> Logs.app (fun m -> m "connection drop")
+          | `Received (_id, _, _) -> Logs.app (fun m -> m "received buffer")
+          | `Send (_id, _) -> Logs.app (fun m -> m "send space available"))
+             evs);
          s := s' ;
          handle_data ip data) (*,
       (fun () ->
