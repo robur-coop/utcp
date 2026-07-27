@@ -75,143 +75,206 @@ module Reassembly_queue = struct
     data : Rope.t ;
   }
 
-  (* we take care that the list is sorted by the sequence number *)
-  type t = reassembly_segment list
-
-  let empty = []
-
-  let is_empty = function [] -> true | _ -> false
-
-  let length t = List.length t
-
   let pp_rseg ppf { seq ; data ; _ } =
-    Fmt.pf ppf "%a (len %u)" Sequence.pp seq (Rope.length data)
+    Fmt.pf ppf "%a (len %u)@ " Sequence.pp seq (Rope.length data)
 
-  let pp = Fmt.(list ~sep:(any ", ") pp_rseg)
+  module Tree = struct
+    type color = Red | Black
+    type t =
+      | Leaf
+      | Node of color * reassembly_segment * t * t
+
+    let balance = function
+      | Black, z, Node (Red, y, Node (Red, x, a, b), c), d
+      | Black, z, Node (Red, x, a, Node (Red, y, b, c)), d
+      | Black, x, a, Node (Red, z, Node (Red, y, b, c), d)
+      | Black, x, a, Node (Red, y, b, Node (Red, z, c, d)) ->
+        Node (Red, y, Node (Black, x, a, b), Node (Black, z, c, d))
+      | a, b, c, d -> Node (a, b, c, d)
+
+    let insert t x =
+      let rec go = function
+        | Leaf -> Node (Red, x, Leaf, Leaf)
+        | Node (co, y, l, r) ->
+          if Sequence.less x.seq y.seq then balance (co, y, go l, r)
+          else if Sequence.greater x.seq y.seq then balance (co, y, l, go r)
+          else Node (co, x, l, r)
+      in
+      match go t with
+      | Node (_, y, l, r) -> Node (Black, y, l, r)
+      | Leaf -> assert false
+
+    let balance_del = function
+      | Black, z, Node (Red, y, Node (Red, x, a, b), c), d ->
+        Node (Red, y, Node (Black, x, a, b), Node (Black, z, c, d))
+      | Black, z, Node (Red, x, a, Node (Red, y, b, c)), d ->
+        Node (Red, y, Node (Black, x, a, b), Node (Black, z, c, d))
+      | Black, x, a, Node (Red, z, Node (Red, y, b, c), d) ->
+        Node (Red, y, Node (Black, x, a, b), Node (Black, z, c, d))
+      | Black, x, a, Node (Red, y, b, Node (Red, z, c, d)) ->
+        Node (Red, y, Node (Black, x, a, b), Node (Black, z, c, d))
+      | a, b, c, d -> Node (a, b, c, d)
+
+    (* "Bubble up" a double-black by recoloring *)
+    let bubble_left = function
+      | Node (Black, y, Node (Red, x, a, b), right) ->
+        balance_del (Black, y, Node (Red, x, a, b), right)
+      | Node (co, y, left, Node (Black, z, a, b)) ->
+        balance_del (co, y, left, Node (Red, z, a, b))
+      | Node (co, y, left, Node (Red, x, Node (Black, z, a, b), c)) ->
+        Node (co, x, Node (Black, y, left, Node (Red, z, a, b)), c)
+      | t -> t
+
+    let bubble_right = function
+      | Node (co, y, Node (Black, x, a, b), right) ->
+        balance_del (co, y, Node (Red, x, a, b), right)
+      | Node (Black, z, Node (Red, x, a, Node (Black, y, b, c)), right) ->
+        Node (Black, x, a, Node (Black, z, Node (Red, y, b, c), right))
+      | t -> t
+
+    let rec min_elt = function
+      | Leaf -> assert false
+      | Node (_, v, Leaf,  _) -> v
+      | Node (_, _, left, _) -> min_elt left
+
+    let rec remove_min = function
+      | Leaf -> assert false
+      | Node (_, _, Leaf, r) -> r
+      | Node (c, v, l, r) ->
+        let l' = remove_min l in
+        bubble_left (Node (c, v, l', r))
+
+    let remove t x =
+      let rec rem = function
+        | Leaf -> Leaf
+        | Node (c, v, l, r) ->
+          if Sequence.less x.seq v.seq then
+            let l' = rem l in
+            bubble_left (Node (c, v, l', r))
+          else if Sequence.greater x.seq v.seq then
+            let r' = rem r in
+            bubble_right (Node (c, v, l, r'))
+          else
+            (* Found: remove this node *)
+            match l, r with
+            | Leaf, _ -> r
+            | _, Leaf -> l
+            | _ ->
+              let s = min_elt r in
+              let r' = remove_min r in
+              bubble_right (Node (c, s, l, r'))
+      in
+      match rem t with
+      | Node (_, v, l, r) -> Node (Black, v, l, r)
+      | Leaf -> Leaf
+
+    let find t seq =
+      let rec go smaller = function
+        | Leaf ->
+          (match smaller with Leaf -> None | Node (_, v, _, _) -> Some v)
+        | Node (_, v, l, r) as n ->
+          if Sequence.less seq v.seq then go smaller l
+          else if Sequence.greater seq v.seq then go n r
+          else Some v
+      in
+      go Leaf t
+  end
+
+  type t = Tree.t
+
+  let pp ppf tree =
+    let rec go = function
+      | Tree.Leaf -> ()
+      | Node (_, v, l, r) ->
+        go l ; pp_rseg ppf v ; go r
+    in
+    go tree
+
+  let rec length = function
+    | Tree.Leaf -> 0
+    | Node (_, _, l, r) -> 1 + length l + length r
+
+  let empty = Tree.Leaf
+
+  let is_empty = function Tree.Leaf -> true | _ -> false
 
   (* insert segment, potentially coalescing existing ones *)
   let insert_seg t (seq, fin, (data : Rope.t)) =
     (* they may overlap, the newest seg wins *)
     (* (1) figure out the place whereafter to insert the seg *)
     (* (2) peek whether the next seg can be already coalesced *)
-    let inserted, segq =
-      List.fold_left (fun (inserted, acc) e ->
-          match inserted with
-          | Some (elt, seq_end) ->
-            (* 2 - the current "e" may be merged into the head of acc *)
-            let acc' = match acc with [] -> [] | _hd :: tl -> tl in
-            if Sequence.less_equal e.seq seq_end then
-              let overlap = Sequence.sub seq_end e.seq in
-              if overlap = 0 then
-                (* overlap = 0, we can just merge them *)
-                let elt = { elt with fin = e.fin || elt.fin ; data = Rope.concat elt.data e.data } in
-                Some (elt, Sequence.addi elt.seq (Rope.length elt.data)), elt :: acc'
-              else
-                (* we need to cut some bytes from e *)
-                let data = Rope.shift e.data overlap in
-                let data = Rope.concat elt.data data in
-                let elt = { elt with fin = e.fin || elt.fin ; data } in
-                Some (elt, Sequence.addi elt.seq (Rope.length data)), elt :: acc'
+    let insert_with_end t elt =
+      let seq_end = Sequence.addi elt.seq (Rope.length elt.data) in
+      match Tree.find t seq_end with
+      | None -> Tree.insert t elt
+      | Some e ->
+        if Sequence.less_equal elt.seq e.seq && Sequence.greater_equal seq_end e.seq then
+          let t = Tree.remove t e in
+          let overlap = Sequence.sub seq_end e.seq in
+          let elt =
+            if overlap = 0 then
+              (* overlap = 0, we can just merge them *)
+              { elt with fin = e.fin || elt.fin ; data = Rope.concat elt.data e.data }
             else
-              (* there's still a hole, nothing to merge *)
-              (inserted, e :: acc)
-          | None ->
-            (* 1 *)
-            (* there are three cases:
-               - (a) the new seq is before the existing e.seq -> prepend
-                     (and figure out whether to merge with e)
-                     seq <= e.seq
-               - (b) the new seq is within e.seq + len e -> append (partially)
-                     seq <= e.seq + len
-               - (c) the new seq is way behind e.seq + len e -> move along
-                     seq > e.seq + len
-            *)
-            if Sequence.less_equal seq e.seq then
-              (* case (a) *)
-              let seq_e = Sequence.addi seq (Rope.length data) in
-              (* case (1): a new segment that is way before the existing one:
-                 seq <= e.seq && seq_e <= e.seq -> e must be retained
-                 case (2): a new segment that is partially before the existing:
-                 seq <= e.seq && seq_e > e.seq -> e may be partially retained:
-                  (i) seq_e >= e.seq_e -> drop e
-                  (ii) seq_e < e.seq_e -> retain the last bytes of e
-              *)
-              if Sequence.less_equal seq_e e.seq then
-                if Sequence.equal seq_e e.seq then
-                  let e = { seq ; fin = fin || e.fin ; data = Rope.concat data e.data } in
-                  Some (e, Sequence.addi seq (Rope.length e.data)), e :: acc
+              (* we need to cut some bytes from e *)
+              let data = Rope.shift e.data overlap in
+              let data = Rope.concat elt.data data in
+              { elt with fin = e.fin || elt.fin ; data }
+          in
+          let t =
+            (* we need to get rid of the segments that are completely overlapped by the new one *)
+            let rec rm_one t =
+              match Tree.find t seq_end with
+              | None -> t
+              | Some e ->
+                let eseqe = Sequence.addi e.seq (Rope.length e.data) in
+                if Sequence.greater_equal e.seq elt.seq && Sequence.less_equal eseqe seq_end then
+                  rm_one (Tree.remove t e)
                 else
-                  let e' = { seq ; fin ; data } in
-                  Some (e', Sequence.addi seq (Rope.length data)), e :: e' :: acc
-              else
-                let e_seq_e = Sequence.addi e.seq (Rope.length e.data) in
-                if Sequence.greater_equal seq_e e_seq_e then
-                  let e' = { seq ; fin ; data } in
-                  Some (e', seq_e), e' :: acc
-                else
-                  (* we've to retain some parts of seq *)
-                  let post =
-                    let retain_data = Sequence.sub e_seq_e seq_e in
-                    let skip_data = Rope.length e.data - retain_data in
-                    Rope.shift e.data skip_data
-                  in
-                  let e = { seq ; fin = fin || e.fin ; data = Rope.concat data post } in
-                  Some (e, Sequence.addi seq (Rope.length e.data)), e :: acc
-            else
-              let e_seq_e = Sequence.addi e.seq (Rope.length e.data) in
-              if Sequence.less_equal seq e_seq_e then
-                (* case (b) we append to the thing *)
-                if Sequence.equal seq e_seq_e then
-                  let e = { e with fin = fin || e.fin ; data = Rope.concat e.data data } in
-                  Some (e, Sequence.addi e_seq_e (Rope.length data)), e :: acc
-                else
-                  let overlap = Sequence.sub e_seq_e seq in
-                  let pre = Rope.chop e.data (Rope.length e.data - overlap) in
-                  let seq_e = Sequence.addi seq (Rope.length data) in
-                  let end_ = Sequence.max e_seq_e seq_e in
-                  let post =
-                    if Sequence.greater e_seq_e seq_e then
-                      let retain_data = Sequence.sub e_seq_e seq_e in
-                      let skip_data = Rope.length e.data - retain_data in
-                      Rope.shift e.data skip_data
-                    else
-                      Rope.empty
-                  in
-                  let e = { e with fin = fin || e.fin ; data = Rope.concat (Rope.concat pre data) post } in
-                  Some (e, end_), e :: acc
-              else
-                (None, e :: acc))
-        (None, []) t
+                  t
+            in
+            rm_one t
+          in
+          Tree.insert t elt
+        else
+          Tree.insert t elt
     in
-    let segq =
-      if inserted = None then
-        { seq ; fin ; data } :: segq
-      else
-        segq
-    in
-    List.rev segq
+    match Tree.find t seq with
+    | None -> insert_with_end t { seq ; fin ; data }
+    | Some e ->
+      (* either the new one is disjoint or we can append *)
+      let e_seqe = Sequence.addi e.seq (Rope.length e.data) in
+      let elt =
+        if Sequence.equal e_seqe seq then
+          let data = Rope.concat e.data data in
+          { e with fin = e.fin || fin ; data }
+        else if Sequence.greater e_seqe seq then
+          let overlap = Sequence.sub e_seqe seq in
+          let pre = Rope.chop e.data (Rope.length e.data - overlap) in
+          let data = Rope.concat pre data in
+          { e with fin = e.fin || fin ; data }
+        else
+          { seq ; fin ; data }
+      in
+      insert_with_end t elt
 
   let maybe_take t seq =
-    let r, t' =
-      List.fold_left (fun (r, acc) e ->
-          match r with
-          | None ->
-            if Sequence.equal seq e.seq then
-              Some (e.data, e.fin), acc
-            else if Sequence.greater seq e.seq then
-              let e_end = Sequence.addi e.seq (Rope.length e.data) in
-              if Sequence.less seq e_end then
-                let to_cut = Sequence.sub seq e.seq in
-                let data = Rope.shift e.data to_cut in
-                Some (data, e.fin), acc
-              else
-                None, acc
-            else
-              None, e :: acc
-          | Some _ -> (r, e :: acc))
-        (None, []) t
-    in
-    List.rev t', r
+    match Tree.find t seq with
+    | None -> t, None
+    | Some e ->
+      Tree.remove t e,
+      if Sequence.equal seq e.seq then
+        Some (e.data, e.fin)
+      else if Sequence.greater seq e.seq then
+        let e_end = Sequence.addi e.seq (Rope.length e.data) in
+        if Sequence.less seq e_end then
+          let to_cut = Sequence.sub seq e.seq in
+          let data = Rope.shift e.data to_cut in
+          Some (data, e.fin)
+        else
+          None
+      else
+        None
 end
 
 (* hostTypes:230 but dropped urg and ts stuff *)

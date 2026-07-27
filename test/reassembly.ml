@@ -50,6 +50,8 @@ let coalescing_works () =
   match s with
   | None -> Alcotest.fail "should be some data"
   | Some (s, _) ->
+    Alcotest.(check int "data has a good length" 20
+                (Rope.length s));
     Alcotest.(check bool "data is good" true
                 (Rope.equal s (Rope.concat data data)))
 
@@ -247,9 +249,13 @@ let overlap_3 () =
 
 let overlap_4 () =
   let r = insert_seg empty (Sequence.of_int32 16l, false, Rope.of_string "AAAAAAAA") in
+  Alcotest.(check int "reassembly queue has 1 element" 1 (length r));
   let r = insert_seg r (Sequence.of_int32 8l, false, Rope.of_string "BBBBBB") in
+  Alcotest.(check int "reassembly queue has 2 elements" 2 (length r));
   let r = insert_seg r (Sequence.of_int32 6l, false, Rope.of_string "CCCCCCCCCCCCCCCC") in
+  Alcotest.(check int "reassembly queue has 1 element" 1 (length r));
   let r = insert_seg r (Sequence.of_int32 0l, false, Rope.of_string "DDDDDDDD") in
+  Alcotest.(check int "reassembly queue has 1 element" 1 (length r));
   let r', s = maybe_take r Sequence.zero in
   Alcotest.(check int "reassembly queue is now empty" 0 (length r'));
   match s with
