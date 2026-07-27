@@ -34,6 +34,9 @@ type flow
 (** [pp_flow flow] pretty-prints the [flow]. *)
 val pp_flow : flow Fmt.t
 
+val num_connections : 'a state -> int
+(** [num_connections t] is the number of connections in any state *)
+
 (** [peers flow] is the two endpoints of the [flow], each identifiable by their
     IP and port. *)
 val peers : flow -> (Ipaddr.t * int) * (Ipaddr.t * int)

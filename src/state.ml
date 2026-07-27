@@ -508,6 +508,8 @@ let collect_metrics now connections =
     connections
     (0, 0, States.empty)
 
+let num_connections t = CM.cardinal t.connections
+
 let metrics =
   let tcp_states =
     [ Syn_sent ; Syn_received ; Established ; Close_wait ; Fin_wait_1 ;

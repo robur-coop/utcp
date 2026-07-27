@@ -10,6 +10,8 @@ type flow = State.Connection.t
 
 let pp_flow = State.Connection.pp
 
+let num_connections = State.num_connections
+
 let peers (src, src_port, dst, dst_port) =
   (src, src_port), (dst, dst_port)
 
