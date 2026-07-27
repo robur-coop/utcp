@@ -224,11 +224,13 @@ let jump () filename ip =
         match msg.func with
         | `Handle_buf ->
           let data = Cstruct.of_string (Option.get (snd msg.data)) in
-          let state, stuff, out = Utcp.handle_buf state tm ~src ~dst data in
-          (match stuff with Some (`Established (fl, _)) ->
-             Logs.info (fun m -> m "flow established! (previously %s)"
-                           (match !flow with Some _ -> "SOME" | None -> "none"));
-             flow := Some fl | _ -> ());
+          let state, evs, out = Utcp.handle_buf state tm ~src ~dst data in
+          (List.iter (function
+               | `Established (fl, _) ->
+                 Logs.info (fun m -> m "flow established! (previously %s)"
+                               (match !flow with Some _ -> "SOME" | None -> "none"));
+                 flow := Some fl
+               | _ -> ()) evs);
           List.iter print_out out;
           state, false, succ idx
         | `Out when out_after_send ->
@@ -273,7 +275,7 @@ let jump () filename ip =
         | `Close ->
           let flow = Option.get !flow in
           (match Utcp.close state tm flow with
-           | Ok (state, out) ->
+           | Ok (state, _, out) ->
              List.iter print_out out;
              state, true, succ idx
            | Error `Msg s ->

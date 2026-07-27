@@ -1131,7 +1131,7 @@ let handle_buf t now ~src ~dst data =
   match Segment.decode_and_validate ~src ~dst data with
   | Error (`Msg msg) ->
     Log.debug (fun m -> m "dropping invalid segment %s" msg);
-    t, None, []
+    t, [], []
   | Ok (seg, id) ->
     Tracing.debug (fun m -> m "%a [%a] handle_buf %u %s"
                       Connection.pp id Mtime.pp now
@@ -1140,42 +1140,50 @@ let handle_buf t now ~src ~dst data =
     (* deliver_in_3a deliver_in_4 are done now! *)
     let t', outs = handle_segment t now id seg in
     let ev =
-      let was_established, was_syn_sent, was_present =
-        match CM.find_opt id t.connections with
-        | None -> false, false, false
-        | Some s -> s.tcp_state = Established, s.tcp_state = Syn_sent, true
-      in
-      let is_established, is_present, rcv_data, snd_space, rcv_n, snd_n =
-        match CM.find_opt id t'.connections with
-        | None -> false, false, false, false, None, None
-        | Some s ->
-          s.tcp_state = Established,
-          true,
-          Rope.length s.rcvq > 0,
-          Rope.length s.sndq < s.sndbufsize,
-          Some s.rcv_notify, Some s.snd_notify
-      in
-      match was_established, is_established, was_present, is_present with
-      | false, true, _, _ ->
-        (* active open, there's likely someone waiting *)
-        let cond = if was_syn_sent then rcv_n else None in
-        Some (`Established (id, cond))
-      | true, false, _, _
-      | _, _, true, false ->
-        let opt_cond, conds =
-          if rcv_data then
-            rcv_n, Option.to_list snd_n
-          else
-            None, Option.to_list rcv_n @ Option.to_list snd_n
+      let old_conn = CM.find_opt id t.connections in
+      let new_conn = CM.find_opt id t'.connections in
+      match old_conn, new_conn with
+      | None, None -> []
+      | Some old, None -> [ `Drop (id, [ old.rcv_notify ; old.snd_notify ]) ]
+      | _, Some conn ->
+        let rcv_data = Rope.length conn.rcvq > 0 in
+        let is_established =
+          let was_established =
+            Option.value ~default:false
+              (Option.map (fun s -> s.tcp_state = Established) old_conn)
+          in
+          not was_established && conn.tcp_state = Established
         in
-        Some (`Drop (id, opt_cond, conds))
-      | _ ->
-        match
-          (if rcv_data then Option.to_list rcv_n else []) @
-          (if snd_space then Option.to_list snd_n else [])
-        with
-        | [] -> None
-        | conds -> Some (`Signal (id, conds))
+        let was_syn_sent =
+          Option.value ~default:false
+            (Option.map (fun s -> s.tcp_state = Syn_sent) old_conn)
+        in
+        let rcvd_fin =
+          (* the peer shut down its write side (half-close): a pending reader
+             must be woken up (it will drain the remaining data and observe
+             Eof on the next recv), but the connection stays usable for
+             sending (CLOSE_WAIT). See [di3_ststuff] to see when we set
+             [cantrcvmore]. *)
+          let was_fin =
+            Option.value ~default:false
+              (Option.map (fun s -> s.cantrcvmore) old_conn)
+          in
+          not was_fin && conn.cantrcvmore
+        in
+        let snd_space =
+          let was_snd =
+            Option.value ~default:false
+              (Option.map (fun s -> Rope.length s.sndq < s.sndbufsize) old_conn)
+          in
+          not was_snd && Rope.length conn.sndq < conn.sndbufsize
+        in
+        (if is_established then
+           [ `Established (id, if was_syn_sent then `Active else `Passive) ]
+         else
+           []) @
+        (if rcv_data then [ `Received (id, `Data, conn.rcv_notify) ] else []) @
+        (if snd_space then [ `Send (id, conn.snd_notify) ] else []) @
+        (if rcvd_fin && not rcv_data then [ `Received (id, `Eof, conn.rcv_notify) ] else [])
     in
     List.iter (fun (src', dst', _) ->
         let src, _, dst, _ = id in
