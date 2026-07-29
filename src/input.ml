@@ -1178,7 +1178,7 @@ let handle_buf t now ~src ~dst data =
           not was_snd && Rope.length conn.sndq < conn.sndbufsize
         in
         (if is_established then
-           [ `Established (id, if was_syn_sent then `Active else `Passive) ]
+           [ `Established (id, if was_syn_sent then `Active conn.rcv_notify else `Passive) ]
          else
            []) @
         (if rcv_data then [ `Received (id, `Data, conn.rcv_notify) ] else []) @

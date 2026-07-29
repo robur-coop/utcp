@@ -165,7 +165,7 @@ val timer : 'a state -> Mtime.t ->
     (Established, Drop, Received, Send), and a list of segments to send. *)
 val handle_buf : 'a state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
   Cstruct.t ->
-  ('a state * [ `Established of flow * [ `Active | `Passive ]
+  ('a state * [ `Established of flow * [ `Active of 'a | `Passive ]
               | `Drop of flow * 'a list
               | `Received of flow * [ `Data | `Eof ] * 'a
               | `Send of flow * 'a ] list * output list)
