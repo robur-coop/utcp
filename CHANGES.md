@@ -1,3 +1,10 @@
+# 0.0.7 (2026-07-30)
+
+* In active TCP connection establishment, wakeup the receiver (same as before
+  https://git.robur.coop/robur/utcp/pulls/2 introduced the regression)
+  (@dinosaure https://git.robur.coop/robur/utcp/pulls/8 fixes
+  https://git.robur.coop/robur/utcp/issues/7)
+
 # 0.0.6 (2026-07-27)
 
 * Use a red-black tree for the reassembly queue instead of a list to avoid
