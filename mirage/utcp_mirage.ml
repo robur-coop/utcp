@@ -190,7 +190,7 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
            | Some cb ->
              (* NOTE we start an asynchronous task with the callback *)
              Lwt.async (fun () -> cb (t, id)))
-        | `Established (_, `Active) -> () (* now ready! *)
+        | `Established (_, `Active c) -> Lwt_condition.signal c (Ok ())
         | `Received (_, what, c) ->
           let ev = match what with `Eof -> Error `Eof | `Data -> Ok () in
           Lwt_condition.signal c ev
