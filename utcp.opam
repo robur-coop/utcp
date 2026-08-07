@@ -32,12 +32,12 @@ depends: [
   "bechamel" {with-test}
   "bechamel-js" {with-test}
   #for apps
-  "cmdliner" {>= "1.1.0" & dev}
-  "mirage-net-unix" {>= "2.8.0" & dev}
-  "ethernet" {>= "2.2.1" & dev}
-  "arp" {>= "4.0.0" & dev}
-  "mirage-unix" {>= "5.0.0" & dev}
-  "pcap-format" {>= "0.6.0" & dev}
+  "cmdliner" {>= "1.1.0" & with-dev-setup}
+  "mirage-net-unix" {>= "2.8.0" & with-dev-setup}
+  "ethernet" {>= "2.2.1" & with-dev-setup}
+  "arp" {>= "4.0.0" & with-dev-setup}
+  "mirage-unix" {>= "5.0.0" & with-dev-setup}
+  "pcap-format" {>= "0.6.0" & with-dev-setup}
 ]
 build: [
   ["dune" "subst"] {dev}

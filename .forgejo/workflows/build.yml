@@ -1,0 +1,29 @@
+name: Build
+on: [push]
+
+jobs:
+  build:
+    runs-on: ["FreeBSD"]
+    steps:
+      - name: Setup opam
+        run: opam init -a --comp=4.14.4 default http://192.168.0.16
+
+      - name: Update opam
+        run: opam update
+
+      - name: 'checkout'
+        run: |
+          set -eu
+          git init --quiet --initial-branch main
+          git remote add origin "https://git.robur.coop/${GITHUB_REPOSITORY}.git"
+          git fetch --quiet --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout --quiet "$GITHUB_SHA"
+
+      - name: Install dependencies
+        run: eval `opam env` && opam install --confirm-level=unsafe-yes --deps-only -t --with-dev-setup .
+
+      - name: Build everything
+        run: eval `opam env` && dune build @all
+
+      - name: Run tests
+        run: eval `opam env` && dune runtest
