@@ -91,7 +91,7 @@ let timer_tt_rexmt m now shift id conn =
 let timer_tt_persist m now shift id conn =
   m "timer-tt-persist";
   if succ shift >= Array.length Params.tcp_backoff then begin
-    Log.err (fun m -> m "persist timer shift exceeded backoff array length");
+    Log.err (fun m -> m "%a persist timer shift exceeded backoff array length" Connection.pp id);
     Ok conn, None
   end else
     let tt_rexmt = Subr.start_tt_persist now (succ shift) conn.control_block.t_rttinf in
