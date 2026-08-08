@@ -105,7 +105,8 @@ let shutdown t now id v =
       in
       Ok ({ t with connections = CM.add id conn' t.connections }, n, out)
     else
-      Error (`Msg "not connected")
+      Error (`Msg ("not connected, state " ^
+                   State.fsm_to_string conn.tcp_state))
 
 (* in real, this is shutdown `readwrite (close_2) - and we do this in any state *)
 (* there's as well close_3 (the abortive close, i.e. send a RST) -- done when SO_LINGER = 0 *)
@@ -116,7 +117,9 @@ let close t now id =
   | Some conn ->
     (* see above, should deal with all states of conn *)
     let* () =
-      guard (behind_established conn.tcp_state) (`Msg "not yet established")
+      guard (behind_established conn.tcp_state)
+        (`Msg ("not yet established, state " ^
+               State.fsm_to_string conn.tcp_state))
     in
     let conn' =
       let cantsndmore = true and cantrcvmore = true and rcvq = Rope.empty in
@@ -147,7 +150,9 @@ let send t now id ?(off = 0) ?len buf =
   | None -> Error `Not_found
   | Some conn ->
     let* () =
-      guard (behind_established conn.tcp_state) (`Msg "not yet established")
+      guard (behind_established conn.tcp_state)
+        (`Msg ("not yet established, state " ^
+               State.fsm_to_string conn.tcp_state))
     in
     let* () =
       guard (not conn.cantsndmore) (`Msg "cant write")
@@ -174,7 +179,9 @@ let force_enqueue t now id ?(off = 0) ?len buf =
   | None -> Error `Not_found
   | Some conn ->
     let* () =
-      guard (behind_established conn.tcp_state) (`Msg "not yet established")
+      guard (behind_established conn.tcp_state)
+        (`Msg ("not yet established, state " ^
+               State.fsm_to_string conn.tcp_state))
     in
     let* () =
       guard (not conn.cantsndmore) (`Msg "cant write")
@@ -193,7 +200,9 @@ let recv t now id =
   | None -> Error `Not_found
   | Some conn ->
     let* () =
-      guard (behind_established conn.tcp_state) (`Msg "not yet connected")
+      guard (behind_established conn.tcp_state)
+        (`Msg ("not yet connected, state " ^
+               State.fsm_to_string conn.tcp_state))
     in
     let rcvq = Rope.to_strings conn.rcvq in
     let* () = guard (not (Rope.length conn.rcvq = 0 && conn.cantrcvmore)) `Eof in
