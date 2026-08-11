@@ -177,39 +177,51 @@ val handle_buf : 'a state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
 val connect : src:Ipaddr.t -> ?src_port:int -> dst:Ipaddr.t -> dst_port:int ->
   'a state -> Mtime.t -> ('a state * flow * 'a * output, [ `Msg of string ]) result
 
+(** The type for the TCP state machine *)
+type tcp_state
+
+(** [tcp_state_to_string state] results in a printable string of [state]. *)
+val tcp_state_to_string : tcp_state -> string
+
+(** The error type for user API functions. *)
+type error = [ `Not_found | `Bad_state of string * tcp_state | `Msg of string ]
+
+(** [pp_error ppf error] pretty-prints the [error] on the pretty printer [ppf]. *)
+val pp_error : error Fmt.t
+
 (** [close state now flow] closes [flow]. It results either in a fresh TCP
     state, a list of changes in the flow (conditions to be notified), and a list
     of segments to send out, or an error (if the [flow] cannot be found, or some
     other error). *)
 val close : 'a state -> Mtime.t -> flow ->
-  ('a state * 'a list * output list, [ `Not_found | `Msg of string ]) result
+  ('a state * 'a list * output list, error) result
 
 (** [shutdown state now flow direction] shuts the [flow] down in the given
     [direction]. It results in a fresh TCP state, a list of changes in the flow
     (conditions to be notified), and a list of segments to send out, or an
     error. *)
 val shutdown : 'a state -> Mtime.t -> flow -> [ `read | `write | `read_write ] ->
-  ('a state * 'a list * output list, [ `Not_found | `Msg of string ]) result
+  ('a state * 'a list * output list, error) result
 
 (** [recv state now flow] receives data for [flow]. The read notification is
     also provided - if there's no awaiting data, this notification can be waited
     on. *)
 val recv : 'a state -> Mtime.t -> flow ->
-  ('a state * string list * 'a * output list, [ `Not_found | `Msg of string | `Eof ]) result
+  ('a state * string list * 'a * output list, [ error | `Eof ]) result
 
 (** [send state now flow ~off ~len data] sends [data] on [flow], starting at
     [off] (defaults to 0) of length [len] (defaults to [data] until the end).
     This outputs a fresh TCP state, the number of bytes enqueued, the write
     notification, and a list of segments to send. *)
 val send : 'a state -> Mtime.t -> flow -> ?off:int -> ?len:int -> string ->
-  ('a state * int * 'a * output list, [ `Not_found | `Msg of string ]) result
+  ('a state * int * 'a * output list, error) result
 
 (** [force_enqueue state now flow ~off ~len data] pushes [data] on [flow],
     starting at [off] (defaults to 0) of length [len] (defaults to [data] until
     the end) onto the send queue. This may exceed the send queue size, use with
     caution. *)
 val force_enqueue : 'a state -> Mtime.t -> flow -> ?off:int -> ?len:int -> string ->
-  ('a state, [ `Not_found | `Msg of string ]) result
+  ('a state, error) result
 
 (**/**)
 (* only to be used for testing! *)

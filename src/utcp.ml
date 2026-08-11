@@ -23,6 +23,19 @@ let handle_buf = Input.handle_buf
 
 let connect = User.connect
 
+type tcp_state = State.tcp_state
+
+let tcp_state_to_string = State.fsm_to_string
+
+type error = [ `Not_found | `Bad_state of string * tcp_state | `Msg of string ]
+
+let pp_error ppf = function
+  | `Not_found -> Fmt.string ppf "not found"
+  | `Bad_state (exp, st) ->
+    Fmt.pf ppf "bad state: expected %s, but connection is in %s"
+      exp (tcp_state_to_string st)
+  | `Msg msg -> Fmt.string ppf msg
+
 let close = User.close
 
 let shutdown = User.shutdown

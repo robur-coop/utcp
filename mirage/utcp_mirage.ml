@@ -80,6 +80,10 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
               Lwt.return (Ok (`Data cs)) end
         | Error `Eof ->
           Lwt.return (Ok `Eof)
+        | Error (`Bad_state _ as e) ->
+          Log.err (fun m -> m "%a error while read (second recv) %a" Utcp.pp_flow flow Utcp.pp_error e);
+          (* TODO better error *)
+          Lwt.return (Error `Refused)
         | Error `Msg msg ->
           Log.err (fun m -> m "%a error while read (second recv) %s" Utcp.pp_flow flow msg);
           (* TODO better error *)
@@ -92,6 +96,10 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
       Lwt.return (Ok (`Data cs))
     | Error `Eof ->
       Lwt.return (Ok `Eof)
+    | Error (`Bad_state _ as e) ->
+      Log.err (fun m -> m "%a error while read %a" Utcp.pp_flow flow Utcp.pp_error e);
+      (* TODO better error *)
+      Lwt.return (Error `Refused)
     | Error `Msg msg ->
       Log.err (fun m -> m "%a error while read %s" Utcp.pp_flow flow msg);
       (* TODO better error *)
@@ -117,6 +125,10 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
           write (t, flow) buf
       else
         Lwt.return (Ok ())
+    | Error (`Bad_state _ as e) ->
+      Log.err (fun m -> m "%a error while write %a" Utcp.pp_flow flow Utcp.pp_error e);
+      (* TODO better error *)
+      Lwt.return (Error `Closed)
     | Error `Msg msg ->
       Log.err (fun m -> m "%a error while write %s" Utcp.pp_flow flow msg);
       Lwt.return (Error `Closed)
@@ -134,6 +146,9 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
     | Error `Msg msg ->
       Log.err (fun m -> m "%a error in close: %s" Utcp.pp_flow flow msg);
       Lwt.return_unit
+    | Error (`Bad_state _ as e) ->
+      Log.err (fun m -> m "%a error in close %a" Utcp.pp_flow flow Utcp.pp_error e);
+      Lwt.return_unit
     | Error `Not_found -> Lwt.return_unit
 
   let shutdown (t, flow) mode =
@@ -144,6 +159,9 @@ module Make (Ip : Tcpip.Ip.S with type ipaddr = Ipaddr.t) = struct
       output_ign t segs
     | Error `Msg msg ->
       Log.err (fun m -> m "%a error in shutdown: %s" Utcp.pp_flow flow msg);
+      Lwt.return_unit
+    | Error (`Bad_state _ as e) ->
+      Log.err (fun m -> m "%a error in shutdown %a" Utcp.pp_flow flow Utcp.pp_error e);
       Lwt.return_unit
     | Error `Not_found -> Lwt.return_unit
 

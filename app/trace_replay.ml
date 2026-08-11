@@ -245,11 +245,8 @@ let jump () filename ip =
            | Ok (state, _data, _cond, out) ->
              List.iter print_out out;
              state, false, succ idx
-           | Error `Msg s ->
-             Logs.err (fun m -> m "recv error %s" s);
-             state, false, succ idx
-           | Error `Not_found ->
-             Logs.err (fun m -> m "recv error not found");
+           | Error (#Utcp.error as e) ->
+             Logs.err (fun m -> m "recv error %a" Utcp.pp_error e);
              state, false, succ idx
            | Error `Eof ->
              Logs.err (fun m -> m "recv eof");
@@ -265,11 +262,8 @@ let jump () filename ip =
              end;
              List.iter print_out out;
              state, true, succ idx
-           | Error `Msg s ->
-             Logs.err (fun m -> m "send error %s" s);
-             state, true, succ idx
-           | Error `Not_found ->
-             Logs.err (fun m -> m "send error not found");
+           | Error e ->
+             Logs.err (fun m -> m "send error %a" Utcp.pp_error e);
              state, true, succ idx
           )
         | `Close ->
@@ -278,11 +272,8 @@ let jump () filename ip =
            | Ok (state, _, out) ->
              List.iter print_out out;
              state, true, succ idx
-           | Error `Msg s ->
-             Logs.err (fun m -> m "close error %s" s);
-             state, true, succ idx
-           | Error `Not_found ->
-             Logs.err (fun m -> m "close error not found");
+           | Error e ->
+             Logs.err (fun m -> m "close error %a" Utcp.pp_error e);
              state, true, succ idx)
         | _ -> assert false)
       (state, false, 0) msgs
