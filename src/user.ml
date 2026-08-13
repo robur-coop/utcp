@@ -105,7 +105,12 @@ let shutdown t now id v =
       in
       Ok ({ t with connections = CM.add id conn' t.connections }, n, out)
     else
-      Error (`Bad_state ("established", conn.tcp_state))
+      let side = match v with
+        | `read -> "read"
+        | `write -> "write"
+        | `read_write -> "readwrite"
+      in
+      Error (`Bad_state ("established for shutdown " ^ side, conn.tcp_state))
 
 (* in real, this is shutdown `readwrite (close_2) - and we do this in any state *)
 (* there's as well close_3 (the abortive close, i.e. send a RST) -- done when SO_LINGER = 0 *)
