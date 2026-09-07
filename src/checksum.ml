@@ -123,7 +123,7 @@ let unsafe_feed_string_16_le ~off ~len:top sum buf =
   let sum = ref sum in
   let i = ref 0 in
   while !len >= 2 do
-    sum := !sum + get_uint16_ne buf (!i * 2);
+    sum := !sum + get_uint16_ne buf (off + (!i * 2));
     incr i;
     len := !len - 2
   done;
@@ -135,7 +135,7 @@ let unsafe_feed_string_16_be ~off ~len:top sum buf =
   let sum = ref sum in
   let i = ref 0 in
   while !len >= 2 do
-    sum := !sum + swap16 (get_uint16_ne buf (!i * 2));
+    sum := !sum + swap16 (get_uint16_ne buf (off + (!i * 2)));
     incr i;
     len := !len - 2
   done;
