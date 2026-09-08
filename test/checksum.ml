@@ -118,6 +118,21 @@ let real5 () =
   in
   Alcotest.(check int "real5" 16623 Segment.(checksum ~src ~dst data))
 
+let string_offset () =
+  let payload = Ohex.decode {|
+60 61 62 63 64 65 66 67  68 69 70 71 72 73 74 75
+76 77 78 79 80|}
+  in
+  let prefix = Ohex.decode "de ad be ef" in
+  let len = String.length payload in
+  let expected = Utcp.Checksum.digest_string ~off:0 ~len payload in
+  for off = 0 to String.length prefix do
+    let str = String.sub prefix 0 off ^ payload in
+    let name = Fmt.str "off:%d" off in
+    Alcotest.(check int name expected
+                (Utcp.Checksum.digest_string ~off ~len str));
+  done
+
 let tests = [
   "simple", `Quick, simple ;
   "data1", `Quick, data1 ;
@@ -130,4 +145,5 @@ let tests = [
   "real3", `Quick, real3 ;
   "real4", `Quick, real4 ;
   "real5", `Quick, real5 ;
+  "string offset", `Quick, string_offset ;
 ]
