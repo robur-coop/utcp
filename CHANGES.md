@@ -1,3 +1,8 @@
+# 0.0.8 (2026-09-08)
+
+* Fix `Checksum.digest_string` (https://github.com/robur-coop/utcp/pull/78 &
+  https://git.robur.coop/robur/utcp/pulls/13)
+
 # 0.0.7 (2026-07-30)
 
 * In active TCP connection establishment, wakeup the receiver (same as before
