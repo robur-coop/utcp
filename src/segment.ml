@@ -661,17 +661,18 @@ let decode data =
   and dst_port = Cstruct.BE.get_uint16 data 2
   and seq = Sequence.of_int32 (Cstruct.BE.get_uint32 data 4)
   and ack = Sequence.of_int32 (Cstruct.BE.get_uint32 data 8)
-  and data_off = (Cstruct.get_uint8 data 12 lsr 4) * 4 (* lower 4 are reserved [can't assume they're 0] *)
+  and data_off_words = Cstruct.get_uint8 data 12 lsr 4 (* lower 4 are reserved [can't assume they're 0] *)
   in
   let* () =
-    guard (data_off >= 5)
-      (`Msg ("data offset field must be greater than or equal to 5, but it is " ^ string_of_int data_off))
+    guard (data_off_words >= 5)
+      (`Msg ("data offset field must be greater than or equal to 5, but it is " ^ string_of_int data_off_words))
   in
   let* ackf, flag, push = Flag.decode (Cstruct.get_uint8 data 13) in
   let window = Cstruct.BE.get_uint16 data 14
   and checksum = Cstruct.BE.get_uint16 data 16
   (* and _up = Cstruct.BE.get_uint16 data 18 *)
   in
+  let data_off = data_off_words * 4 in
   let* () =
     guard (Cstruct.length data >= data_off) (`Msg "data_offset too big")
   in
