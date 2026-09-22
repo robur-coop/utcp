@@ -1003,10 +1003,10 @@ let handle_conn t now id conn seg =
           let* c', o = deliver_in_2 m t.stats now id conn seg ack in
           Ok (add c', [ o ])
         | None, Some `Syn ->
-          (* simultaneous open: accept anything, send syn+ack *)
+          (* TODO simultaneous open: accept anything, send syn+ack *)
           (* let* c', o = deliver_in_2b now id conn seg in *)
           m "deliver_in_2b";
-          Ok (drop (), [ ])
+          Ok (t, [ ])
         | _, ((None | Some `Rst | Some `Fin) as f) ->
           let* () = deliver_in_2a m conn seg f in
           Ok (drop (), [])
