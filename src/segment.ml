@@ -39,7 +39,7 @@ let encode_option buf off = function
   | Unknown (typ, data) ->
     let len = Cstruct.length data in
     Cstruct.set_uint8 buf off typ;
-    Cstruct.set_uint8 buf (off + 1) len;
+    Cstruct.set_uint8 buf (off + 1) (len + 2);
     Cstruct.blit data 0 buf (off + 2) len;
     off + len + 2
 
@@ -88,7 +88,7 @@ let decode_option data =
     match x with
     | 2 ->
       let* () =
-        guard (l = 4) (`Msg "maximum segment size must be at least 4 bytes")
+        guard (l = 4) (`Msg "maximum segment size must be exactly 4 bytes")
       in
       let mss = Cstruct.BE.get_uint16 data 2 in
       Ok (Some (MaximumSegmentSize mss), 4)
