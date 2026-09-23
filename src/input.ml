@@ -101,11 +101,12 @@ let deliver_in_2 m stats now id conn seg ack =
   let tf_doing_ws, snd_scale, rcv_scale =
     match Segment.ws seg, cb.request_r_scale with
     | None, _ -> false, 0, 0
-    | Some x, Some y -> true, x, y
-    | Some x, None ->
+    | Some x, Some y when x <= Params.tcp_maxwinscale -> true, x, y
+    | Some x, None when x <= Params.tcp_maxwinscale ->
       (* may our 3rd time retransmitted SYN hits them, and we don't know what
          we sent (use Params.scale for now) *)
       true, x, Params.scale
+    | _ -> false, 0, 0
   in
   let rcvbufsize, sndbufsize, t_maxseg, snd_cwnd =
     let bw_delay_product_for_rt = None in

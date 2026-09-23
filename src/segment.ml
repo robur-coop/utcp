@@ -68,12 +68,7 @@ let decode_option data =
     let* () =
       guard (Cstruct.get_uint8 data 1 = 3) (`Msg "window scale length not 3")
     in
-    let ws = Cstruct.get_uint8 data 2 in
-    let* () =
-      guard (ws <= 14)
-        (`Msg ("window scale must be at most 14, got " ^ string_of_int ws))
-    in
-    Ok (Some (WindowScale ws), 3)
+    Ok (Some (WindowScale (Cstruct.get_uint8 data 2)), 3)
   | x ->
     let* () =
       guard (Cstruct.length data >= 2) (`Msg "option shorter than 2 bytes")
