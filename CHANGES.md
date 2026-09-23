@@ -1,3 +1,15 @@
+# 0.0.9 (2026-09-23)
+
+* deliver_in_2 (active open): clamp window scale to tcp_maxwinscale
+  https://git.robur.coop/robur/utcp/pulls/18 and
+  352de4a8fd240022882125fec9ac8486144757d0
+* Ignore SYN when in SYN_SENT (potential simultaneous open), instead of
+  dropping the connection https://git.robur.coop/robur/utcp/pulls/17
+* Fix range check of data_off in Segment.decode
+  https://git.robur.coop/robur/utcp/pulls/16
+* Fix unknown option encoding: length must include option type and length byte
+  https://git.robur.coop/robur/utcp/pulls/15
+
 # 0.0.8 (2026-09-08)
 
 * Fix `Checksum.digest_string` (https://github.com/robur-coop/utcp/pull/78 &
