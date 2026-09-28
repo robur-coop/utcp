@@ -416,14 +416,18 @@ let di3_newackstuff now id conn ourfinisacked ack =
         (*: If this socket has previously emitted a [[FIN]] segment and the
            [[FIN]] has now been [[ACK]]ed, decrease [[snd_wnd]] by the length of
            the send queue and clear the send queue.:*)
-        cb.snd_wnd - Rope.length conn.sndq, Rope.empty
+        (* NOTE: we don't want any negative numbers, in the specification we use
+           the 'num' type (which is non-negative). *)
+        Int.max 0 (cb.snd_wnd - Rope.length conn.sndq), Rope.empty
       else
         (*: Otherwise, reduce the send window by the amound of data acknowledged
            as it is now consuming space on the receiver's receive queue. Remove
            the acknowledged bytes from the send queue as they will never need to
            be retransmitted.:*)
         let acked = Sequence.window ack cb.snd_una in
-        cb.snd_wnd - acked,
+        (* NOTE: we don't want any negative numbers, in the specification we use
+           the 'num' type (which is non-negative). *)
+        Int.max 0 (cb.snd_wnd - acked),
         Rope.shift conn.sndq acked
     in
     (*: Update the control block :*)

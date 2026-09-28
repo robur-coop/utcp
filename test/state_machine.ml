@@ -621,9 +621,46 @@ let test_close_wait =
       [ rcv_cond ; snd_cond ] woken;
     match recv tcp now id with
     | Error `Not_found -> ()
-    | _ -> Alcotest.fail "unexpected connection" in
+    | _ -> Alcotest.fail "unexpected connection"
+  in
+  let ack_never_shrinks_snd_wnd_below_zero () =
+    (* A shrunken advertised window followed by an ACK that covers more
+       in-flight bytes than the current window must not drive snd_wnd
+       negative: snd_wnd counts window space, so it floors at zero. *)
+    let now = Mtime.of_uint64_ns 0L in
+    let tcp0 = State.empty (fun () -> ()) "" in
+    let isn = Sequence.of_int32 1000l in
+    let snd_max = Sequence.addi isn 5000 in
+    let cb = { State.initial_cb with
+      State.snd_una = isn ;
+      snd_max ;
+      snd_nxt = snd_max ;
+      snd_wnd = 1000 ;
+      (* window update must not fire: pretend the last update came from a
+         later segment, so the stale advertised window is kept *)
+      snd_wl1 = Sequence.addi State.initial_cb.State.rcv_nxt 100 ;
+      rcv_wnd = 1000 }
+    in
+    (* pretend we sent 5000 bytes (sndq tracks unacked data) *)
+    let sndq = Rope.of_string (String.make 5000 'x') in
+    let conn =
+      State.conn_state now (fun () -> ())
+        ~rcvbufsize:65535 ~sndbufsize:32768 State.Established cb
+    in
+    let conn = { conn with State.sndq } in
+    let tcp0 =
+      { tcp0 with State.connections = State.CM.add quad conn tcp0.State.connections }
+    in
+    (* ACK all 5000 bytes while the window stays shrunk at 1000 *)
+    let seg = { basic_seg with seq = cb.State.rcv_nxt ;
+                               ack = Some snd_max ; window = 1000 } in
+    let tcp, _out = Input.handle_segment tcp0 now quad seg in
+    let conn' = State.CM.find quad tcp.State.connections in
+    Alcotest.(check int) "snd_wnd floored at zero" 0 conn'.State.control_block.State.snd_wnd
+  in
   [ "FIN in Established signals, does not drop", `Quick, fin_on_established
-  ; "RST in Established drops and wakes all waiters", `Quick, rst_on_established ]
+  ; "RST in Established drops and wakes all waiters", `Quick, rst_on_established
+  ; "ACK covering more than snd_wnd floors at zero", `Quick, ack_never_shrinks_snd_wnd_below_zero ]
 
 let tests =
   test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd @ test_window_probe @ test_close_wait
