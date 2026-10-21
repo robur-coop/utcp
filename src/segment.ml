@@ -406,10 +406,17 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
       is past the [[FIN]]'s sequence number, then [[snd_nxt]] should be set to the sequence number
       of the [[FIN]] flag, i.e. a retransmission. Check that [[snd_una <> iss]] as in this case no
       data has yet been sent over the socket  :*)
+  (* The [snd_nxt - iss = 2] case (taken from the spec) is meant for SYN+FIN
+     without data while the SYN is unacked. It must be restricted to
+     [snd_una = iss]: otherwise, after SYN and exactly one byte of data, the
+     first FIN is mistaken for a retransmission and sent on top of that data
+     byte; the peer then never acks it, and every (duplicate) ACK triggers the
+     same FIN again. *)
   let snd_nxt =
     if fin &&
        (Sequence.equal (Sequence.addi cb.State.snd_nxt dlen) (Sequence.incr last_sndq_data_seq) &&
         not (Sequence.equal cb.State.snd_una cb.State.iss) ||
+        Sequence.equal cb.State.snd_una cb.State.iss &&
         Sequence.window cb.State.snd_nxt cb.State.iss = 2)
     then
       Sequence.addi cb.State.snd_nxt (-1)
