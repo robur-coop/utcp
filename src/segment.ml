@@ -686,13 +686,15 @@ let decode data =
   Ok ({ src_port; dst_port; seq; ack; flag; push; window; options; payload_len; payload },
       checksum)
 
-let decode_and_validate ~src ~dst data =
+let decode_and_validate ?checksum:(validate_checksum = true) ~src ~dst data =
   let* t, pkt_csum = decode data in
-  let computed = checksum ~src ~dst data in
-  (* these are already checks done in deliver_in_4, etc. *)
-  let pkt_csum = if pkt_csum = 0xffff then 0x0 else pkt_csum in
   let* () =
-    guard (computed = pkt_csum) (`Msg "invalid checksum")
+    if validate_checksum then begin
+      let computed = checksum ~src ~dst data in
+      (* these are already checks done in deliver_in_4, etc. *)
+      let pkt_csum = if pkt_csum = 0xffff then 0x0 else pkt_csum in
+      guard (computed = pkt_csum) (`Msg "invalid checksum")
+    end else Ok ()
   in
   let* () =
     match src, dst with

@@ -1132,8 +1132,8 @@ let handle_segment t now id seg =
   in
   t', out
 
-let handle_buf t now ~src ~dst data =
-  match Segment.decode_and_validate ~src ~dst data with
+let handle_buf ?verify t now ~src ~dst data =
+  match Segment.decode_and_validate ?checksum:verify ~src ~dst data with
   | Error (`Msg msg) ->
     Log.debug (fun m -> m "dropping invalid segment %s" msg);
     t, [], []

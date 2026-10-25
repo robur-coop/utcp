@@ -127,7 +127,7 @@ module Segment : sig
       error, also packets to and from the same endpoint (equal IP address and
       equal port). If the result is Ok, it is a segment and the flow.
   *)
-  val decode_and_validate : src:Ipaddr.t -> dst:Ipaddr.t -> Cstruct.t ->
+  val decode_and_validate : ?checksum:bool -> src:Ipaddr.t -> dst:Ipaddr.t -> Cstruct.t ->
     (t * flow, [ `Msg of string ]) result
 
   (** [length seg] computes the length in bytes of [s]. *)
@@ -160,10 +160,12 @@ type output = Ipaddr.t * Ipaddr.t * Segment.t
 val timer : 'a state -> Mtime.t ->
   ('a state * (flow * [ `Retransmission_exceeded | `Timer_2msl | `Timer_connection_established | `Timer_fin_wait_2 ] * 'a * 'a) list * output list)
 
-(** [handle_buf state now ~src ~dst buf] handles the buffer [buf] for the TCP
-    stack. This results in a fresh state, optionally a change in the flow
-    (Established, Drop, Received, Send), and a list of segments to send. *)
-val handle_buf : 'a state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
+(** [handle_buf ?verify state now ~src ~dst buf] handles the buffer [buf] for
+    the TCP stack. This results in a fresh state, optionally a change in the
+    flow (Established, Drop, Received, Send), and a list of segments to send.
+    When [verify = false] (defaults to [true]), the TCP checksum is {b not}
+    verified. *)
+val handle_buf : ?verify:bool -> 'a state -> Mtime.t -> src:Ipaddr.t -> dst:Ipaddr.t ->
   Cstruct.t ->
   ('a state * [ `Established of flow * [ `Active of 'a | `Passive ]
               | `Drop of flow * 'a list
