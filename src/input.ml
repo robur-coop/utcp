@@ -699,7 +699,10 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
       let delay_ack =
         is_connected conn.tcp_state &&
         have_stuff_to_ack && not fin_trimmed && Reassembly_queue.is_empty cb.t_segq &&
-        not cb.tf_rxwin0sent && cb.tt_delack = None
+        not cb.tf_rxwin0sent && cb.tt_delack = None &&
+        (* FreeBSD (DELAY_ACK in tcp_input.c): never delay the ACK of a segment
+           larger than one MSS, such as a coalesced (LRO/GRO) segment. *)
+        Rope.length data_trimmed_left_right <= cb.t_maxseg
       in
       (*: Check to see whether any data or a [[FIN]] can be
           reassembled. hannes (2023-08-30 nothing non-deterministically here,

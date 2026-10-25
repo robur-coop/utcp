@@ -437,20 +437,17 @@ let test_window_probe =
                                 window = 1 lsl 16 - 1 ;
                                 payload_len = window ;
                                 payload = [ String.make window 'A' ] } in
-    let tcp, _ev, _out = handle tcp _0ns data in
-    (* NOTE(dinosaure): the delayed ACK tells us how much space is left in
-       [rcvq]. We can retrieve it after 100ms (we chosen 200ms), see
-       [Params.tcptv_delack]. We would like to trigger [fast_timer] AND
-       [slow_timer], so we iterate [run_timers] with [10]:
-       - which is a multiple of [2]
-       - and a multiple of [5] *)
+    (* NOTE(dinosaure): [data] carries far more than 2 MSS (like a GRO segment):
+       it must be ACKed at once, without waiting for the delayed ACK timer. This
+       ACK tells us how much space is left in [rcvq]. *)
+    let tcp, _ev, out = handle tcp _0ns data in
+    let left = match out with
+      | [ (_, _, seg) ] -> seg.Segment.window
+      | _ -> Alcotest.fail "expected an immediate ACK for the data" in
     let _200ms = Mtime.of_uint64_ns (Duration.of_ms 200) in
     let tcp, drops, out = run_timers tcp _200ms 10 in
     Alcotest.(check int) "no connection is dropped" 0 (List.length drops);
-    let left = match out with
-      | [ (_, _, seg) ] -> seg.Segment.window
-      | _ -> Alcotest.fail "expected a (delayed) ACK for the data"
-    in
+    Alcotest.(check int) "no delayed ACK" 0 (List.length out);
     (* fill the rest of the receive buffer: [rcv_wnd] falls to zero *)
     let tcp = match left with
       | 0 -> tcp
