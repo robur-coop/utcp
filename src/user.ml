@@ -43,6 +43,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
     let iss = Sequence.of_int32 (Randomconv.int32 Mirage_crypto_rng.generate) in
     let rcv_wnd = t.rcvbuf in
     let advmss = Subr.tcp_mssopt t.mtu id in
+    let t_device_mss, t_tso_max = Subr.tso_params t id in
     let t_rttseg = Some (now, iss) in
     let control_block = {
       initial_cb with
@@ -57,6 +58,8 @@ let connect ~src ?src_port ~dst ~dst_port t now =
       rcv_adv = Sequence.of_int32 (Int32.of_int rcv_wnd) ; (* rcv_nxt is 0 anyways, this is void *)
       tf_rxwin0sent = (rcv_wnd = 0);
       t_advmss = advmss ;
+      t_device_mss ;
+      t_tso_max ;
       t_rttseg
     } in
     conn_state now t.mk_notify ~rcvbufsize:rcv_wnd ~sndbufsize:t.sndbuf Syn_sent control_block

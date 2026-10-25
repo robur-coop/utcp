@@ -48,6 +48,7 @@ let deliver_in_1 t m now id seg =
   m "deliver-in-1";
   let conn =
     let advmss = Subr.tcp_mssopt t.mtu id in
+    let t_device_mss, t_tso_max = Subr.tso_params t id in
     let rcvbufsize, sndbufsize, t_maxseg', snd_cwnd' =
       let bw_delay_product_for_rt = None in
       Subr.calculate_buf_sizes advmss (Segment.mss seg)
@@ -82,6 +83,8 @@ let deliver_in_1 t m now id seg =
       snd_cwnd = snd_cwnd' ;
       t_maxseg = t_maxseg' ;
       t_advmss = advmss ;
+      t_device_mss ;
+      t_tso_max ;
       tf_doing_ws ; snd_scale ; rcv_scale ;
       request_r_scale ;
       last_ack_sent = ack' ;
