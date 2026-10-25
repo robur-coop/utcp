@@ -51,7 +51,7 @@ let deliver_in_1 t m now id seg =
     let rcvbufsize, sndbufsize, t_maxseg', snd_cwnd' =
       let bw_delay_product_for_rt = None in
       Subr.calculate_buf_sizes advmss (Segment.mss seg)
-        bw_delay_product_for_rt Params.so_rcvbuf Params.so_sndbuf
+        bw_delay_product_for_rt t.rcvbuf t.sndbuf
     in
     let rcv_wnd = rcvbufsize in
     let tf_doing_ws, snd_scale =

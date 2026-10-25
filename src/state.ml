@@ -551,7 +551,9 @@ type 'a t = {
   id : string ;
   mutable ctr : int ;
   mk_notify : unit -> 'a;
-  mtu : int (* device MTU, for the advertised MSS *)
+  mtu : int ; (* device MTU, for the advertised MSS *)
+  sndbuf : int ;
+  rcvbuf : int ;
 }
 
 module States = Map.Make (struct
@@ -640,6 +642,9 @@ let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 
 let empty ?(mtu= 1500) mk_notify id =
+let empty
+    ?(mtu= 1500) ?(sndbuf = Params.so_sndbuf) ?(rcvbuf= Params.so_rcvbuf)
+    mk_notify id =
   {
     id ;
     listeners = IS.empty ;
@@ -648,4 +653,6 @@ let empty ?(mtu= 1500) mk_notify id =
     ctr = 0 ;
     mk_notify ;
     mtu ;
+    sndbuf ;
+    rcvbuf ;
   }
