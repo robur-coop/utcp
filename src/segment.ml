@@ -598,6 +598,9 @@ let checksum ~src ~dst cs =
   Cstruct.BE.set_uint16 cs 16 0;
   Checksum.finally (Checksum.feed_cstruct sum cs)
 
+let partial_checksum ~src ~dst len =
+  Checksum.fold (pseudo_header_csum ~src ~dst len)
+
 let encode_into buf t =
   let opt_len = length_options t.options in
   Cstruct.BE.set_uint16 buf 0 t.src_port;
