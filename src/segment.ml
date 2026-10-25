@@ -635,6 +635,15 @@ let encode_and_checksum_into now buf ~src ~dst t =
                           Mtime.pp now t.payload_len
                           (Base64.encode_string (Cstruct.to_string buf)))
 
+let encode_and_partial_checksum_into now buf ~src ~dst t =
+  encode_into buf t;
+  let len = Cstruct.length buf in
+  Cstruct.BE.set_uint16 buf 16 (partial_checksum ~src ~dst len);
+  State.Tracing.debug (fun m -> m "%a [%a] out %u %s"
+                          State.Connection.pp (src, t.src_port, dst, t.dst_port)
+                          Mtime.pp now t.payload_len
+                          (Base64.encode_string (Cstruct.to_string buf)))
+
 let encode_and_checksum now ~src ~dst t =
   let buf = Cstruct.create (length t) in
   encode_and_checksum_into now buf ~src ~dst t;
