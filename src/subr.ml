@@ -21,6 +21,14 @@ let tcp_mssopt mtu (src, _, dst, _) =
   else
     mss
 
+let tso_params t (src, _, _, _) =
+  let ip_hlen, tso = match src with
+    | Ipaddr.V4 _ -> 20, t.tso_v4
+    | Ipaddr.V6 _ -> 40, t.tso_v6 in
+  let device_mss = t.mtu - ip_hlen - 20 (* Segment.header_size = 20 *) in
+  let tso_max = if tso = 0 then 0 else Int.min tso 65535 - ip_hlen - 20 (* Segment.header_size = 20 *) in
+  device_mss, tso_max
+
 (* tcp_subr.c:2908 *)
 let tcp_maxseg conn =
   let optlen = match conn.tcp_state with
