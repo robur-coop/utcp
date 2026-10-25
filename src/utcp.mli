@@ -143,6 +143,11 @@ module Segment : sig
       used for logging. *)
   val encode_and_checksum_into : Mtime.t -> Cstruct.t -> src:Ipaddr.t -> dst:Ipaddr.t -> t -> unit
 
+  (** [encode_and_partial_checksum_into now buf ~src ~dst seg] is like {!val:encode_and_checksum},
+      but only stores the pseudo-header sum (folded, {b not} complemented) in the checksum field.
+      [buf] must be exactly [length seg] bytes. *)
+  val encode_and_partial_checksum_into : Mtime.t -> Cstruct.t -> src:Ipaddr.t -> dst:Ipaddr.t -> t -> unit
+
   (** [checksum ~src ~dst buf] computes the checksum of [buf]. *)
   val checksum : src:Ipaddr.t -> dst:Ipaddr.t -> Cstruct.t -> int
 
