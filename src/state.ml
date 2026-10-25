@@ -349,9 +349,11 @@ type control_block = {
 
   (*: other :*)
   t_segq :  Reassembly_queue.t;  (*: segment reassembly queue :*)
-  t_softerror : string option      (*: current transient error; reported only if failure becomes permanent :*)
+  t_softerror : string option;     (*: current transient error; reported only if failure becomes permanent :*)
   (*: could cut this down to the actually-possible errors? :*)
 
+  t_device_mss : int; (* mtu - ip_hdr - tcp_hdr: the host segments at this size *)
+  t_tso_max : int; (* max TCP payload of a TSO super-segment, 0 = no TSO *)
 }
 
 (* auxFns:1066*)
@@ -407,6 +409,8 @@ let initial_cb =
     snd_cwnd_prev = 0;
     snd_ssthresh_prev = 0;
     t_badrxtwin = Mtime.of_uint64_ns 0L;
+    t_device_mss = 0;
+    t_tso_max = 0;
   }
 
 let pp_timer now ppf (_, deadline) =
@@ -427,7 +431,8 @@ let pp_control now ppf c =
               irs %a@ rcv_adv %a@ snd_recover %a@ t_maxseg %d@ t_advmss %d@ \
               snd_scale %d@ rcv_scale %d@ request_r_scale %a@ tf_doing_ws %B@ \
               tt_rexmt %a@ tt_2msl %a@ tt_delack %a@ tt_conn_est %a@ \
-              tt_fin_wait_2 %a@ dupacks %u@ rttinf %a@ rttseg %a"
+              tt_fin_wait_2 %a@ dupacks %u@ rttinf %a@ rttseg %a@ device_mss %d \
+              @ tso_max %d"
     c.tf_needfin c.tf_shouldacknow
     Sequence.pp c.snd_una Sequence.pp c.snd_max Sequence.pp c.snd_nxt
     Sequence.pp c.snd_wl1 Sequence.pp c.snd_wl2 Sequence.pp c.iss
@@ -450,6 +455,8 @@ let pp_control now ppf c =
              (Option.value ~default:Mtime.min_stamp (Mtime.sub_span now sent))
          in
          ts', seg) c.t_rttseg)
+
+    c.t_device_mss c.t_tso_max
 (*
     (* tt_keep = None; *)
     t_idletime = Mtime.of_uint64_ns 0L;
@@ -552,6 +559,8 @@ type 'a t = {
   mutable ctr : int ;
   mk_notify : unit -> 'a;
   mtu : int ; (* device MTU, for the advertised MSS *)
+  tso_v4 : int ; (* max IPv4 packet size of a TSO segment, 0 = no TSO *)
+  tso_v6 : int ; (* same for IPv6 *)
   sndbuf : int ;
   rcvbuf : int ;
 }
@@ -641,9 +650,9 @@ let pp now ppf t =
 let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 
-let empty ?(mtu= 1500) mk_notify id =
 let empty
-    ?(mtu= 1500) ?(sndbuf = Params.so_sndbuf) ?(rcvbuf= Params.so_rcvbuf)
+    ?(mtu= 1500) ?(tso_v4= 0) ?(tso_v6= 0)
+    ?(sndbuf = Params.so_sndbuf) ?(rcvbuf= Params.so_rcvbuf)
     mk_notify id =
   {
     id ;
@@ -653,6 +662,8 @@ let empty
     ctr = 0 ;
     mk_notify ;
     mtu ;
+    tso_v4 ;
+    tso_v6 ;
     sndbuf ;
     rcvbuf ;
   }

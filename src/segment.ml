@@ -384,6 +384,10 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
   in
   let last_sndq_data_seq = Sequence.addi cb.State.snd_una (Rope.length conn.sndq) in
   (*: The data to send in this segment (if any) :*)
+  let burst =
+    let mss = cb.State.t_maxseg in
+    if cb.State.t_tso_max = 0 || mss < cb.State.t_device_mss then mss
+    else Int.max mss (cb.State.t_tso_max / mss * mss) in
   let data_to_send, more_data_could_be_sent =
     let data' =
       Rope.shift conn.State.sndq
@@ -395,9 +399,9 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
     let dlen = Rope.length data' in
     let len_could_be_sent = Int.max 0 snd_wnd_unused in
     let data' =
-      let len = Int.min dlen (Int.min len_could_be_sent cb.State.t_maxseg) in
+      let len = Int.min dlen (Int.min len_could_be_sent burst) in
       Rope.chop data' len in
-    data', dlen > cb.t_maxseg && len_could_be_sent > cb.t_maxseg
+    data', dlen > burst && len_could_be_sent > burst
   in
   let dlen = Rope.length data_to_send in
   (*: Should [[FIN]] be set in this segment? :*)
