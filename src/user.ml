@@ -41,7 +41,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
   Tracing.debug (fun m -> m "%a [%a] connect" Connection.pp id Mtime.pp now);
   let conn =
     let iss = Sequence.of_int32 (Randomconv.int32 Mirage_crypto_rng.generate) in
-    let rcv_wnd = Params.so_rcvbuf in
+    let rcv_wnd = t.rcvbuf in
     let advmss = Subr.tcp_mssopt t.mtu id in
     let t_rttseg = Some (now, iss) in
     let control_block = {
@@ -59,7 +59,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
       t_advmss = advmss ;
       t_rttseg
     } in
-    conn_state now t.mk_notify ~rcvbufsize:rcv_wnd ~sndbufsize:Params.so_sndbuf Syn_sent control_block
+    conn_state now t.mk_notify ~rcvbufsize:rcv_wnd ~sndbufsize:t.sndbuf Syn_sent control_block
   in
   let _, _, seg = Segment.make_syn conn.control_block id in
   let connections =
