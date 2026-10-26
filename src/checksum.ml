@@ -87,6 +87,15 @@ let[@inline always] unsafe_feed_32_be ~off ~len:top sum buf =
   if !len = 1 then sum := !sum + unsafe_get_uint8 buf (off + top - 1);
   !sum
 
+let[@inline always] fold sum =
+  let sum = ref sum in
+  let car = ref (!sum lsr 16) in
+  while !car != 0 do
+    sum := (!sum land 0xffff) + !car;
+    car := !sum lsr 16;
+  done;
+  swap16 (!sum land 0xffff)
+
 let[@inline always] finally sum =
   let sum = ref sum in
   let car = ref (!sum lsr 16) in
