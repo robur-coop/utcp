@@ -515,45 +515,45 @@ let test_window_probe =
   ; "out-of-window RST is dropped", `Quick,
     rst_out_of_window_is_dropped ]
 
+let handle ~now tcp seg =
+  let data = Segment.encode_and_checksum now ~src:your_ip ~dst:my_ip seg in
+  handle_buf tcp now ~src:your_ip ~dst:my_ip data
+
+let established ~now () =
+  let ctr = ref 0 in
+  let fetch_and_incr () = incr ctr; !ctr in
+  let tcp = start_listen (empty fetch_and_incr "") listen_port in
+  let syn = { basic_seg with flag = Some `Syn ; seq = initial_seq } in
+  (* SYN ([out] should be SYN+ACK) *)
+  let tcp, _ev, _out = handle ~now tcp syn in
+  let ack = { basic_seg with seq = Sequence.incr initial_seq ;
+                             ack = Some (Sequence.incr rng_seq) ;
+                             window = 1 lsl 16 - 1 } in
+  (* ACK (we should be in the [Established] mode) *)
+  let tcp, evs, _out = handle ~now tcp ack in
+  let id =
+    List.fold_left (fun acc -> function
+        | `Established (id, _) -> Some id
+        | _ -> acc)
+      None evs
+  in
+  let id =
+    match id with
+    | Some x -> x
+    | None -> Alcotest.fail "expected an ESTABLISHED event"
+  in
+  let tcp, rcv_cond = match recv tcp now id with
+    | Ok (tcp, _, cond, _) -> tcp, cond
+    | Error _ -> Alcotest.fail "recv failed"
+  in
+  let tcp, snd_cond = match send tcp now id "" with
+    | Ok (tcp, _, cond, _) -> tcp, cond
+    | Error _ -> Alcotest.fail "send failed"
+  in
+  tcp, id, rcv_cond, snd_cond
+
 let test_close_wait =
   let now = Mtime.of_uint64_ns 0L in
-  let handle tcp seg =
-    let data = Segment.encode_and_checksum now ~src:your_ip ~dst:my_ip seg in
-    handle_buf tcp now ~src:your_ip ~dst:my_ip data
-  in
-  let established () =
-    let ctr = ref 0 in
-    let fetch_and_incr () = incr ctr; !ctr in
-    let tcp = start_listen (empty fetch_and_incr "") listen_port in
-    let syn = { basic_seg with flag = Some `Syn ; seq = initial_seq } in
-    (* SYN ([out] should be SYN+ACK) *)
-    let tcp, _ev, _out = handle tcp syn in
-    let ack = { basic_seg with seq = Sequence.incr initial_seq ;
-                               ack = Some (Sequence.incr rng_seq) ;
-                               window = 1 lsl 16 - 1 } in
-    (* ACK (we should be in the [Established] mode) *)
-    let tcp, evs, _out = handle tcp ack in
-    let id =
-      List.fold_left (fun acc -> function
-          | `Established (id, _) -> Some id
-          | _ -> acc)
-        None evs
-    in
-    let id =
-      match id with
-      | Some x -> x
-      | None -> Alcotest.fail "expected an ESTABLISHED event"
-    in
-    let tcp, rcv_cond = match recv tcp now id with
-      | Ok (tcp, _, cond, _) -> tcp, cond
-      | Error _ -> Alcotest.fail "recv failed"
-    in
-    let tcp, snd_cond = match send tcp now id "" with
-      | Ok (tcp, _, cond, _) -> tcp, cond
-      | Error _ -> Alcotest.fail "send failed"
-    in
-    tcp, id, rcv_cond, snd_cond
-  in
   let fin = { basic_seg with flag = Some `Fin ; push = true ;
                              seq = Sequence.incr initial_seq ;
                              ack = Some (Sequence.incr rng_seq) ;
@@ -575,9 +575,9 @@ let test_close_wait =
        C: SYN ->            ACK -> FIN ->
        S:        SYN+ACK ->     |               ACK ->
        s:                       | [ESTABLISHED]     | [CLOSE_WAIT] *)
-    let tcp, id, rcv_cond, _snd_cond = established () in
+    let tcp, id, rcv_cond, _snd_cond = established ~now () in
     (* FIN ([out] should be ACK) *)
-    let tcp, evs, _out = handle tcp fin in
+    let tcp, evs, _out = handle ~now tcp fin in
     let woken =
       List.fold_left (fun acc -> function
           | `Received (_, _, n) -> n :: acc
@@ -609,8 +609,8 @@ let test_close_wait =
   let rst_on_established () =
     (* NOTE(dinosaure): the aim here is to show that we are correctly consuming
        our conditions despite an [RST] being sent by the client. *)
-    let tcp, id, rcv_cond, snd_cond = established () in
-    let tcp, evs, _out = handle tcp rst in
+    let tcp, id, rcv_cond, snd_cond = established ~now () in
+    let tcp, evs, _out = handle ~now tcp rst in
     let woken =
       List.fold_left (fun acc -> function
           | `Drop (_, conds) -> conds
@@ -662,5 +662,72 @@ let test_close_wait =
   ; "RST in Established drops and wakes all waiters", `Quick, rst_on_established
   ; "ACK covering more than snd_wnd floors at zero", `Quick, ack_never_shrinks_snd_wnd_below_zero ]
 
+let test_edge =
+  let now = Mtime.of_uint64_ns 0L in
+  let fin_at_the_right_edge_of_the_window () =
+    (* NOTE(dinosaure): the client sends data which fill exactly our advertised
+       window, with the FIN on the same segment. The FIN consumes one sequence
+       number past the right edge of the window: once accepted, [rcv_nxt] is
+       [rcv_adv + 1]. The window already advertised ([rcv_adv - rcv_nxt]) must
+       be considered as 0 and not as [2^32 - 1] (an unsigned subtraction):
+       otherwise, [rcv_adv] becomes [rcv_nxt - 1] and every following segment
+       is unacceptable, even a pure ACK with [seq = rcv_nxt]. The ACK of our
+       data is never processed, [snd_una] never advances and we retransmit
+       forever.
+
+       C: SYN ->            ACK ->                       data+FIN ->     ACK ->
+       S:        SYN+ACK ->       data (window = w) ->               ACK
+       s:                       | [ESTABLISHED]                     | [CLOSE_WAIT] *)
+    let tcp, id, _rcv_cond, _snd_cond = established ~now () in
+    (* the client sends some data first: our advertised window is then smaller
+       than 65535 and not clamped, so it is exactly [rcv_adv - rcv_nxt] *)
+    let first = 1000 in
+    let data = { basic_seg with seq = Sequence.incr initial_seq ;
+                                ack = Some (Sequence.incr rng_seq) ;
+                                window = 1 lsl 16 - 1 ;
+                                payload_len = first ;
+                                payload = [ String.make first 'Z' ] } in
+    let tcp, _evs, _out = handle ~now tcp data in
+    (* the server sends some data, its segment advertises our window *)
+    let tcp, window, snd_max = match send tcp now id "hello" with
+      | Ok (tcp, 5, _, [ (_, _, seg) ]) ->
+        tcp, seg.Segment.window, Sequence.addi seg.Segment.seq 5
+      | Ok _ -> Alcotest.fail "expected one segment with our data"
+      | Error _ -> Alcotest.fail "send failed"
+    in
+    (* the client fills exactly this window and closes *)
+    let data_and_fin = { basic_seg with flag = Some `Fin ;
+                                        seq = Sequence.addi initial_seq (1 + first) ;
+                                        ack = Some (Sequence.incr rng_seq) ;
+                                        window = 1 lsl 16 - 1 ;
+                                        payload_len = window ;
+                                        payload = [ String.make window 'A' ] } in
+    let tcp, _evs, out = handle ~now tcp data_and_fin in
+    let rcv_nxt = Sequence.addi initial_seq (first + window + 2) in
+    begin match out with
+      | [ (_, _, seg) ] ->
+        Alcotest.(check (option sequence)) "data and FIN are acked"
+          (Some rcv_nxt) seg.Segment.ack;
+        (* with an unsigned subtraction, the window becomes 65535 (clamped) *)
+        Alcotest.(check bool) "the advertised window does not grow" true
+          (seg.Segment.window < window)
+      | _ -> Alcotest.fail "expected an ACK for the data and the FIN" end;
+    (* the client acks our data: this ACK must be acceptable (an unacceptable
+       segment is answered with an ACK) *)
+    let ack = { basic_seg with seq = rcv_nxt ; ack = Some snd_max ;
+                               window = 1 lsl 16 - 1 } in
+    let tcp, _evs, out = handle ~now tcp ack in
+    Alcotest.(check int) "nothing to reply" 0 (List.length out);
+    (* our data is acked: nothing is retransmitted once the RTO expires *)
+    let _10s = Mtime.of_uint64_ns (Duration.of_sec 10) in
+    let _tcp, drops, out = run_timers tcp _10s 10 in
+    Alcotest.(check int) "no connection is dropped" 0 (List.length drops);
+    let retransmitted =
+      List.exists (fun (_, _, seg) -> seg.Segment.payload_len > 0) out in
+    Alcotest.(check bool) "no retransmission" false retransmitted
+  in
+  [ "FIN at the right edge of the window keeps ACKs acceptable", `Quick,
+    fin_at_the_right_edge_of_the_window ]
+
 let tests =
-  test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd @ test_window_probe @ test_close_wait
+  test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd @ test_window_probe @ test_close_wait @ test_edge

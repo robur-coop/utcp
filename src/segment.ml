@@ -306,7 +306,8 @@ let tcp_output_required now conn =
   let window_update_delta =
     (Int.min (Params.tcp_maxwin lsl cb.State.rcv_scale))
        (conn.rcvbufsize - Rope.length conn.rcvq) -
-    Sequence.window cb.State.rcv_adv cb.State.rcv_nxt
+    (if Sequence.less cb.State.rcv_adv cb.State.rcv_nxt then 0
+     else Sequence.window cb.State.rcv_adv cb.State.rcv_nxt)
   in
   (*: Send a window update? This occurs when (a) the advertised window can be increased by at
       least two maximum segment sizes, or (b) the advertised window can be increased by at least
@@ -420,7 +421,9 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
   let push = dlen > 0 && Sequence.equal (Sequence.addi cb.State.snd_nxt dlen) last_sndq_data_seq in
   (*: Calculate size of the receive window (based upon available buffer space) :*)
   let rcv_wnd' =
-    let window_size = Sequence.window cb.State.rcv_adv cb.State.rcv_nxt in
+    let window_size =
+      if Sequence.less cb.State.rcv_adv cb.State.rcv_nxt then 0
+      else Sequence.window cb.State.rcv_adv cb.State.rcv_nxt in
     match conn.State.tcp_state with
     | Time_wait -> window_size
     | _ ->
