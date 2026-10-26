@@ -5,9 +5,8 @@ let src = Logs.Src.create "tcp.subr" ~doc:"TCP subr"
 module Log = (val Logs.src_log src : Logs.LOG)
 
 (* tcp_input.c:3736 *)
-let tcp_mssopt (src, _, dst, _) =
+let tcp_mssopt mtu (src, _, dst, _) =
   let mss = Params.mssdflt
-  and maxmtu = 1500 (* tcp_maxmtu - lookup the routing entry of this connection *)
   (* for IPv6, 40 for IPv6 and 20 for TCP = 60 bytes
      for IPv4, 20 for IPv4 and 20 for TCP = 40 bytes *)
   and min_protoh = match src, dst with
@@ -15,10 +14,10 @@ let tcp_mssopt (src, _, dst, _) =
     | _ -> 40
   and thcmtu = 0 (* tcp_hc_getmtu (from hostcache) *)
   in
-  if maxmtu > 0 && thcmtu > 0 then
-    (min maxmtu thcmtu) - min_protoh
-  else if maxmtu > 0 || thcmtu > 0 then
-    (max maxmtu thcmtu) - min_protoh
+  if mtu > 0 && thcmtu > 0 then
+    (min mtu thcmtu) - min_protoh
+  else if mtu > 0 || thcmtu > 0 then
+    (max mtu thcmtu) - min_protoh
   else
     mss
 

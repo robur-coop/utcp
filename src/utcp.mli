@@ -18,9 +18,9 @@
 (** The abstract type of an immutable state of the TCP stack. *)
 type 'a state
 
-(** [empty make_notify id] constructs an empty TCP state with a function
+(** [empty ?mtu make_notify id] constructs an empty TCP state with a function
     how to create a notifications, and an identifier for the TCP stack. *)
-val empty : (unit -> 'a) -> string -> 'a state
+val empty : ?mtu:int -> (unit -> 'a) -> string -> 'a state
 
 (** [start_listen t port] adds [port] to the set of listened to ports. *)
 val start_listen : 'a state -> int -> 'a state
@@ -326,9 +326,10 @@ module State : sig
     id : string ;
     mutable ctr : int ;
     mk_notify : unit -> 'a;
+    mtu : int;
   }
   val pp : Mtime.t -> 'a t Fmt.t
-  val empty : (unit -> 'a) -> string -> 'a t
+  val empty : ?mtu:int -> (unit -> 'a) -> string -> 'a t
   val start_listen : 'a t -> int -> 'a t
   val stop_listen : 'a t -> int -> 'a t
 end

@@ -551,6 +551,7 @@ type 'a t = {
   id : string ;
   mutable ctr : int ;
   mk_notify : unit -> 'a;
+  mtu : int (* device MTU, for the advertised MSS *)
 }
 
 module States = Map.Make (struct
@@ -638,7 +639,7 @@ let pp now ppf t =
 let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 
-let empty mk_notify id =
+let empty ?(mtu= 1500) mk_notify id =
   {
     id ;
     listeners = IS.empty ;
@@ -646,4 +647,5 @@ let empty mk_notify id =
     stats = Stats.empty () ;
     ctr = 0 ;
     mk_notify ;
+    mtu ;
   }

@@ -47,7 +47,7 @@ let deliver_in_1 t m now id seg =
      or via handle_conn if in time_wait, and a syn, and the seq > rcv_nxt. *)
   m "deliver-in-1";
   let conn =
-    let advmss = Subr.tcp_mssopt id in
+    let advmss = Subr.tcp_mssopt t.mtu id in
     let rcvbufsize, sndbufsize, t_maxseg', snd_cwnd' =
       let bw_delay_product_for_rt = None in
       Subr.calculate_buf_sizes advmss (Segment.mss seg)

@@ -42,7 +42,7 @@ let connect ~src ?src_port ~dst ~dst_port t now =
   let conn =
     let iss = Sequence.of_int32 (Randomconv.int32 Mirage_crypto_rng.generate) in
     let rcv_wnd = Params.so_rcvbuf in
-    let advmss = Subr.tcp_mssopt id in
+    let advmss = Subr.tcp_mssopt t.mtu id in
     let t_rttseg = Some (now, iss) in
     let control_block = {
       initial_cb with
