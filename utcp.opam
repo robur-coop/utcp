@@ -5,7 +5,7 @@ homepage: "https://git.robur.coop/robur/utcp"
 dev-repo: "git+https://git.robur.coop/robur/utcp.git"
 bug-reports: "https://github.com/robur-coop/utcp/issues"
 available: [ arch != "arm32" & arch != "x86_32" ] # see #35
-license: "ISC"
+license: "AGPL-3.0-or-later"
 depends: [
   "ocaml" {>= "4.13.0"}
   "dune" {>= "2.7.0"}

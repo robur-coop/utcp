@@ -84,6 +84,20 @@ When to output segments?
 - basically on every incoming segment, on any user operation, and any timer (mostly rexmt, but as well persist and delack)
 - in tcp_output we establish a list of segments to be sent (if any), avoiding the necessity to wait for other interaction if the congestion window is big enough
 
+## Installation
+
+`opam install utcp`
+
+## License
+
+It is licensed under the AGPL-3.0 or later. If you want to pay for a more
+permissive license, reach out to team@robur.coop.
+
+## AI
+
+Contributions involving AI must comply with the rules set out [here](./AI.md).
+If they do not comply, we reserve the right to reject your contribution.
+
 ## TODO
 
 - I copied over various functions which need to be properly tested:
