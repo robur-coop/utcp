@@ -37,7 +37,7 @@ deliver_in_9 - recv SYN in TIME_WAIT (in case there's no LISTEN) - not handled
 let dropwithreset (src, _, dst, _) seg =
   Option.map (fun x -> src, dst, x) (Segment.dropwithreset seg)
 
-let deliver_in_1 mk_notify m stats now id seg =
+let deliver_in_1 t m now id seg =
   (* there's a difference from the model, namely that we don't care about
      sockets in TIME_WAIT - this is handled in handle_conn explicitly (allowing
      port reusage with strictly higher sequence numbers - RFC1122 4.2.2.13).
@@ -87,11 +87,11 @@ let deliver_in_1 mk_notify m stats now id seg =
       last_ack_sent = ack' ;
       t_rttseg }
     in
-    conn_state now mk_notify ~rcvbufsize ~sndbufsize Syn_received control_block
+    conn_state now t.mk_notify ~rcvbufsize ~sndbufsize Syn_received control_block
   in
   let reply = Segment.make_syn_ack conn.control_block id in
   Log.debug (fun m -> m "%a passive open %a" Connection.pp id (pp_conn_state now) conn);
-  Stats.incr_passive stats;
+  Stats.incr_passive t.stats;
   conn, reply
 
 let deliver_in_2 m stats now id conn seg ack =
@@ -977,7 +977,7 @@ let handle_noconn t now id seg =
   with
   | true, true ->
     (* there can't be anything in TIME_WAIT, otherwise we wouldn't end up here *)
-    let conn, reply = deliver_in_1 t.mk_notify m t.stats now id seg in
+    let conn, reply = deliver_in_1 t m now id seg in
     { t with connections = CM.add id conn t.connections }, [ reply ]
   | true, false ->
     (* deliver_in_1b *)
@@ -1065,7 +1065,7 @@ let handle_conn t now id conn seg =
          state. This is modelled by closing the existing [[TIME_WAIT]] socket and creating the new
          socket from scratch.
       *)
-      let conn, reply = deliver_in_1 t.mk_notify m t.stats now id seg in
+      let conn, reply = deliver_in_1 t m now id seg in
       Ok ({ t with connections = CM.add id conn t.connections }, [ reply ])
     | _ ->
       if not (in_window conn.control_block seg) then
