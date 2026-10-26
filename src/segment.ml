@@ -573,32 +573,30 @@ let make_ack cb ~fin (src, src_port, dst, dst_port) =
     push = false ; window ; options = [] ;
     payload_len = 0 ; payload = [] }
 
-let checksum ~src ~dst cs =
-  let len = Cstruct.length cs in
-  let protocol = 0x06 in
-  (* construct pseudoheader *)
+let pseudo_header_csum ~src ~dst len =
+  let protocol = 0x06 (* TCP *) in
   match src, dst with
   | Ipaddr.V4 src, Ipaddr.V4 dst ->
       let buf = Bytes.make 12 '\000' in
       Bytes.set_int32_be buf 0 (Ipaddr.V4.to_int32 src);
       Bytes.set_int32_be buf 4 (Ipaddr.V4.to_int32 dst);
       Bytes.set_uint8 buf 9 protocol;
-      Bytes.set_uint16_be buf 10 len;
-      let sum = Checksum.feed_string ~off:0 ~len:12 0 (Bytes.unsafe_to_string buf) in
-      Cstruct.BE.set_uint16 cs 16 0;
-      let sum = Checksum.feed_cstruct sum cs in
-      Checksum.finally sum
+      Bytes.set_uint16_be buf 10 len;                                   
+      Checksum.feed_string ~off:0 ~len:12 0 (Bytes.unsafe_to_string buf)
   | Ipaddr.V6 src, Ipaddr.V6 dst ->
-      let buf = Bytes.make 40 '\000' in
+      let buf = Bytes.make 40 '\000' in                                 
       Bytes.blit_string (Ipaddr.V6.to_octets src) 0 buf 0 16;
       Bytes.blit_string (Ipaddr.V6.to_octets dst) 0 buf 16 16;
       Bytes.set_uint16_be buf 34 len;
       Bytes.set_uint8 buf 39 protocol;
-      let sum = Checksum.feed_string ~off:0 ~len:40 0 (Bytes.unsafe_to_string buf) in
-      Cstruct.BE.set_uint16 cs 16 0;
-      let sum = Checksum.feed_cstruct sum cs in
-      Checksum.finally sum
+      Checksum.feed_string ~off:0 ~len:40 0 (Bytes.unsafe_to_string buf)
   | _ -> invalid_arg "mixing IPv4 and IPv6 addresses not supported"
+
+let checksum ~src ~dst cs =
+  let len = Cstruct.length cs in
+  let sum = pseudo_header_csum ~src ~dst len in
+  Cstruct.BE.set_uint16 cs 16 0;
+  Checksum.finally (Checksum.feed_cstruct sum cs)
 
 let encode_into buf t =
   let opt_len = length_options t.options in
