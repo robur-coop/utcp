@@ -8,6 +8,7 @@ val feed_string : off:int -> len:int -> int -> string -> int
 val digest_string : off:int -> len:int -> string -> int
 val digest_strings : string list -> int
 val finally : int -> int
+val fold : int -> int
 
 (**/*)
 
