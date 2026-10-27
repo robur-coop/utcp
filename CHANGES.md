@@ -55,7 +55,7 @@
 
 # 0.0.4 (2026-05-23)
 
-* Deuplicate the metrics sources, there's no need for each stack constructing
+* Deduplicate the metrics sources, there's no need for each stack constructing
   their own value. The "stack-id" is present as tag in each measurement.
   (#69 @hannesm)
 

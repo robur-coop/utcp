@@ -525,12 +525,20 @@ module Stats = struct
     mutable total_established : int ;
     mutable total_passive_connections : int ;
     mutable total_active_connections : int ;
+    mutable sndq : int ;
+    mutable rcvq : int ;
+    mutable states : (tcp_state, int) Hashtbl.t ;
+    transitions : (string, int) Hashtbl.t ;
   }
 
   let empty () = {
     total_established = 0 ;
     total_passive_connections = 0 ;
     total_active_connections = 0 ;
+    sndq = 0 ;
+    rcvq = 0 ;
+    states = Hashtbl.create 7 ;
+    transitions = Hashtbl.create 7 ;
   }
 
   let incr_passive t =
@@ -554,81 +562,73 @@ type 'a t = {
   mtu : int (* device MTU, for the advertised MSS *)
 }
 
-module States = Map.Make (struct
-    type t = tcp_state
-    let compare a b = compare a b
-  end)
+let num_connections t = CM.cardinal t.connections
 
 let src = Logs.Src.create "tcp.state" ~doc:"TCP state"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-let collect_metrics now connections =
-  CM.fold (fun k conn (rcvq, sndq, acc) ->
-      if Mtime.(Span.to_uint64_ns (span now conn.created)) > Duration.of_min 1 then
-        Log.debug (fun m -> m "%a in %a" Connection.pp k (pp_conn_state now) conn);
-      rcvq + Rope.length conn.rcvq,
-      sndq + Rope.length conn.sndq,
-      States.update conn.tcp_state (fun v -> Some (succ (Option.value ~default:0 v))) acc)
-    connections
-    (0, 0, States.empty)
-
-let num_connections t = CM.cardinal t.connections
-
-let metrics =
-  let tcp_states =
-    [ Syn_sent ; Syn_received ; Established ; Close_wait ; Fin_wait_1 ;
-      Closing ; Last_ack ; Fin_wait_2 ; Time_wait
-    ]
-  in
-  let open Metrics in
-  let doc = "uTCP metrics" in
-  let data ((rcvq, sndq, states), stats) =
-    let total = States.fold (fun _ v acc -> v + acc) states 0 in
-    Data.v
-      (List.map (fun tcp_state ->
-           let v = Option.value ~default:0 (States.find_opt tcp_state states) in
-           int (fsm_to_string tcp_state) v)
-          tcp_states @ [
-         int "active connections" total
-       ; int "total established" stats.Stats.total_established
-       ; int "total server" stats.total_passive_connections
-       ; int "total client" stats.total_active_connections
-       ; int "receive queue size" rcvq
-       ; int "send queue size" sndq
-       ])
-  in
-  let tag = Tags.string "stack-id" in
-  Src.v ~doc ~tags:Tags.[ tag ] ~data "utcp"
-
 let add_metrics t now =
-  Metrics.add metrics (fun x -> x t.id) (fun d -> d (collect_metrics now t.connections, t.stats))
-
-let transitions =
-  let create () =
-    let data : (string, int) Hashtbl.t = Hashtbl.create 7 in
-    (fun key ->
-       let cur = match Hashtbl.find_opt data key with
-         | None -> 0
-         | Some x -> x
-       in
-       Hashtbl.replace data key (succ cur)),
-    (fun () ->
-       let data, total =
-         Hashtbl.fold (fun key value (acc, total) ->
-             (Metrics.uint key value :: acc), value + total)
-           data ([], 0)
-       in
-       Metrics.uint "total" total :: data)
+  let states = Hashtbl.create 7 in
+  let sndq, rcvq =
+    CM.fold (fun k conn (rcvq, sndq) ->
+        if Mtime.(Span.to_uint64_ns (span now conn.created)) > Duration.of_min 1 then
+          Log.debug (fun m -> m "%a in %a" Connection.pp k (pp_conn_state now) conn);
+        let v = Option.value ~default:0 (Hashtbl.find_opt states conn.tcp_state) in
+        Hashtbl.replace states conn.tcp_state (succ v);
+        rcvq + Rope.length conn.rcvq,
+        sndq + Rope.length conn.sndq)
+      t.connections
+      (0, 0)
   in
-  let open Metrics in
-  let doc = "uTCP transition metrics" in
-  let incr, get = create () in
-  let data thing = incr thing; Data.v (get ()) in
-  let tag = Tags.string "stack-id" in
-  Src.v ~doc ~tags:Metrics.Tags.[ tag ] ~data "utcp_transition"
+  t.stats.sndq <- sndq;
+  t.stats.rcvq <- rcvq;
+  t.stats.states <- states
+
+let tcp_states =
+  [ Syn_sent ; Syn_received ; Established ; Close_wait ; Fin_wait_1 ;
+    Closing ; Last_ack ; Fin_wait_2 ; Time_wait
+  ]
+
+let _ts : (string * Stats.t) list ref = ref []
+
+let _utcp_metrics =
+  let measure () =
+    List.map (fun (id, stats) ->
+        let total = ref 0 in
+        [ "stack-id", id ],
+        List.map (fun tcp_state ->
+            let v =
+              Option.value ~default:0
+                (Hashtbl.find_opt stats.Stats.states tcp_state)
+            in
+            total := !total + v;
+            fsm_to_string tcp_state, v)
+          tcp_states @ [
+          "active connections", !total
+        ; "total established", stats.total_established
+        ; "total server", stats.total_passive_connections
+        ; "total client", stats.total_active_connections
+        ; "receive queue size", stats.rcvq
+        ; "send queue size", stats.sndq
+        ]) !_ts
+  in
+  Tally.v "utcp" measure
+
+let _transitions =
+  let measure () =
+    List.map (fun (id, stats) ->
+        let ts, total =
+          Hashtbl.fold (fun k v (acc, total) -> (k, v) :: acc, v + total)
+            stats.Stats.transitions ([], 0)
+        in
+        [ "stack-id", id ], ("total", total) :: ts)
+      !_ts
+  in
+  Tally.v "utcp_transition" measure
 
 let rule t name =
-  Metrics.add transitions (fun x -> x t.id) (fun d -> d name)
+  let v = Option.value ~default:0 (Hashtbl.find_opt t.stats.transitions name) in
+  Hashtbl.replace t.stats.transitions name (succ v)
 
 let pp now ppf t =
   Fmt.pf ppf "listener %a, connections: %a"
@@ -640,12 +640,16 @@ let start_listen t port = { t with listeners = IS.add port t.listeners }
 let stop_listen t port = { t with listeners = IS.remove port t.listeners }
 
 let empty ?(mtu= 1500) mk_notify id =
-  {
-    id ;
-    listeners = IS.empty ;
-    connections = CM.empty ;
-    stats = Stats.empty () ;
-    ctr = 0 ;
-    mk_notify ;
-    mtu ;
-  }
+  let t =
+    {
+      id ;
+      listeners = IS.empty ;
+      connections = CM.empty ;
+      stats = Stats.empty () ;
+      ctr = 0 ;
+      mk_notify ;
+      mtu ;
+    }
+  in
+  _ts := (t.id, t.stats) :: !_ts;
+  t
