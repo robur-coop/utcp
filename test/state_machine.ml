@@ -658,9 +658,63 @@ let test_close_wait =
     let conn' = State.CM.find quad tcp.State.connections in
     Alcotest.(check int) "snd_wnd floored at zero" 0 conn'.State.control_block.State.snd_wnd
   in
+  let fin_after_one_byte () =
+    (* An echo server exchanging exactly one byte, then closing: snd_nxt is
+       iss + 2 (SYN + 1 byte) when our FIN is first emitted. It must not be
+       mistaken for a FIN retransmission (sent at snd_nxt - 1, on top of the
+       data byte), otherwise the peer never acks it.
+
+       C: SYN ->         ACK -> "p" ->           ACK+FIN ->       ACK ->
+       S:     SYN+ACK ->              "p" ->               FIN ->
+       s:                     [ESTABLISHED]       [CLOSE_WAIT] [LAST_ACK] [CLOSED] *)
+    let tcp, id, _rcv_cond, _snd_cond = established () in
+    let data = { basic_seg with push = true ;
+                                seq = Sequence.incr initial_seq ;
+                                ack = Some (Sequence.incr rng_seq) ;
+                                window = 1 lsl 16 - 1 ;
+                                payload_len = 1 ; payload = [ "p" ] } in
+    let tcp, _evs, _out = handle tcp data in
+    let tcp = match recv tcp now id with
+      | Ok (tcp, bufs, _, _) ->
+        Alcotest.(check string) "received one byte" "p" (String.concat "" bufs);
+        tcp
+      | Error _ -> Alcotest.fail "expected recv to deliver the byte"
+    in
+    let tcp = match send tcp now id "p" with
+      | Ok (tcp, 1, _, _) -> tcp
+      | _ -> Alcotest.fail "expected send to enqueue one byte"
+    in
+    let fin_ack = { basic_seg with flag = Some `Fin ;
+                                   seq = Sequence.addi initial_seq 2 ;
+                                   ack = Some (Sequence.addi rng_seq 2) ;
+                                   window = 1 lsl 16 - 1 } in
+    let tcp, _evs, _out = handle tcp fin_ack in
+    let tcp = match recv tcp now id with
+      | Error `Eof -> tcp
+      | _ -> Alcotest.fail "expected eof"
+    in
+    let tcp, outs = match close tcp now id with
+      | Ok (tcp, _, outs) -> tcp, outs
+      | Error _ -> Alcotest.fail "close failed"
+    in
+    let fins =
+      List.filter_map (fun (_, _, seg) ->
+          if seg.Segment.flag = Some `Fin then Some seg.Segment.seq else None)
+        outs
+    in
+    Alcotest.(check (list sequence)) "FIN is sent after the data byte"
+      [ Sequence.addi rng_seq 2 ] fins;
+    let ack = { basic_seg with seq = Sequence.addi initial_seq 3 ;
+                               ack = Some (Sequence.addi rng_seq 3) ;
+                               window = 1 lsl 16 - 1 } in
+    let tcp, _evs, _out = handle tcp ack in
+    Alcotest.(check int) "connection is closed once our FIN is acked"
+      0 (num_connections tcp)
+  in
   [ "FIN in Established signals, does not drop", `Quick, fin_on_established
   ; "RST in Established drops and wakes all waiters", `Quick, rst_on_established
-  ; "ACK covering more than snd_wnd floors at zero", `Quick, ack_never_shrinks_snd_wnd_below_zero ]
+  ; "ACK covering more than snd_wnd floors at zero", `Quick, ack_never_shrinks_snd_wnd_below_zero
+  ; "FIN after exchanging exactly one byte", `Quick, fin_after_one_byte ]
 
 let tests =
   test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd @ test_window_probe @ test_close_wait
