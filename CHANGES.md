@@ -1,3 +1,31 @@
+# 0.0.10 (2026-11-05)
+
+* Relicense to AGPL, add AI.md
+  (@hannes https://git.robur.coop/robur/utcp/pulls/21)
+
+Protocol fixes & improvements
+* Clamp the receive window when rcv_nxt is past rcv_adv (also in FreeBSD)
+  (@dinosaure https://git.robur.coop/robur/utcp/pulls/20)
+* Do not delay the ACK when 2 MSS or more are left unacknowledged (also in FreeBSD)
+  (@dinosaure https://git.robur.coop/robur/utcp/pulls/25)
+* Avoid snd_wnd being negative (@hannes 6d2c3a0cfe3b3461b0acfc6bc005109a5e9ad68c)
+* tcp_output: do not treat the first FIN after one data byte as a retransmission
+  (@hhugo https://github.com/robur-coop/utcp/pull/79)
+
+API changes
+* Be able to pass the MTU from what the device gives to us
+  (@dinosaure https://git.robur.coop/robur/utcp/pulls/26)
+* Configure `{snd,rcv}buf` (defaults to `Params.so_{rcv,snd}buf`)
+  (@dinosaure https://git.robur.coop/robur/utcp/pulls/27)
+* use tally instead of metrics
+  (@hannes https://git.robur.coop/robur/utcp/pulls/28)
+* Add Checksum.fold (@dinosaure https://git.robur.coop/robur/utcp/pulls/22)
+* Split our Segment.checksum function to be able to generate a partial checksum
+  from a pseudo-header (@dinosaure https://git.robur.coop/robur/utcp/pulls/23)
+* Pass the global value `t` instead of `mk_notify`/`stats` separately in
+  `deliver_1_in` (@dinosaure https://git.robur.coop/robur/utcp/pulls/24)
+
+
 # 0.0.9 (2026-09-23)
 
 * deliver_in_2 (active open): clamp window scale to tcp_maxwinscale
