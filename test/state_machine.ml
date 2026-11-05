@@ -664,13 +664,13 @@ let test_close_wait =
        C: SYN ->         ACK -> "p" ->           ACK+FIN ->       ACK ->
        S:     SYN+ACK ->              "p" ->               FIN ->
        s:                     [ESTABLISHED]       [CLOSE_WAIT] [LAST_ACK] [CLOSED] *)
-    let tcp, id, _rcv_cond, _snd_cond = established () in
+    let tcp, id, _rcv_cond, _snd_cond = established ~now () in
     let data = { basic_seg with push = true ;
                                 seq = Sequence.incr initial_seq ;
                                 ack = Some (Sequence.incr rng_seq) ;
                                 window = 1 lsl 16 - 1 ;
                                 payload_len = 1 ; payload = [ "p" ] } in
-    let tcp, _evs, _out = handle tcp data in
+    let tcp, _evs, _out = handle ~now tcp data in
     let tcp = match recv tcp now id with
       | Ok (tcp, bufs, _, _) ->
         Alcotest.(check string) "received one byte" "p" (String.concat "" bufs);
@@ -685,7 +685,7 @@ let test_close_wait =
                                    seq = Sequence.addi initial_seq 2 ;
                                    ack = Some (Sequence.addi rng_seq 2) ;
                                    window = 1 lsl 16 - 1 } in
-    let tcp, _evs, _out = handle tcp fin_ack in
+    let tcp, _evs, _out = handle ~now tcp fin_ack in
     let tcp = match recv tcp now id with
       | Error `Eof -> tcp
       | _ -> Alcotest.fail "expected eof"
@@ -704,7 +704,7 @@ let test_close_wait =
     let ack = { basic_seg with seq = Sequence.addi initial_seq 3 ;
                                ack = Some (Sequence.addi rng_seq 3) ;
                                window = 1 lsl 16 - 1 } in
-    let tcp, _evs, _out = handle tcp ack in
+    let tcp, _evs, _out = handle ~now tcp ack in
     Alcotest.(check int) "connection is closed once our FIN is acked"
       0 (num_connections tcp)
   in
