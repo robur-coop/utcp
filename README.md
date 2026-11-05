@@ -79,7 +79,8 @@ Model anomalies:
 - we update rcv_wnd (of the control block) in tcp_output_really, the model does not (see TCP1_hostTypesScript.sml:538 - they compute the rcv_wnd lazily)
 - the timer_tt_rexmt_1 is restricted to tcp_state <> [ CLOSED; LISTEN; ] SYN SENT; CLOSE WAIT; FIN WAIT 2; TIME WAIT, but in CLOSE WAIT we need a retransmit timer, implementation changed in f3a083fc082f580e387917ebbb135b1c940fd5bc
 - no tf_shouldacknow in close or shutdown (if the write part is shutdown, the cantsndmore signals tcp_output_* that a fin is needed anyways)
-- tcp_output_really check for snd_nxt should include una = iss & nxt - iss = 2 -- the reasoning is that otherwise a TCP connection where SYN has been acked, and a single byte is transferred and then FIN is sent ends in the same case
+- tcp_output_really check for snd_nxt should include una = iss & nxt - iss = 2 -- the reasoning is that otherwise a TCP connection where SYN has been acked, and a single byte is transferred and then FIN is sent ends in the same case - see 119b0362d187cf40da149b56d911e840864c201a (FreeBSD has TF_SENTFIN for this)
+- when rcv_nxt > rcv_adv, move window to 0 - 79dae8ee196f2c7072a12c6d3034005a8a6c6dca (same as FreeBSD)
 
 When to output segments?
 - basically on every incoming segment, on any user operation, and any timer (mostly rexmt, but as well persist and delack)
