@@ -25,7 +25,6 @@ API changes
 * Pass the global value `t` instead of `mk_notify`/`stats` separately in
   `deliver_1_in` (@dinosaure https://git.robur.coop/robur/utcp/pulls/24)
 
-
 # 0.0.9 (2026-09-23)
 
 * deliver_in_2 (active open): clamp window scale to tcp_maxwinscale
