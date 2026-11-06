@@ -300,7 +300,8 @@ module State : sig
     snd_ssthresh_prev : int ;
     snd_recover : Sequence.t ;
     t_segq : Reassembly_queue.t ;
-    t_softerror : string option
+    t_softerror : string option ;
+    t_sack : bool ;
   }
   val initial_cb : control_block
   type 'a conn_state = {

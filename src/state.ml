@@ -349,9 +349,10 @@ type control_block = {
 
   (*: other :*)
   t_segq :  Reassembly_queue.t;  (*: segment reassembly queue :*)
-  t_softerror : string option      (*: current transient error; reported only if failure becomes permanent :*)
+  t_softerror : string option;      (*: current transient error; reported only if failure becomes permanent :*)
   (*: could cut this down to the actually-possible errors? :*)
 
+  t_sack : bool;
 }
 
 (* auxFns:1066*)
@@ -407,6 +408,7 @@ let initial_cb =
     snd_cwnd_prev = 0;
     snd_ssthresh_prev = 0;
     t_badrxtwin = Mtime.of_uint64_ns 0L;
+    t_sack = false;
   }
 
 let pp_timer now ppf (_, deadline) =
@@ -427,7 +429,7 @@ let pp_control now ppf c =
               irs %a@ rcv_adv %a@ snd_recover %a@ t_maxseg %d@ t_advmss %d@ \
               snd_scale %d@ rcv_scale %d@ request_r_scale %a@ tf_doing_ws %B@ \
               tt_rexmt %a@ tt_2msl %a@ tt_delack %a@ tt_conn_est %a@ \
-              tt_fin_wait_2 %a@ dupacks %u@ rttinf %a@ rttseg %a"
+              tt_fin_wait_2 %a@ dupacks %u@ rttinf %a@ rttseg %a@ sack %B"
     c.tf_needfin c.tf_shouldacknow
     Sequence.pp c.snd_una Sequence.pp c.snd_max Sequence.pp c.snd_nxt
     Sequence.pp c.snd_wl1 Sequence.pp c.snd_wl2 Sequence.pp c.iss
@@ -450,6 +452,7 @@ let pp_control now ppf c =
              (Option.value ~default:Mtime.min_stamp (Mtime.sub_span now sent))
          in
          ts', seg) c.t_rttseg)
+    c.t_sack
 (*
     (* tt_keep = None; *)
     t_idletime = Mtime.of_uint64_ns 0L;
