@@ -608,6 +608,7 @@ let tcp_output_perhaps now id conn =
 let make_syn_ack cb (src, src_port, dst, dst_port) =
   let window = Int.min cb.State.rcv_wnd max_win in
   let options =
+    (if cb.t_sack then [ SackPermitted ] else []) @
     MaximumSegmentSize cb.t_advmss ::
     (Option.map (fun sc -> WindowScale sc) cb.request_r_scale |> Option.to_list)
   in
@@ -620,6 +621,7 @@ let make_syn_ack cb (src, src_port, dst, dst_port) =
 let make_syn cb (src, src_port, dst, dst_port) =
   let window = Int.min cb.State.rcv_wnd max_win in
   let options =
+    SackPermitted ::
     MaximumSegmentSize cb.State.t_advmss ::
     (Option.map (fun sc -> WindowScale sc) cb.request_r_scale |> Option.to_list)
   in

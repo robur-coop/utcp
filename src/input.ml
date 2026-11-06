@@ -66,6 +66,9 @@ let deliver_in_1 t m now id seg =
     and ack' = Sequence.incr seg.Segment.seq (* ACK the SYN *)
     in
     let t_rttseg = Some (now, iss) in
+    let t_sack =
+      List.exists (function Segment.SackPermitted -> true | _ -> false) seg.options
+    in
     let control_block = {
       initial_cb with
       tt_rexmt = Subr.start_tt_rexmt now 0 false initial_cb.t_rttinf ;
@@ -85,8 +88,9 @@ let deliver_in_1 t m now id seg =
       tf_doing_ws ; snd_scale ; rcv_scale ;
       request_r_scale ;
       last_ack_sent = ack' ;
-      t_rttseg }
-    in
+      t_rttseg ;
+      t_sack ;
+    } in
     conn_state now t.mk_notify ~rcvbufsize ~sndbufsize Syn_received control_block
   in
   let reply = Segment.make_syn_ack conn.control_block id in
@@ -98,6 +102,9 @@ let deliver_in_2 m stats now id conn seg ack =
   m "deliver-in-2";
   let cb = conn.control_block in
   let* () = guard (Sequence.equal ack cb.snd_nxt) (`Drop (fun () -> "ack = snd_nxt")) in
+  let t_sack =
+    List.exists (function Segment.SackPermitted -> true | _ -> false) seg.Segment.options
+  in
   let tf_doing_ws, snd_scale, rcv_scale =
     match Segment.ws seg, cb.request_r_scale with
     | None, _ -> false, 0, 0
@@ -178,6 +185,7 @@ let deliver_in_2 m stats now id conn seg ack =
     t_softerror ;
     t_rttseg ;
     t_rttinf ;
+    t_sack ;
   }
   in
   Stats.incr_established stats;
