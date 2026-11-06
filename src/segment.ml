@@ -12,17 +12,28 @@ let ( let* ) = Result.bind
 type tcp_option =
   | MaximumSegmentSize of int
   | WindowScale of int
+  | SackPermitted
+  | Sack of (Sequence.t * Sequence.t) list
   | Unknown of int * Cstruct.t
 
 let equal_option a b = match a, b with
   | MaximumSegmentSize a, MaximumSegmentSize b -> a = b
   | WindowScale a, WindowScale b -> a = b
+  | SackPermitted, SackPermitted -> true
+  | Sack s1, Sack s2 ->
+    List.length s1 = List.length s2 && List.for_all2 (fun (s, e) (s', e') ->
+        Sequence.equal s s' && Sequence.equal e e') s1 s2
   | Unknown (t, v), Unknown (t', v') -> t = t' && Cstruct.equal v v'
   | _ -> false
 
 let pp_option ppf = function
   | MaximumSegmentSize mss -> Fmt.pf ppf "MSS %d" mss
   | WindowScale f -> Fmt.pf ppf "window scale %d" f
+  | SackPermitted -> Fmt.pf ppf "sack permitted"
+  | Sack seq -> Fmt.pf ppf "SACK %a"
+                  Fmt.(list ~sep:(any ", ")
+                         (pair ~sep:(any " - ") Sequence.pp Sequence.pp))
+                  seq
   | Unknown (typ, v) -> Fmt.pf ppf "typ %X value %a" typ Cstruct.hexdump_pp v
 
 let encode_option buf off = function
@@ -36,6 +47,20 @@ let encode_option buf off = function
     Cstruct.set_uint8 buf (off + 1) 3;
     Cstruct.set_uint8 buf (off + 2) f;
     off + 3
+  | SackPermitted ->
+    Cstruct.set_uint8 buf off 4;
+    Cstruct.set_uint8 buf (off + 1) 2;
+    off + 2
+  | Sack seq ->
+    let ivs = List.length seq in
+    (* if ivs > 31 then invalid_arg *)
+    Cstruct.set_uint8 buf off 5;
+    Cstruct.set_uint8 buf (off + 1) (2 + 8 * ivs);
+    List.iteri (fun idx (s, e) ->
+        Cstruct.BE.set_uint32 buf (off + 2 + 8 * idx) (Sequence.to_int32 s);
+        Cstruct.BE.set_uint32 buf (off + 2 + 4 + 8 * idx) (Sequence.to_int32 e))
+      seq;
+    off + 2 + 8 * ivs
   | Unknown (typ, data) ->
     let len = Cstruct.length data in
     Cstruct.set_uint8 buf off typ;
@@ -48,6 +73,8 @@ let length_options opts =
     List.fold_left (fun l -> function
         | MaximumSegmentSize _ -> 4 + l
         | WindowScale _ -> 3 + l
+        | SackPermitted -> 2 + l
+        | Sack seq -> 2 + 8 * List.length seq + l
         | Unknown (_, data) -> Cstruct.length data + 2 + l)
       0 opts
   in
@@ -69,6 +96,36 @@ let decode_option data =
       guard (Cstruct.get_uint8 data 1 = 3) (`Msg "window scale length not 3")
     in
     Ok (Some (WindowScale (Cstruct.get_uint8 data 2)), 3)
+  | 4 ->
+    let* () =
+      guard (Cstruct.length data >= 2) (`Msg "SackPermitted shorter than 2 bytes")
+    in
+    let* () =
+      guard (Cstruct.get_uint8 data 1 = 2) (`Msg "SackPermitted length not 2")
+    in
+    Ok (Some SackPermitted, 2)
+  | 5 ->
+    let* () =
+      guard (Cstruct.length data >= 2) (`Msg "Sack must be at least 2 bytes")
+    in
+    let len = Cstruct.get_uint8 data 1 in
+    let* () =
+      guard (len > 0 && Cstruct.length data >= len) (`Msg "Sack must be at least 2 bytes")
+    in
+    let* () =
+      guard ((len - 2) land 0x7 = 0) (`Msg "Sack length - 2 must be divisible by 8")
+    in
+    let amount = len - 2 / 8 in
+    let rec go idx acc =
+      if idx = amount then
+        List.rev acc
+      else
+        let s = Cstruct.BE.get_uint32 data (2 + idx * 8) |> Sequence.of_int32 in
+        let e = Cstruct.BE.get_uint32 data (2 + 4 + idx * 8) |> Sequence.of_int32 in
+        go (succ idx) ((s, e) :: acc)
+    in
+    let s = go 0 [] in
+    Ok (Some (Sack s), len)
   | x ->
     let* () =
       guard (Cstruct.length data >= 2) (`Msg "option shorter than 2 bytes")

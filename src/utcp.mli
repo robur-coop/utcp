@@ -100,6 +100,8 @@ module Segment : sig
   type tcp_option =
     | MaximumSegmentSize of int
     | WindowScale of int
+    | SackPermitted
+    | Sack of (Sequence.t * Sequence.t) list
     | Unknown of int * Cstruct.t
 
   (** The record type of the TCP segment *)
