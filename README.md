@@ -73,7 +73,7 @@ FreeBSD).
 
 Model anomalies:
 - is tcp option size computation good in timer_tt_rexmtsyn_1? (missing MSS)
-- tt_persist doesn't check whether shift + 1 is < tcp_maxrxtshift
+- tt_persist doesn't check whether shift + 1 is < tcp_maxrxtshift, and also there's never a drop (after the tcp_backoff array has been used up) -- there is a case in FreeBSD: "tp->t_rxtshift >= V_tcp_retries && (ticks - tp->t_rcvtime >= tcp_maxpersistidle || ticks - tp->t_rcvtime >= TCP_REXMTVAL(tp) * tcp_totbackoff))"
 - di3_ackstuff: hostLTS:452 "ack <= snd_una", but text "strictly less than snd_una"
 - di3_newackstuff: hostLTS:251 uses "cb'.snd_nxt" which is the same (and a no-op)
 - we update rcv_wnd (of the control block) in tcp_output_really, the model does not (see TCP1_hostTypesScript.sml:538 - they compute the rcv_wnd lazily)
