@@ -388,7 +388,8 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
   let burst =
     let mss = cb.State.t_maxseg in
     if cb.State.t_tso_max = 0 || mss < cb.State.t_device_mss then mss
-    else Int.max mss (cb.State.t_tso_max / mss * mss) in
+    else Int.max mss (cb.State.t_tso_max / mss * mss)
+  in
   let data_to_send, more_data_could_be_sent =
     let data' =
       Rope.shift conn.State.sndq
