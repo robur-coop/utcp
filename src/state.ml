@@ -352,6 +352,7 @@ type control_block = {
   t_softerror : string option;     (*: current transient error; reported only if failure becomes permanent :*)
   (*: could cut this down to the actually-possible errors? :*)
 
+  (*: for GRO/GSO/TSO :*)
   t_device_mss : int; (* mtu - ip_hdr - tcp_hdr: the host segments at this size *)
   t_tso_max : int; (* max TCP payload of a TSO super-segment, 0 = no TSO *)
 }
@@ -455,7 +456,6 @@ let pp_control now ppf c =
              (Option.value ~default:Mtime.min_stamp (Mtime.sub_span now sent))
          in
          ts', seg) c.t_rttseg)
-
     c.t_device_mss c.t_tso_max
 (*
     (* tt_keep = None; *)
