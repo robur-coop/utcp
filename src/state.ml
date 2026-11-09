@@ -198,17 +198,24 @@ module Reassembly_queue = struct
 
   let is_empty = function Tree.Leaf -> true | _ -> false
 
+  (* TODO: we may want to keep a third one? *)
+  let chop_to_2 s =
+    match s with
+    | [] | [ _ ] | [ _ ; _ ] -> s
+    | a :: b :: _ -> [ a ; b ]
+
   (* insert segment, potentially coalescing existing ones *)
-  let insert_seg t (seq, fin, (data : Rope.t)) =
+  let insert_seg t sackblocks (seq, fin, (data : Rope.t)) =
     (* they may overlap, the newest seg wins *)
     (* (1) figure out the place whereafter to insert the seg *)
     (* (2) peek whether the next seg can be already coalesced *)
-    let insert_with_end t elt =
+    let insert_with_end t sackblocks elt =
       let seq_end = Sequence.addi elt.seq (Rope.length elt.data) in
       match Tree.find t seq_end with
-      | None -> Tree.insert t elt
+      | None -> Tree.insert t elt, (elt.seq, seq_end) :: chop_to_2 sackblocks
       | Some e ->
         if Sequence.less_equal elt.seq e.seq && Sequence.greater_equal seq_end e.seq then
+          let sackblocks = List.filter (fun (s, _) -> not (Sequence.equal e.seq s)) sackblocks in
           let t = Tree.remove t e in
           let overlap = Sequence.sub seq_end e.seq in
           let elt =
@@ -221,26 +228,28 @@ module Reassembly_queue = struct
               let data = Rope.concat elt.data data in
               { elt with fin = e.fin || elt.fin ; data }
           in
-          let t =
+          let t, sackblocks =
             (* we need to get rid of the segments that are completely overlapped by the new one *)
-            let rec rm_one t =
+            let rec rm_one t sackblocks =
               match Tree.find t seq_end with
-              | None -> t
+              | None -> t, sackblocks
               | Some e ->
                 let eseqe = Sequence.addi e.seq (Rope.length e.data) in
                 if Sequence.greater_equal e.seq elt.seq && Sequence.less_equal eseqe seq_end then
-                  rm_one (Tree.remove t e)
+                  let t = Tree.remove t e in
+                  let sackblocks = List.filter (fun (s, _) -> not (Sequence.equal s e.seq)) sackblocks in
+                  rm_one t sackblocks
                 else
-                  t
+                  t, sackblocks
             in
-            rm_one t
+            rm_one t sackblocks
           in
-          Tree.insert t elt
+          Tree.insert t elt, (elt.seq, Sequence.addi elt.seq (Rope.length elt.data)) :: chop_to_2 sackblocks
         else
-          Tree.insert t elt
+          Tree.insert t elt, (elt.seq, seq_end) :: chop_to_2 sackblocks
     in
     match Tree.find t seq with
-    | None -> insert_with_end t { seq ; fin ; data }
+    | None -> insert_with_end t sackblocks { seq ; fin ; data }
     | Some e ->
       (* either the new one is disjoint or we can append *)
       let e_seqe = Sequence.addi e.seq (Rope.length e.data) in
@@ -256,13 +265,15 @@ module Reassembly_queue = struct
         else
           { seq ; fin ; data }
       in
-      insert_with_end t elt
+      insert_with_end t sackblocks elt
 
-  let maybe_take t seq =
+  let maybe_take t sackblocks seq =
     match Tree.find t seq with
-    | None -> t, None
+    | None -> t, sackblocks, None
     | Some e ->
       Tree.remove t e,
+      (* TODO: should we lookup and add more sack blocks? *)
+      List.filter (fun (s, _) -> not (Sequence.equal seq s)) sackblocks,
       if Sequence.equal seq e.seq then
         Some (e.data, e.fin)
       else if Sequence.greater seq e.seq then

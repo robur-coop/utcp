@@ -715,7 +715,9 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
       (*: Check to see whether any data or a [[FIN]] can be
           reassembled. hannes (2023-08-30 nothing non-deterministically here,
           also not dealing with oob (as does this stack) :*)
-      let t_segq, r = Reassembly_queue.maybe_take cb.t_segq rseq_trimmed in
+      let t_segq, sackblocks, r =
+        Reassembly_queue.maybe_take cb.t_segq cb.sackblocks rseq_trimmed
+      in
       (* Length (in sequence space) of reassembled data, counting a [[FIN]] as
          one byte and including any out-of-line urgent data previously removed *)
       let data_reass, fin_reass0 = Option.value ~default:(Rope.empty, false) r in
@@ -748,6 +750,7 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
         tt_delack ;
         tf_shouldacknow ;
         t_segq ;   (*: updated reassembly queue, post-pruning :*)
+        sackblocks ;
         rcv_nxt ;
         rcv_wnd ;
       }
@@ -767,10 +770,13 @@ let di3_datastuff_really now the_ststuff conn seg _bsd_fast_path ourfinisacked f
       (*: Hack: assertion used to share values with later conditions :*)
       let fin_reass = false in (* it is out-of-order *)
       (*: Update the socket's TCP control block state :*)
-      let t_segq =
-        Reassembly_queue.insert_seg cb.t_segq (seq_trimmed, fin_trimmed, data_trimmed_left_right)
+      let t_segq, sackblocks =
+        Reassembly_queue.insert_seg cb.t_segq cb.sackblocks
+          (seq_trimmed, fin_trimmed, data_trimmed_left_right)
       in
-      let control_block = { cb with tf_shouldacknow = true ; t_segq } in
+      let control_block =
+        { cb with tf_shouldacknow = true ; t_segq ; sackblocks }
+      in
       (* since it is out-of-order, we do not (yet) handle the fin *)
       ({ conn with control_block }, fin_reass, []), true
       (*: Case (3) The segment is a pure [[ACK]] segment (contains no data) (and

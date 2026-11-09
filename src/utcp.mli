@@ -258,8 +258,8 @@ module State : sig
     val empty : t
     val is_empty : t -> bool
     val length : t -> int
-    val insert_seg : t -> (Sequence.t * bool * Rope.t) -> t
-    val maybe_take : t -> Sequence.t -> (t * (Rope.t * bool) option)
+    val insert_seg : t -> (Sequence.t * Sequence.t) list -> (Sequence.t * bool * Rope.t) -> t * (Sequence.t * Sequence.t) list
+    val maybe_take : t -> (Sequence.t * Sequence.t) list -> Sequence.t -> (t * (Sequence.t * Sequence.t) list * (Rope.t * bool) option)
     val pp : t Fmt.t
   end
   type control_block = {
