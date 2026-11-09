@@ -302,6 +302,7 @@ module State : sig
     t_segq : Reassembly_queue.t ;
     t_softerror : string option ;
     t_sack : bool ;
+    sackblocks : (Sequence.t * Sequence.t) list;
   }
   val initial_cb : control_block
   type 'a conn_state = {

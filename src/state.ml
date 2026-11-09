@@ -353,6 +353,7 @@ type control_block = {
   (*: could cut this down to the actually-possible errors? :*)
 
   t_sack : bool;
+  sackblocks : (Sequence.t * Sequence.t) list;
 }
 
 (* auxFns:1066*)
@@ -409,6 +410,7 @@ let initial_cb =
     snd_ssthresh_prev = 0;
     t_badrxtwin = Mtime.of_uint64_ns 0L;
     t_sack = false;
+    sackblocks = [];
   }
 
 let pp_timer now ppf (_, deadline) =

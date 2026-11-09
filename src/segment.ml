@@ -452,10 +452,12 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
     in
     let dlen = Rope.length data' in
     let len_could_be_sent = Int.max 0 snd_wnd_unused in
+    let maxseg = cb.t_maxseg - (2 + 8 * List.length cb.sackblocks) in
     let data' =
-      let len = Int.min dlen (Int.min len_could_be_sent cb.State.t_maxseg) in
-      Rope.chop data' len in
-    data', dlen > cb.t_maxseg && len_could_be_sent > cb.t_maxseg
+      let len = Int.min dlen (Int.min len_could_be_sent maxseg) in
+      Rope.chop data' len
+    in
+    data', dlen > maxseg && len_could_be_sent > maxseg
   in
   let dlen = Rope.length data_to_send in
   (*: Should [[FIN]] be set in this segment? :*)
@@ -502,10 +504,14 @@ let tcp_output_really_helper now (src, src_port, dst, dst_port) window_probe con
   (*: Assert the advertised window is within a sensible range :*)
   let flag = if fin then Some `Fin else None in
   let seg =
+    let options = match cb.sackblocks with
+      | [] -> []
+      | xs -> [ Sack xs ]
+    in
     { src_port ; dst_port ; seq = snd_nxt;
       ack = Some cb.State.rcv_nxt ; flag ; push ;
       window = Int.min (rcv_wnd' lsr cb.rcv_scale) max_win ;
-      options = [] ; payload_len = Rope.length data_to_send ;
+      options ; payload_len = Rope.length data_to_send ;
       payload = Rope.to_strings data_to_send
     }
   in
@@ -633,13 +639,16 @@ let make_syn cb (src, src_port, dst, dst_port) =
 (* auxFns:1437 *)
 let make_ack cb ~fin (src, src_port, dst, dst_port) =
   let window = Int.min (cb.State.rcv_wnd lsr cb.rcv_scale) max_win in
-  (* sack *)
+  let options = match cb.sackblocks with
+    | [] -> []
+    | xs -> [ Sack xs ]
+  in
   src, dst,
   { src_port ; dst_port ;
     seq = if fin then cb.snd_una else cb.snd_nxt ;
     ack = Some cb.rcv_nxt ;
     flag = if fin then Some `Fin else None ;
-    push = false ; window ; options = [] ;
+    push = false ; window ; options ;
     payload_len = 0 ; payload = [] }
 
 let pseudo_header_csum ~src ~dst len =
