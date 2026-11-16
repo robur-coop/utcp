@@ -1088,24 +1088,44 @@ let handle_conn t now id conn seg =
                            Sequence.pp seg.Segment.seq
                            Sequence.pp conn.control_block.rcv_nxt))
         else begin
-          (* RFC9293 3.10.7.4 (Other states, [_]):
-
-             If an incoming segment is not acceptable, an acknowledgment should
-             be sent in reply (unless the RST bit is set, if so drop the segment
-             and return):
-
-             <SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK> *)
-          Log.debug (fun m ->
-              m "%a unacceptable segment seq %a seql %u rcv_nxt %a rcv_wnd %u, acking"
-                Connection.pp id
-                Sequence.pp seg.Segment.seq seg.payload_len
-                Sequence.pp conn.control_block.rcv_nxt
-                conn.control_block.rcv_wnd);
-          let control_block =
-            { conn.control_block with tf_shouldacknow = true } in
-          let conn' = { conn with control_block } in
-          let conn', out = Segment.tcp_output_perhaps now id conn' in
-          Ok (add conn', out)
+          (* A segment whose data and FIN are entirely before rcv_nxt is an
+             old duplicate -- a retransmitted FIN, or a duplicate bare ACK. As
+             BSD does (tcp_input, "todrop"), still process its ACK rather than
+             only replying with one. The FIN case is the one that matters:
+             otherwise two utcp stacks in a simultaneous close loop forever -- in
+             CLOSING each answers the other's FIN retransmission with its own, so
+             neither ever sees its FIN acked. *)
+          let old_duplicate =
+            let fin = if seg.Segment.flag = Some `Fin then 1 else 0 in
+            Sequence.less seg.Segment.seq conn.control_block.rcv_nxt &&
+            Sequence.less_equal
+              (Sequence.addi seg.Segment.seq (seg.Segment.payload_len + fin))
+              conn.control_block.rcv_nxt
+          in
+          match seg.Segment.flag, seg.Segment.ack with
+          | (None | Some `Fin), Some ack when old_duplicate ->
+            (* trim the duplicate to a bare ACK at rcv_nxt and deliver it *)
+            let seg' = { seg with Segment.seq = conn.control_block.rcv_nxt ;
+                                  flag = None ; push = false ;
+                                  payload = [] ; payload_len = 0 } in
+            let control_block =
+              { conn.control_block with tf_shouldacknow = true } in
+            deliver_ack { conn with control_block } seg' None ack
+          | _ ->
+            (* RFC9293 3.10.7.4 (Other states, [_]): an unacceptable segment is
+               acknowledged (unless it is a RST, handled above):
+               <SEQ=SND.NXT><ACK=RCV.NXT><CTL=ACK> *)
+            Log.debug (fun m ->
+                m "%a unacceptable segment seq %a seql %u rcv_nxt %a rcv_wnd %u, acking"
+                  Connection.pp id
+                  Sequence.pp seg.Segment.seq seg.payload_len
+                  Sequence.pp conn.control_block.rcv_nxt
+                  conn.control_block.rcv_wnd);
+            let control_block =
+              { conn.control_block with tf_shouldacknow = true } in
+            let conn' = { conn with control_block } in
+            let conn', out = Segment.tcp_output_perhaps now id conn' in
+            Ok (add conn', out)
         end
       else
         (* RFC5961: challenge acks for SYN and (RST where seq != rcv_nxt), keep state *)
