@@ -1071,6 +1071,17 @@ let handle_conn t now id conn seg =
       let conn, reply = deliver_in_1 t m now id seg in
       Ok ({ t with connections = CM.add id conn t.connections }, [ reply ])
     | _ ->
+      let deliver_ack conn seg f ack =
+        let* conn', out = deliver_in_3 m now id conn seg f ack in
+        match conn' with
+        | None -> Ok (drop (), [])
+        | Some conn' ->
+          let conn'', out' = match out with
+            | [] -> Segment.tcp_output_perhaps now id conn'
+            | x -> conn', x
+          in
+          Ok (add conn'', out')
+      in
       if not (in_window conn.control_block seg) then
         if seg.Segment.flag = Some `Rst then
           Error (`Drop (fun () -> Fmt.str "RST out of window seq %a rcv_nxt %a"
@@ -1106,16 +1117,7 @@ let handle_conn t now id conn seg =
           let* seg' = deliver_in_8 m id conn seg in
           Ok (t, [ seg' ])
         | _, None -> Error (`Drop (fun () -> "no ACK"))
-        | f, Some ack ->
-          let* conn', out = deliver_in_3 m now id conn seg f ack in
-          match conn' with
-          | None -> Ok (drop (), [])
-          | Some conn' ->
-            let conn'', out' = match out with
-              | [] -> Segment.tcp_output_perhaps now id conn'
-              | x -> conn', x
-            in
-            Ok (add conn'', out')
+        | f, Some ack -> deliver_ack conn seg f ack
   in
   match r with
   | Ok (t, a) -> t, a
