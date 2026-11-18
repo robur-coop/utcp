@@ -1,7 +1,7 @@
 type t (** Immutable rope *)
 
 val length : t -> int
-(** [length t]returns the length of the rope (O(1) time). *)
+(** [length t] returns the length of the rope (O(1) time). *)
 
 val empty : t
 (** An empty rope. *)
