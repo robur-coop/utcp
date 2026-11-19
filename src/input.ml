@@ -238,18 +238,21 @@ let deliver_in_3c_3d m stats now conn seg =
     Ok { conn with control_block ; tcp_state = Established }
 
 let in_window cb seg =
-  (* from table in 793bis13 3.3 *)
+  (* from table in 793bis13 3.3, updated by draft-gont-tcpm-tcp-seq-validation-04:
+     instead of using rcv_nxt - 1, we use seq + 1
+  *)
   let seq = seg.Segment.seq
   and max = Sequence.addi cb.rcv_nxt cb.rcv_wnd
   in
   match seg.Segment.payload_len, cb.rcv_wnd with
-  | 0, 0 -> Sequence.equal seq cb.rcv_nxt
-  | 0, _ -> Sequence.less_equal cb.rcv_nxt seq && Sequence.less seq max
+  | 0, 0 -> Sequence.greater_equal (Sequence.incr seq) cb.rcv_nxt &&
+            Sequence.less_equal seq cb.rcv_nxt
+  | 0, _ -> Sequence.less_equal cb.rcv_nxt (Sequence.incr seq) && Sequence.less seq max
   | _, 0 -> false
   | dl, _ ->
     let rseq = Sequence.addi seq (pred dl) in
-    (Sequence.less_equal cb.rcv_nxt seq && Sequence.less seq max) ||
-    (Sequence.less_equal cb.rcv_nxt rseq && Sequence.less rseq max)
+    (Sequence.less_equal cb.rcv_nxt (Sequence.incr seq) && Sequence.less seq max) ||
+    (Sequence.less_equal cb.rcv_nxt (Sequence.incr rseq) && Sequence.less rseq max)
 (* TODO are we missing (from di3_topstuff) the window probe
    ("segment_off_right_hand_edge" and rcv_wnd' is <> 0) *)
 
