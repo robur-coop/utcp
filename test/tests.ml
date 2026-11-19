@@ -6,6 +6,7 @@ let tests = [
   "State machine", State_machine.tests ;
   "Reassembly", Reassembly.tests ;
   "Rope", Rope.tests ;
+  "Pair", Pair.tests ;
 ]
 
 let () =
