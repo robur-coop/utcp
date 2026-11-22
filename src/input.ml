@@ -964,14 +964,26 @@ let deliver_in_3 m now id conn seg flag ack =
 let deliver_in_7 m id conn seg =
   m "deliver-in-7";
   let cb = conn.control_block in
+  (* RFC 5961 - blind in-window attacks protection:
+     - we reset only if rcv_nxt = seq
+     - otherwise if in window (delayed ACK: we test against last_ack_sent;
+       also take into account a closed window (not covered by RFC)
+  *)
   if Sequence.equal cb.rcv_nxt seg.Segment.seq then
     (* we rely that dropwithreset does not RST if a RST was received *)
     Error (`Reset (fun () -> "received valid reset"))
-  else
+  else (* we must be in window -- otherwise discard (from FreeBSD) *)
+  if (Sequence.greater_equal seg.seq cb.last_ack_sent &&
+      Sequence.less seg.seq (Sequence.addi cb.last_ack_sent cb.rcv_wnd)) ||
+     (cb.rcv_wnd = 0 && Sequence.equal seg.seq cb.last_ack_sent)
+  then
     Ok (Segment.make_ack cb ~fin:false id)
+  else
+    Error (`Drop (fun () -> "RST out of window, drop"))
 
 let deliver_in_8 m id conn _seg =
   m "deliver-in-8";
+  (* RFC 5961 - we send a challenge ACK *)
   Ok (Segment.make_ack conn.control_block ~fin:false id)
 
 let handle_noconn t now id seg =
