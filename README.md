@@ -94,3 +94,7 @@ permissive license, reach out to team@robur.coop.
 
 Contributions involving AI must comply with the rules set out [here](./AI.md).
 If they do not comply, we reserve the right to reject your contribution.
+
+## Funding
+
+This project is funded through [NGI0 Commons Fund](https://nlnet.nl/commonsfund), a fund established by [NLnet](https://nlnet.nl) with financial support from the European Commission's [Next Generation Internet](https://ngi.eu) program. Learn more at the [NLnet project page](https://nlnet.nl/project/microTCP). The amount is 50000 EUR.
