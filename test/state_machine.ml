@@ -198,7 +198,31 @@ let test_segs ack payload =
     "FIN+ACK" ^ str, { seg with flag = Some `Fin ; ack = Some ack ; payload_len ; payload } ;
   ]
 
-(* we encode the answers to each of these 16 segments for each state *)
+(* 18 segments with 3 different flags set, each with and without ack (so 9), once before, in, and after window *)
+let window_segs ack =
+  (* TODO test with delayed ack in mind -- so where last_ack_sent and rcv_nxt is different! *)
+  [
+    "RST before window", { basic_seg with flag = Some `Rst };
+    "RST+ACK before window", { basic_seg with flag = Some `Rst ; ack = Some ack };
+    "RST in window", { basic_seg with flag = Some `Rst ; seq = Sequence.addi initial_seq 1 };
+    "RST+ACK in window", { basic_seg with flag = Some `Rst ; seq = Sequence.addi initial_seq 1 ; ack = Some ack };
+    "RST after window", { basic_seg with flag = Some `Rst ; seq = Sequence.addi initial_seq 65536 };
+    "RST+ACK after window", { basic_seg with flag = Some `Rst ; seq = Sequence.addi initial_seq 65536 ; ack = Some ack };
+    "SYN before window", { basic_seg with flag = Some `Syn };
+    "SYN+ACK before window", { basic_seg with flag = Some `Syn; ack = Some ack };
+    "SYN in window", { basic_seg with flag = Some `Syn ; seq = Sequence.addi initial_seq 1 };
+    "SYN+ACK in window", { basic_seg with flag = Some `Syn ; seq = Sequence.addi initial_seq 1 ; ack = Some ack };
+    "SYN after window", { basic_seg with flag = Some `Syn ; seq = Sequence.addi initial_seq 65536 };
+    "SYN+ACK after window", { basic_seg with flag = Some `Syn ; seq = Sequence.addi initial_seq 65536 ; ack = Some ack };
+    "FIN before window", { basic_seg with flag = Some `Fin };
+    "FIN+ACK before window", { basic_seg with flag = Some `Fin ; ack = Some ack };
+    "FIN in window", { basic_seg with flag = Some `Fin ; seq = Sequence.addi initial_seq 1 };
+    "FIN+ACK in window", { basic_seg with flag = Some `Fin ; seq = Sequence.addi initial_seq 1 ; ack = Some ack };
+    "FIN after window", { basic_seg with flag = Some `Fin ; seq = Sequence.addi initial_seq 65536 };
+    "FIN+ACK after window", { basic_seg with flag = Some `Fin ; seq = Sequence.addi initial_seq 65536 ; ack = Some ack };
+  ]
+
+(* we encode the answers to each of these 8 segments for each state *)
 let no_state dl =
   let rst = {
     basic_seg with src_port = listen_port ; dst_port = src_port ;
@@ -233,6 +257,36 @@ let test_closed =
           (no_state (String.length p)))
   in
   test_all " " String.empty @ test_all "+data " (String.make 20 '\000')
+
+let no_state_window =
+  let rst = {
+    basic_seg with src_port = listen_port ; dst_port = src_port ;
+    flag = Some `Rst ; seq = initial_ack
+  } in
+  let rst_ack = { rst with seq = Sequence.zero ; ack = Some (Sequence.addi Sequence.zero 1) } in
+  [
+    (* RST *)
+    None; None; None; None; None; None;
+    (* SYN *)
+    Some rst_ack; Some rst;
+    Some { rst_ack with ack = Some (Sequence.addi initial_seq 2) }; Some rst;
+    Some { rst_ack with ack = Some (Sequence.of_int32 65579l) }; Some rst;
+    (* FIN *)
+    Some rst_ack; Some rst;
+    Some { rst_ack with ack = Some (Sequence.addi initial_seq 2) }; Some rst;
+    Some { rst_ack with ack = Some (Sequence.of_int32 65579l) }; Some rst;
+  ]
+
+let test_closed_window =
+  List.map2 (fun (name, seg) (cnt, reply) ->
+      "window closed " ^ string_of_int cnt, `Quick,
+      fun () ->
+        Alcotest.check test_full_handle ("CLOSED, seg " ^ name) (tcp, reply)
+          (Input.handle_segment tcp (Mtime.of_uint64_ns 0L) quad seg))
+    (window_segs initial_ack)
+    (List.mapi (fun i v ->
+         i, match v with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
+        no_state_window)
 
 let listen =
   let rst = {
@@ -275,6 +329,47 @@ let test_listen =
   in
   test_all " " String.empty @ test_all "+data " (String.make 20 '\000')
 
+let listen_window =
+  let rst = {
+    basic_seg with src_port = listen_port ; dst_port = src_port ;
+                   seq = initial_ack ; ack = None ;
+                   flag = Some `Rst ;
+  } in
+  let synack = {
+    rst with seq = rng_seq ; ack = Some (Sequence.incr initial_seq) ;
+             flag = Some `Syn ;
+             window = 1 lsl 16 - 1 ;
+             options = [ Segment.MaximumSegmentSize 1460 ] }
+  in
+  let tcp' =
+    let conn = State.conn_state Mtime.min_stamp (fun () -> ()) ~rcvbufsize:0 ~sndbufsize:0 Syn_received State.initial_cb in
+    { tcp_listen with connections = State.CM.add quad conn tcp_listen.connections }
+  in
+  [ (* RST *)
+    tcp_listen, None; tcp_listen, None; tcp_listen, None; tcp_listen, None; tcp_listen, None; tcp_listen, None;
+    (* SYN *)
+    tcp', Some { synack with ack = Some (Sequence.of_int32 1l) };
+    tcp_listen, Some rst;
+    tcp', Some { synack with ack = Some (Sequence.of_int32 44l) };
+    tcp_listen, Some rst;
+    tcp', Some { synack with ack = Some (Sequence.of_int32 65579l) };
+    tcp_listen, Some rst;
+    (* FIN *)
+    tcp_listen, None; tcp_listen, Some rst;
+    tcp_listen, None; tcp_listen, Some rst;
+    tcp_listen, None; tcp_listen, Some rst; ]
+
+let test_listen_window =
+  List.map2 (fun (name, seg) (cnt, tcp, reply) ->
+      "window listen " ^ string_of_int cnt, `Quick,
+      fun () ->
+        Alcotest.check test_handle ("LISTEN, seg " ^ name) (tcp, reply)
+          (Input.handle_segment tcp_listen (Mtime.of_uint64_ns 0L) quad seg))
+    (window_segs initial_ack)
+    (List.mapi (fun i (s, v) ->
+         i, s, match v with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
+        listen_window)
+
 let tcp_syn_sent =
   let tcp', _id, _signal, _out =
     Result.get_ok
@@ -316,13 +411,10 @@ let syn_sent_ack_iss, syn_sent_ack_bad =
 let test_syn_sent =
   let test_all s ack p res =
     List.map2 (fun (name, seg) (cnt, tcp, reply) ->
-        if cnt = 2 then
-          "skip simultaneous open", `Quick, fun () -> ()
-        else
-          "syn_sent" ^ s ^ string_of_int cnt, `Quick,
-          fun () ->
-            Alcotest.check test_handle ("SYN_SENT, seg " ^ name) (tcp, reply)
-              (Input.handle_segment tcp_syn_sent (Mtime.of_uint64_ns 0L) quad seg))
+        "syn_sent" ^ s ^ string_of_int cnt, `Quick,
+        fun () ->
+          Alcotest.check test_handle ("SYN_SENT, seg " ^ name) (tcp, reply)
+            (Input.handle_segment tcp_syn_sent (Mtime.of_uint64_ns 0L) quad seg))
       (test_segs ack p)
       (List.mapi (fun i (s, v) ->
            i, s, match v with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
@@ -334,6 +426,43 @@ let test_syn_sent =
   test_all "+data " (Sequence.incr rng_seq) (String.make 20 '\000') syn_sent_ack_iss @
   test_all "+data+iss " rng_seq (String.make 20 '\000') syn_sent_ack_bad @
   test_all "+data+iss+2 " (Sequence.addi rng_seq 2) (String.make 20 '\000') syn_sent_ack_bad
+
+let syn_sent_window =
+  let tcp_est =
+    let conn = State.CM.find quad tcp_syn_sent.connections in
+    let conn' = { conn with tcp_state = Established } in
+    { tcp_syn_sent with connections = State.CM.add quad conn' tcp_syn_sent.connections }
+  and ack = {
+    basic_seg with src_port = listen_port ; dst_port = src_port ;
+                   seq = Sequence.incr rng_seq ;
+                   ack = Some (Sequence.incr initial_seq) ;
+                   flag = None ;
+                   window = 1 lsl 16 - 1 ;
+  } in
+  [ (* RST *)
+    tcp_syn_sent, None; tcp, None;
+    tcp_syn_sent, None; tcp, None;
+    tcp_syn_sent, None; tcp, None;
+    (* SYN *)
+    tcp_syn_sent, None; tcp_est, Some { ack with ack = Some (Sequence.of_int32 1l) };
+    tcp_syn_sent, None; tcp_est, Some { ack with ack = Some (Sequence.of_int32 44l) };
+    tcp_syn_sent, None; tcp_est, Some { ack with ack = Some (Sequence.of_int32 65579l) };
+    (* FIN *)
+    tcp_syn_sent, None; tcp_syn_sent, None;
+    tcp_syn_sent, None; tcp_syn_sent, None;
+    tcp_syn_sent, None; tcp_syn_sent, None;
+  ]
+
+let test_syn_sent_window =
+  List.map2 (fun (name, seg) (cnt, tcp, reply) ->
+      "window syn_sent " ^ string_of_int cnt, `Quick,
+      fun () ->
+        Alcotest.check test_handle ("SYN_SENT, seg " ^ name) (tcp, reply)
+          (Input.handle_segment tcp_syn_sent (Mtime.of_uint64_ns 0L) quad seg))
+    (window_segs (Sequence.incr rng_seq))
+    (List.mapi (fun i (s, v) ->
+         i, s, match v with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
+        syn_sent_window)
 
 let tcp_syn_rcvd =
   let syn = { basic_seg with
@@ -353,7 +482,7 @@ let syn_received =
   [
     tcp_syn_rcvd, None; (* atm - drop + AR *)
     tcp', None; (* ~> est *)
-    tcp_listen, None; (* comefrom listen ~> listen, otherwise (sim-open) challenge-ack -- atm AR *)
+    tcp_syn_rcvd, None; (* comefrom listen ~> listen, otherwise (sim-open) challenge-ack -- atm AR *)
     tcp_listen, None;
     tcp_syn_rcvd, None; (* atm drop + AR [should just drop, no ACK] *)
     tcp_syn_rcvd, None; (* sim open (when seq--) *)
@@ -367,7 +496,6 @@ let test_syn_rcvd =
   let test_all s ack p =
     List.map2 (fun (name, seg) (cnt, tcp, reply) ->
         "syn received" ^ s ^ string_of_int cnt, `Quick,
-        if cnt = 0 || cnt = 2 then fun () -> () else
         fun () ->
           Alcotest.check test_handle ("SYN_RCVD, seg " ^ name) (tcp, reply)
             (Input.handle_segment tcp_syn_rcvd (Mtime.of_uint64_ns 0L) quad seg))
@@ -377,6 +505,26 @@ let test_syn_rcvd =
           syn_received)
   in
   test_all " " (Sequence.incr rng_seq) String.empty
+
+let syn_rcvd_window = [
+  (* RST *)
+  tcp_syn_rcvd, None; tcp_syn_rcvd, None; tcp_syn_rcvd, None; tcp_syn_rcvd, None; tcp_syn_rcvd, None; tcp_syn_rcvd, None;
+  (* SYN *)
+  tcp_syn_rcvd, None; tcp_syn_rcvd, None; tcp_syn_rcvd, None; tcp_syn_rcvd, None; tcp_syn_rcvd, None; tcp_syn_rcvd, None;
+  (* FIN *)
+  tcp_syn_rcvd, None; tcp_syn_rcvd, None; tcp_syn_rcvd, None; tcp_syn_rcvd, None; tcp_syn_rcvd, None; tcp_syn_rcvd, None;
+]
+
+let test_syn_rcvd_window =
+  List.map2 (fun (name, seg) (cnt, tcp, reply) ->
+      "window syn received " ^ string_of_int cnt, `Quick,
+        fun () ->
+          Alcotest.check test_handle ("SYN_RCVD, seg " ^ name) (tcp, reply)
+            (Input.handle_segment tcp_syn_rcvd (Mtime.of_uint64_ns 0L) quad seg))
+      (window_segs (Sequence.incr rng_seq))
+      (List.mapi (fun i (s, v) ->
+           i, s, match v with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
+          syn_rcvd_window)
 
 let run_timers tcp now n =
   let rec go tcp drops outs = function
@@ -781,4 +929,5 @@ let test_edge =
     fin_at_the_right_edge_of_the_window ]
 
 let tests =
-  test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd @ test_window_probe @ test_close_wait @ test_edge
+  test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd @ test_window_probe @ test_close_wait @ test_edge @
+  test_closed_window @ test_listen_window @ test_syn_sent_window @ test_syn_rcvd_window
