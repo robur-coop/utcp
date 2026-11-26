@@ -180,8 +180,8 @@ and rng_seq = Sequence.of_int32 0xA5A5A5A5l
 let sequence = Alcotest.testable Sequence.pp Sequence.equal
 
 (* 8 different input segments for testing our state machine *)
-let test_segs ack payload =
-  let seg = { basic_seg with seq = initial_seq }
+let test_segs ?(seq = initial_seq) ack payload =
+  let seg = { basic_seg with seq }
   and str =
     let l = String.length payload in
     if l = 0 then "" else "+" ^ string_of_int l ^ " bytes data"
@@ -660,6 +660,48 @@ let test_window_probe =
   ; "out-of-window RST is dropped", `Quick,
     rst_out_of_window_is_dropped ]
 
+let test_established =
+  let established ~now =
+    let tcp = State.start_listen tcp listen_port in
+    let syn = { basic_seg with flag = Some `Syn ; seq = initial_seq } in
+    (* SYN ([out] should be SYN+ACK) *)
+    let tcp, _ = Input.handle_segment tcp now quad syn in
+    let ack = { basic_seg with seq = Sequence.incr initial_seq ;
+                               ack = Some (Sequence.incr rng_seq) ;
+                               window = 1 lsl 16 - 1 } in
+    (* ACK (we should be in the [Established] mode) *)
+    let tcp, _ = Input.handle_segment tcp now quad ack in
+    tcp
+  in
+  let est = established ~now:(Mtime.of_uint64_ns 0L) in
+  let cw (tcp : 'a State.t) =
+    let conn = State.CM.find quad tcp.connections in
+    let cb = conn.control_block in
+    let cb = { cb with rcv_wnd = cb.rcv_wnd - 1 ; rcv_nxt = Sequence.incr cb.rcv_nxt } in
+    let conn' = { conn with tcp_state = Close_wait ; cantrcvmore = true ; control_block = cb } in
+    { tcp with connections = State.CM.add quad conn' tcp.connections }
+  in
+  let states tcp =
+    [
+      tcp, None ;
+      tcp, None ;
+      tcp, Some { basic_seg with src_port = listen_port ; dst_port = src_port ; seq = Sequence.incr rng_seq ; ack = Some (Sequence.incr initial_seq); window = 65535 };
+      tcp_listen, None ;
+      tcp, None ;
+      tcp, Some { basic_seg with src_port = listen_port ; dst_port = src_port ; seq = Sequence.incr rng_seq ; ack = Some (Sequence.incr initial_seq); window = 65535 } ;
+      tcp_listen, None ;
+      cw tcp, Some { basic_seg with src_port = listen_port ; dst_port = src_port ; seq = Sequence.incr rng_seq ; ack = Some (Sequence.addi initial_seq 2); window = 65535 } ;
+    ]
+  in
+  List.map2 (fun (name, seg) (cnt, tcp, reply) ->
+      "established " ^ string_of_int cnt, `Quick, fun () ->
+        Alcotest.check test_handle ("ESTABLISHED, seg " ^ name) (tcp, reply)
+          (Input.handle_segment est (Mtime.of_uint64_ns 0L) quad seg))
+    (test_segs ~seq:(Sequence.incr initial_seq) (Sequence.incr rng_seq) "")
+    (List.mapi (fun idx (tcp, seg) ->
+         idx, tcp, match seg with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
+        (states est))
+
 let handle ~now tcp seg =
   let data = Segment.encode_and_checksum now ~src:your_ip ~dst:my_ip seg in
   handle_buf tcp now ~src:your_ip ~dst:my_ip data
@@ -930,4 +972,5 @@ let test_edge =
 
 let tests =
   test_closed @ test_listen @ test_syn_sent @ test_syn_rcvd @ test_window_probe @ test_close_wait @ test_edge @
-  test_closed_window @ test_listen_window @ test_syn_sent_window @ test_syn_rcvd_window
+  test_closed_window @ test_listen_window @ test_syn_sent_window @ test_syn_rcvd_window @
+  test_established
