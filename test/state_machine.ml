@@ -677,7 +677,7 @@ let test_established =
   let cw (tcp : 'a State.t) =
     let conn = State.CM.find quad tcp.connections in
     let cb = conn.control_block in
-    let cb = { cb with rcv_wnd = cb.rcv_wnd - 1 ; rcv_nxt = Sequence.incr cb.rcv_nxt } in
+    let cb = { cb with rcv_wnd = cb.rcv_wnd - 1 ; rcv_nxt = Sequence.incr cb.rcv_nxt ; last_ack_sent = Sequence.incr cb.last_ack_sent } in
     let conn' = { conn with tcp_state = Close_wait ; cantrcvmore = true ; control_block = cb } in
     { tcp with connections = State.CM.add quad conn' tcp.connections }
   in
@@ -695,7 +695,7 @@ let test_established =
   in
   List.map2 (fun (name, seg) (cnt, tcp, reply) ->
       "established " ^ string_of_int cnt, `Quick, fun () ->
-        Alcotest.check test_handle ("ESTABLISHED, seg " ^ name) (tcp, reply)
+        Alcotest.check test_full_handle ("ESTABLISHED, seg " ^ name) (tcp, reply)
           (Input.handle_segment est (Mtime.of_uint64_ns 0L) quad seg))
     (test_segs ~seq:(Sequence.incr initial_seq) (Sequence.incr rng_seq) "")
     (List.mapi (fun idx (tcp, seg) ->
