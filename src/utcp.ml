@@ -61,3 +61,5 @@ module User = User
 module Checksum = Checksum
 
 module Rope = Rope
+
+module Subr = Subr

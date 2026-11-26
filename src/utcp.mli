@@ -227,6 +227,7 @@ val force_enqueue : 'a state -> Mtime.t -> flow -> ?off:int -> ?len:int -> strin
 (* only to be used for testing! *)
 module Timers : sig
   type 'a timed = 'a * Mtime.t
+  val timer : Mtime.t -> 'a -> int64 -> 'a * Mtime.t
 end
 
 module State : sig
@@ -240,7 +241,7 @@ module State : sig
     | Last_ack
     | Fin_wait_2
     | Time_wait
-  type rttinf = private {
+  type rttinf = {
     t_rttupdated : int ;
     tf_srtt_valid : bool ;
     t_srtt : Duration.t ;
@@ -348,4 +349,7 @@ end
 
 module Checksum = Checksum
 module Rope = Rope
+module Subr : sig
+  val start_tt_rexmt : Mtime.t -> int -> bool -> State.rttinf -> ((State.rexmtmode * int) * Mtime.t) option
+end
 (**/**)

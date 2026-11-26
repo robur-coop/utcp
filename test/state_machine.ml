@@ -54,7 +54,7 @@ let equal_control_block a b =
   equal_timer_opt (fun () () -> true) a.tt_conn_est b.tt_conn_est &&
   equal_timer_opt (fun () () -> true) a.tt_fin_wait_2 b.tt_fin_wait_2 &&
 
-  Mtime.equal a.t_idletime b.t_idletime &&
+  Mtime.equal a.State.t_idletime b.State.t_idletime &&
   a.tf_needfin = b.tf_needfin &&
   a.tf_shouldacknow = b.tf_shouldacknow &&
 
@@ -68,7 +68,7 @@ let equal_control_block a b =
   a.snd_cwnd = b.snd_cwnd &&
   a.snd_ssthresh = b.snd_ssthresh &&
 
-  a.rcv_wnd = b.rcv_wnd &&
+  a.State.rcv_wnd = b.State.rcv_wnd &&
   a.tf_rxwin0sent = b.tf_rxwin0sent &&
   Sequence.equal a.rcv_nxt b.rcv_nxt &&
   Sequence.equal a.irs b.irs &&
@@ -92,13 +92,13 @@ let equal_control_block a b =
    | _ -> false) &&
   equal_rttinf a.t_rttinf b.t_rttinf &&
 
-  a.t_dupacks = b.t_dupacks &&
+  a.State.t_dupacks = b.State.t_dupacks &&
   Mtime.equal a.t_badrxtwin b.t_badrxtwin &&
   a.snd_cwnd_prev = b.snd_cwnd_prev &&
   a.snd_ssthresh_prev = b.snd_ssthresh_prev &&
   Sequence.equal a.snd_recover b.snd_recover &&
 
-  (match a.t_softerror, b.t_softerror with
+  (match a.State.t_softerror, b.State.t_softerror with
    | None, None -> true
    | Some a, Some b -> String.equal a b
    | _ -> false)
@@ -129,31 +129,17 @@ let equal_conn_state_full a b =
   Rope.equal a.rcvq b.rcvq &&
   equal_control_block a.control_block b.control_block
 
-let equal_conn_state a b =
-  equal_tcp_state a.State.tcp_state b.State.tcp_state &&
-  a.cantrcvmore = b.cantrcvmore &&
-  a.cantsndmore = b.cantsndmore &&
-  Rope.equal a.sndq b.sndq &&
-  Rope.equal a.rcvq b.rcvq
-
 let equal_tcp_full a b =
   State.IS.equal a.State.listeners b.State.listeners &&
   State.CM.equal equal_conn_state_full a.connections b.connections
 
-let equal_tcp a b =
-  State.IS.equal a.State.listeners b.State.listeners &&
-  State.CM.equal equal_conn_state a.connections b.connections
-
 let test_full_state = Alcotest.testable (State.pp Mtime.min_stamp) equal_tcp_full
-and test_state = Alcotest.testable (State.pp Mtime.min_stamp) equal_tcp
 and test_seg = Alcotest.testable Segment.pp Segment.equal
 and test_ip =
   Alcotest.testable Ipaddr.pp (fun a b -> Ipaddr.compare a b = 0)
 
 let test_full_handle =
   Alcotest.(pair test_full_state (list (triple test_ip test_ip test_seg)))
-and test_handle =
-  Alcotest.(pair test_state (list (triple test_ip test_ip test_seg)))
 
 (* some setup for testing, they should not be relevant (famous last words) *)
 let my_ip = Ipaddr.(V4 (V4.of_string_exn "1.2.3.4"))
@@ -301,7 +287,10 @@ let listen =
              options = [ Segment.MaximumSegmentSize 1460 ] }
   in
   let tcp' =
-    let conn = State.conn_state Mtime.min_stamp (fun () -> ()) ~rcvbufsize:0 ~sndbufsize:0 Syn_received State.initial_cb in
+    let now = Mtime.of_uint64_ns 0L in
+    let timer = Subr.start_tt_rexmt now 0 false State.initial_cb.t_rttinf in
+    let cb = { State.initial_cb with snd_una = rng_seq ; snd_max = Sequence.incr rng_seq ; snd_nxt = Sequence.incr rng_seq ; iss = rng_seq ; snd_cwnd = 2144 ; rcv_wnd = 65928 ; rcv_nxt = Sequence.incr initial_seq ; irs = initial_seq ; rcv_adv = Sequence.of_int32 65971l ; last_ack_sent = Sequence.incr initial_seq ; t_advmss = 1460 ; tt_rexmt = timer ; t_rttseg = Some (now, rng_seq) } in
+    let conn = State.conn_state Mtime.min_stamp (fun () -> ()) ~rcvbufsize:65928 ~sndbufsize:33232 Syn_received cb in
     { tcp_listen with connections = State.CM.add quad conn tcp_listen.connections }
   in [
     tcp_listen, None ;
@@ -320,7 +309,7 @@ let test_listen =
     List.map2 (fun (name, seg) (cnt, tcp, reply) ->
         "listen" ^ s ^ string_of_int cnt, `Quick,
         fun () ->
-          Alcotest.check test_handle ("LISTEN, seg " ^ name) (tcp, reply)
+          Alcotest.check test_full_handle ("LISTEN, seg " ^ name) (tcp, reply)
             (Input.handle_segment tcp_listen (Mtime.of_uint64_ns 0L) quad seg))
       (test_segs initial_ack p)
       (List.mapi (fun i (s, v) ->
@@ -341,18 +330,22 @@ let listen_window =
              window = 1 lsl 16 - 1 ;
              options = [ Segment.MaximumSegmentSize 1460 ] }
   in
-  let tcp' =
-    let conn = State.conn_state Mtime.min_stamp (fun () -> ()) ~rcvbufsize:0 ~sndbufsize:0 Syn_received State.initial_cb in
+  let tcp' irs rcv_adv =
+    let rcv_nxt = Sequence.incr irs in
+    let now = Mtime.of_uint64_ns 0L in
+    let timer = Subr.start_tt_rexmt now 0 false State.initial_cb.t_rttinf in
+    let cb = { State.initial_cb with snd_una = rng_seq ; snd_max = Sequence.incr rng_seq ; snd_nxt = Sequence.incr rng_seq ; iss = rng_seq ; snd_cwnd = 2144 ; rcv_wnd = 65928 ; rcv_nxt ; irs ; rcv_adv ; last_ack_sent = rcv_nxt ; t_advmss = 1460 ; tt_rexmt = timer ; t_rttseg = Some (now, rng_seq) } in
+    let conn = State.conn_state Mtime.min_stamp (fun () -> ()) ~rcvbufsize:65928 ~sndbufsize:33232 Syn_received cb in
     { tcp_listen with connections = State.CM.add quad conn tcp_listen.connections }
   in
   [ (* RST *)
     tcp_listen, None; tcp_listen, None; tcp_listen, None; tcp_listen, None; tcp_listen, None; tcp_listen, None;
     (* SYN *)
-    tcp', Some { synack with ack = Some (Sequence.of_int32 1l) };
+    tcp' (Sequence.of_int32 0l) (Sequence.of_int32 65929l), Some { synack with ack = Some (Sequence.of_int32 1l) };
     tcp_listen, Some rst;
-    tcp', Some { synack with ack = Some (Sequence.of_int32 44l) };
+    tcp' (Sequence.of_int32 43l) (Sequence.of_int32 65972l), Some { synack with ack = Some (Sequence.of_int32 44l) };
     tcp_listen, Some rst;
-    tcp', Some { synack with ack = Some (Sequence.of_int32 65579l) };
+    tcp' (Sequence.of_int32 65578l) (Sequence.of_int32 131507l), Some { synack with ack = Some (Sequence.of_int32 65579l) };
     tcp_listen, Some rst;
     (* FIN *)
     tcp_listen, None; tcp_listen, Some rst;
@@ -363,7 +356,7 @@ let test_listen_window =
   List.map2 (fun (name, seg) (cnt, tcp, reply) ->
       "window listen " ^ string_of_int cnt, `Quick,
       fun () ->
-        Alcotest.check test_handle ("LISTEN, seg " ^ name) (tcp, reply)
+        Alcotest.check test_full_handle ("LISTEN, seg " ^ name) (tcp, reply)
           (Input.handle_segment tcp_listen (Mtime.of_uint64_ns 0L) quad seg))
     (window_segs initial_ack)
     (List.mapi (fun i (s, v) ->
@@ -380,7 +373,10 @@ let tcp_syn_sent =
 let syn_sent_ack_iss, syn_sent_ack_bad =
   let tcp_est =
     let conn = State.CM.find quad tcp_syn_sent.connections in
-    let conn' = { conn with tcp_state = Established } in
+    let cb = conn.control_block in
+    let rttinf = { cb.t_rttinf with t_rttupdated = 1 ; tf_srtt_valid = true ; t_srtt = 0L ; t_rttvar = 0L ; t_lastrtt = Some 0L; t_lastshift =  Some 0 } in
+    let cb = { cb with snd_una = Sequence.incr cb.snd_una ; snd_wl1 = Sequence.incr initial_seq ; snd_wl2 = Sequence.incr rng_seq ; snd_cwnd = 2144 ; rcv_nxt = Sequence.incr initial_seq ; irs = initial_seq ; rcv_adv = Sequence.of_int32 65578l ; last_ack_sent = Sequence.incr initial_seq ; t_rttseg = None ; tt_conn_est = None ; tt_rexmt = None ; t_rttinf = rttinf } in
+    let conn' = { conn with tcp_state = Established ; control_block = cb ; rcvbufsize = 65928 ; sndbufsize = 33232 } in
     { tcp_syn_sent with connections = State.CM.add quad conn' tcp_syn_sent.connections }
   and ack = {
     basic_seg with src_port = listen_port ; dst_port = src_port ;
@@ -413,7 +409,7 @@ let test_syn_sent =
     List.map2 (fun (name, seg) (cnt, tcp, reply) ->
         "syn_sent" ^ s ^ string_of_int cnt, `Quick,
         fun () ->
-          Alcotest.check test_handle ("SYN_SENT, seg " ^ name) (tcp, reply)
+          Alcotest.check test_full_handle ("SYN_SENT, seg " ^ name) (tcp, reply)
             (Input.handle_segment tcp_syn_sent (Mtime.of_uint64_ns 0L) quad seg))
       (test_segs ack p)
       (List.mapi (fun i (s, v) ->
@@ -428,9 +424,13 @@ let test_syn_sent =
   test_all "+data+iss+2 " (Sequence.addi rng_seq 2) (String.make 20 '\000') syn_sent_ack_bad
 
 let syn_sent_window =
-  let tcp_est =
+  let tcp_est irs rcv_adv =
+    let rcv_nxt = Sequence.incr irs in
     let conn = State.CM.find quad tcp_syn_sent.connections in
-    let conn' = { conn with tcp_state = Established } in
+    let cb = conn.control_block in
+    let rttinf = { cb.t_rttinf with t_rttupdated = 1 ; tf_srtt_valid = true ; t_srtt = 0L ; t_rttvar = 0L ; t_lastrtt = Some 0L; t_lastshift =  Some 0 } in
+    let cb = { cb with snd_una = Sequence.incr cb.snd_una ; snd_wl1 = rcv_nxt ; snd_wl2 = Sequence.incr rng_seq ; snd_cwnd = 2144 ; rcv_nxt ; irs ; rcv_adv ; last_ack_sent = rcv_nxt ; t_rttseg = None ; tt_conn_est = None ; tt_rexmt = None ; t_rttinf = rttinf } in
+    let conn' = { conn with tcp_state = Established ; control_block = cb ; rcvbufsize = 65928 ; sndbufsize = 33232 } in
     { tcp_syn_sent with connections = State.CM.add quad conn' tcp_syn_sent.connections }
   and ack = {
     basic_seg with src_port = listen_port ; dst_port = src_port ;
@@ -444,9 +444,9 @@ let syn_sent_window =
     tcp_syn_sent, None; tcp, None;
     tcp_syn_sent, None; tcp, None;
     (* SYN *)
-    tcp_syn_sent, None; tcp_est, Some { ack with ack = Some (Sequence.of_int32 1l) };
-    tcp_syn_sent, None; tcp_est, Some { ack with ack = Some (Sequence.of_int32 44l) };
-    tcp_syn_sent, None; tcp_est, Some { ack with ack = Some (Sequence.of_int32 65579l) };
+    tcp_syn_sent, None; tcp_est Sequence.zero (Sequence.of_int32 65536l), Some { ack with ack = Some (Sequence.of_int32 1l) };
+    tcp_syn_sent, None; tcp_est (Sequence.of_int32 43l) (Sequence.of_int32 65579l), Some { ack with ack = Some (Sequence.of_int32 44l) };
+    tcp_syn_sent, None; tcp_est (Sequence.of_int32 65578l) (Sequence.of_int32 131114l), Some { ack with ack = Some (Sequence.of_int32 65579l) };
     (* FIN *)
     tcp_syn_sent, None; tcp_syn_sent, None;
     tcp_syn_sent, None; tcp_syn_sent, None;
@@ -457,7 +457,7 @@ let test_syn_sent_window =
   List.map2 (fun (name, seg) (cnt, tcp, reply) ->
       "window syn_sent " ^ string_of_int cnt, `Quick,
       fun () ->
-        Alcotest.check test_handle ("SYN_SENT, seg " ^ name) (tcp, reply)
+        Alcotest.check test_full_handle ("SYN_SENT, seg " ^ name) (tcp, reply)
           (Input.handle_segment tcp_syn_sent (Mtime.of_uint64_ns 0L) quad seg))
     (window_segs (Sequence.incr rng_seq))
     (List.mapi (fun i (s, v) ->
@@ -476,7 +476,9 @@ let tcp_syn_rcvd =
 let syn_received =
   let tcp' =
     let conn = State.CM.find quad tcp_syn_rcvd.connections in
-    let conn' = { conn with tcp_state = Established } in
+    let cb = conn.control_block in
+    let cb = { cb with snd_una = Sequence.incr cb.snd_una ; snd_wl1 = initial_seq ; snd_wl2 = Sequence.incr rng_seq } in
+    let conn' = { conn with tcp_state = Established ; control_block = cb } in
     { tcp_syn_rcvd with connections = State.CM.add quad conn' tcp_syn_rcvd.connections }
   in
   [
@@ -497,7 +499,7 @@ let test_syn_rcvd =
     List.map2 (fun (name, seg) (cnt, tcp, reply) ->
         "syn received" ^ s ^ string_of_int cnt, `Quick,
         fun () ->
-          Alcotest.check test_handle ("SYN_RCVD, seg " ^ name) (tcp, reply)
+          Alcotest.check test_full_handle ("SYN_RCVD, seg " ^ name) (tcp, reply)
             (Input.handle_segment tcp_syn_rcvd (Mtime.of_uint64_ns 0L) quad seg))
       (test_segs ack p)
       (List.mapi (fun i (s, v) ->
@@ -519,7 +521,7 @@ let test_syn_rcvd_window =
   List.map2 (fun (name, seg) (cnt, tcp, reply) ->
       "window syn received " ^ string_of_int cnt, `Quick,
         fun () ->
-          Alcotest.check test_handle ("SYN_RCVD, seg " ^ name) (tcp, reply)
+          Alcotest.check test_full_handle ("SYN_RCVD, seg " ^ name) (tcp, reply)
             (Input.handle_segment tcp_syn_rcvd (Mtime.of_uint64_ns 0L) quad seg))
       (window_segs (Sequence.incr rng_seq))
       (List.mapi (fun i (s, v) ->
