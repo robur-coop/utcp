@@ -54,7 +54,7 @@ let equal_control_block a b =
   equal_timer_opt (fun () () -> true) a.tt_conn_est b.tt_conn_est &&
   equal_timer_opt (fun () () -> true) a.tt_fin_wait_2 b.tt_fin_wait_2 &&
 
-  Mtime.equal a.State.t_idletime b.State.t_idletime &&
+  Mtime.equal a.t_idletime b.t_idletime &&
   a.tf_needfin = b.tf_needfin &&
   a.tf_shouldacknow = b.tf_shouldacknow &&
 
@@ -68,7 +68,7 @@ let equal_control_block a b =
   a.snd_cwnd = b.snd_cwnd &&
   a.snd_ssthresh = b.snd_ssthresh &&
 
-  a.State.rcv_wnd = b.State.rcv_wnd &&
+  a.rcv_wnd = b.rcv_wnd &&
   a.tf_rxwin0sent = b.tf_rxwin0sent &&
   Sequence.equal a.rcv_nxt b.rcv_nxt &&
   Sequence.equal a.irs b.irs &&
@@ -92,13 +92,13 @@ let equal_control_block a b =
    | _ -> false) &&
   equal_rttinf a.t_rttinf b.t_rttinf &&
 
-  a.State.t_dupacks = b.State.t_dupacks &&
+  a.t_dupacks = b.t_dupacks &&
   Mtime.equal a.t_badrxtwin b.t_badrxtwin &&
   a.snd_cwnd_prev = b.snd_cwnd_prev &&
   a.snd_ssthresh_prev = b.snd_ssthresh_prev &&
   Sequence.equal a.snd_recover b.snd_recover &&
 
-  (match a.State.t_softerror, b.State.t_softerror with
+  (match a.t_softerror, b.t_softerror with
    | None, None -> true
    | Some a, Some b -> String.equal a b
    | _ -> false)
