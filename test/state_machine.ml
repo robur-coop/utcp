@@ -599,18 +599,21 @@ let test_established_window =
   let seg = { basic_seg with src_port = listen_port ; dst_port = src_port ; window = 65535 } in
   let states tcp =
     [
+      (* RST *)
       tcp, None ;
       tcp, None ;
       tcp, Some { seg with ack = Some (Sequence.incr initial_seq) ; seq = Sequence.incr rng_seq } ;
       tcp, Some { seg with ack = Some (Sequence.incr initial_seq) ; seq = Sequence.incr rng_seq } ;
       tcp, None ;
       tcp, None ;
+      (* SYN *)
       tcp, Some { seg with ack = Some (Sequence.incr initial_seq) ; seq = Sequence.incr rng_seq } ;
       tcp, Some { seg with ack = Some (Sequence.incr initial_seq) ; seq = Sequence.incr rng_seq } ;
       tcp, Some { seg with ack = Some (Sequence.incr initial_seq) ; seq = Sequence.incr rng_seq } ;
       tcp, Some { seg with ack = Some (Sequence.incr initial_seq) ; seq = Sequence.incr rng_seq } ;
       tcp, Some { seg with ack = Some (Sequence.incr initial_seq) ; seq = Sequence.incr rng_seq } ;
       tcp, Some { seg with ack = Some (Sequence.incr initial_seq) ; seq = Sequence.incr rng_seq } ;
+      (* FIN *)
       tcp, Some { seg with ack = Some (Sequence.incr initial_seq) ; seq = Sequence.incr rng_seq } ;
       tcp, Some { seg with ack = Some (Sequence.incr initial_seq) ; seq = Sequence.incr rng_seq } ;
       tcp, None ;
