@@ -676,33 +676,57 @@ let test_established =
     tcp
   in
   let est = established ~now:(Mtime.of_uint64_ns 0L) in
-  let cw (tcp : 'a State.t) =
+  let cw (tcp : 'a State.t) len =
     let conn = State.CM.find quad tcp.connections in
     let cb = conn.control_block in
-    let cb = { cb with rcv_wnd = cb.rcv_wnd - 1 ; rcv_nxt = Sequence.incr cb.rcv_nxt ; last_ack_sent = Sequence.incr cb.last_ack_sent } in
-    let conn' = { conn with tcp_state = Close_wait ; cantrcvmore = true ; control_block = cb } in
+    let cb = { cb with rcv_wnd = cb.rcv_wnd - 1 - len ; rcv_nxt = Sequence.addi cb.rcv_nxt (1 + len) ; last_ack_sent = Sequence.addi cb.last_ack_sent (1 + len) } in
+    let conn' = { conn with tcp_state = Close_wait ; cantrcvmore = true ; control_block = cb ; rcvq = Rope.of_string (String.make len '\000') } in
     { tcp with connections = State.CM.add quad conn' tcp.connections }
   in
-  let states tcp =
+  let tcp_with_p tcp len =
+    let conn = State.CM.find quad tcp.State.connections in
+    let cb = conn.control_block in
+    let tt_delack =
+      if len = 0 then None else Some (Timers.timer (Mtime.of_uint64_ns 0L) () (Duration.of_ms 100))
+    in
+    let cb = { cb with rcv_nxt = Sequence.addi cb.rcv_nxt len ; rcv_wnd = cb.rcv_wnd - len ; tt_delack } in
+    let rcvq = Rope.of_string (String.make len '\000') in
+    let conn' = { conn with control_block = cb; rcvq } in
+    { tcp with connections = State.CM.add quad conn' tcp.connections }
+  in
+  let states tcp plen =
     [
       tcp, None ;
-      tcp, None ;
+      tcp_with_p tcp plen, None ;
       tcp, Some { basic_seg with src_port = listen_port ; dst_port = src_port ; seq = Sequence.incr rng_seq ; ack = Some (Sequence.incr initial_seq); window = 65535 };
       tcp_listen, None ;
       tcp, None ;
       tcp, Some { basic_seg with src_port = listen_port ; dst_port = src_port ; seq = Sequence.incr rng_seq ; ack = Some (Sequence.incr initial_seq); window = 65535 } ;
       tcp_listen, None ;
-      cw tcp, Some { basic_seg with src_port = listen_port ; dst_port = src_port ; seq = Sequence.incr rng_seq ; ack = Some (Sequence.addi initial_seq 2); window = 65535 } ;
+      cw tcp plen, Some { basic_seg with src_port = listen_port ; dst_port = src_port ; seq = Sequence.incr rng_seq ; ack = Some (Sequence.addi initial_seq (2 + plen)); window = 65535 } ;
     ]
   in
-  List.map2 (fun (name, seg) (cnt, tcp, reply) ->
-      "established " ^ string_of_int cnt, `Quick, fun () ->
-        Alcotest.check test_full_handle ("ESTABLISHED, seg " ^ name) (tcp, reply)
-          (Input.handle_segment est (Mtime.of_uint64_ns 0L) quad seg))
-    (test_segs ~seq:(Sequence.incr initial_seq) (Sequence.incr rng_seq) "")
-    (List.mapi (fun idx (tcp, seg) ->
-         idx, tcp, match seg with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
-        (states est))
+  let no_payload =
+    List.map2 (fun (name, seg) (cnt, tcp, reply) ->
+        "established " ^ string_of_int cnt, `Quick, fun () ->
+          Alcotest.check test_full_handle ("ESTABLISHED, seg " ^ name) (tcp, reply)
+            (Input.handle_segment est (Mtime.of_uint64_ns 0L) quad seg))
+      (test_segs ~seq:(Sequence.incr initial_seq) (Sequence.incr rng_seq) "")
+      (List.mapi (fun idx (tcp, seg) ->
+           idx, tcp, match seg with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
+          (states est 0))
+  in
+  let payload =
+    List.map2 (fun (name, seg) (cnt, tcp, reply) ->
+        "data + established " ^ string_of_int cnt, `Quick, fun () ->
+          Alcotest.check test_full_handle ("ESTABLISHED, seg " ^ name) (tcp, reply)
+            (Input.handle_segment est (Mtime.of_uint64_ns 0L) quad seg))
+      (test_segs ~seq:(Sequence.incr initial_seq) (Sequence.incr rng_seq) (String.make 20 '\000'))
+      (List.mapi (fun idx (tcp, seg) ->
+           idx, tcp, match seg with None -> [] | Some s -> [ (my_ip, your_ip, s) ])
+          (states est 20))
+  in
+  no_payload @ payload
 
 let handle ~now tcp seg =
   let data = Segment.encode_and_checksum now ~src:your_ip ~dst:my_ip seg in
